@@ -26,7 +26,6 @@ def chain_binomial_propagate(h, time_step, stoichiometry):
     return propagate_fn
 
 
-#@tf.function
 def chain_binomial_simulate(hazard_fn, state, start, end, time_step, stoichiometry):
 
     propagate = chain_binomial_propagate(hazard_fn, time_step, stoichiometry)

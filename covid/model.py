@@ -14,6 +14,7 @@ class CovidUK:
                               [0, -1, 1, 0],
                               [0, 0, -1, 1]]
 
+    @tf.function
     def h(self, state):
         state = tf.unstack(state, axis=0)
         S, E, I, R = state
@@ -25,6 +26,7 @@ class CovidUK:
         ])
         return hazard_rates
 
+    @tf.function
     def sample(self, initial_state, time_lims, param):
         self.param = param
         return chain_binomial_simulate(self.h, initial_state, time_lims[0],
@@ -49,6 +51,7 @@ class Homogeneous:
         ])
         return hazard_rates
 
+    @tf.function
     def sample(self, initial_state, time_lims, param):
         self.param = param
         return chain_binomial_simulate(self.h, initial_state, time_lims[0],
