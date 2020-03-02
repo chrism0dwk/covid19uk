@@ -12,15 +12,16 @@ state = np.array([np.full([popsize], 999.),
 
 K = np.random.uniform(size=[popsize, popsize])
 
-param = {'beta': 0.2, 'nu': 0.14, 'gamma': 0.14}
+param = {'beta': 0.0002, 'nu': 0.14, 'gamma': 0.14}
 
-@tf.function
+
+
 def h(t, state):
+    print(state)
     state = tf.unstack(state, axis=0)
     S, E, I, R = state
 
     infec_rate = param['beta'] * S * tf.linalg.matvec(K, I)
-
     dS = -infec_rate
     dE = infec_rate - param['nu'] * E
     dI = param['nu'] * E - param['gamma'] * I
@@ -31,9 +32,11 @@ def h(t, state):
 
 @tf.function
 def solve_ode(rates, t_init, state_init, t):
-    return tode.DormandPrince().solve(rates, t_init, state_init, solution_times=t)
+    return tode.DormandPrince(first_step_size=1., max_num_steps=5000).solve(rates, t_init, state_init, solution_times=t)
 
 solution_times = np.arange(0., 365., 1.)
 
+print("Running...", flush=True)
 result = solve_ode(rates=h, t_init=0., state_init=state, t=solution_times)
+print("Done")
 print(result)
