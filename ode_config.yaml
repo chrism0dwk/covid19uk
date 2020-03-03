@@ -1,0 +1,19 @@
+# Covid_ODE model configuration
+
+data:
+  age_mixing_matrix: data/polymod_normal_df.rds
+  mobility_matrix: data/movement.rds
+  population_size: data/pop.rds
+
+parameter:
+  beta: 0.09
+  nu: 0.25
+  gamma: 0.65
+
+settings:
+  start: 0.
+  end: 365.
+  time_step: 1.
+
+output:
+  simulation: covid_ode.sim

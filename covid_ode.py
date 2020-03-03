@@ -1,42 +1,52 @@
+import optparse
 import numpy as np
-import tensorflow as tf
-import tensorflow_probability as tfp
-tode = tfp.math.ode
+import yaml
+import time
+import matplotlib.pyplot as plt
+
+from covid.model import CovidUKODE
+from covid.rdata import *
 
 
-popsize = 2500
-state = np.array([np.full([popsize], 999.),
-                  np.full([popsize], 0.),
-                  np.full([popsize], 1.),
-                  np.full([popsize], 0.)], dtype=np.float64)
-
-K = np.random.uniform(size=[popsize, popsize])
-
-param = {'beta': 0.0002, 'nu': 0.14, 'gamma': 0.14}
+def sanitise_parameter(par_dict):
+    """Sanitises a dictionary of parameters"""
+    par = ['beta','nu','gamma']
+    d = {key: np.float64(par_dict[key]) for key in par}
+    return d
 
 
+def sanitise_settings(par_dict):
+    d = {'start': np.float64(par_dict['start']),
+         'end': np.float64(par_dict['end']),
+         'time_step': np.float64(par_dict['time_step'])}
+    return d
 
-def h(t, state):
-    print(state)
-    state = tf.unstack(state, axis=0)
-    S, E, I, R = state
 
-    infec_rate = param['beta'] * S * tf.linalg.matvec(K, I)
-    dS = -infec_rate
-    dE = infec_rate - param['nu'] * E
-    dI = param['nu'] * E - param['gamma'] * I
-    dR = param['gamma'] * I
+if __name__ == '__main__':
 
-    df = tf.stack([dS, dE, dI, dR])
-    return df
+    parser = optparse.OptionParser()
+    parser.add_option("--config", "-c", dest="config",
+                      help="configuration file")
+    options, args = parser.parse_args()
+    with open(options.config, 'r') as ymlfile:
+        config = yaml.load(ymlfile)
 
-@tf.function
-def solve_ode(rates, t_init, state_init, t):
-    return tode.DormandPrince(first_step_size=1., max_num_steps=5000).solve(rates, t_init, state_init, solution_times=t)
+    K = load_age_mixing(config['data']['age_mixing_matrix']).to_numpy(dtype=np.float32)
+    T = load_mobility_matrix(config['data']['mobility_matrix']).to_numpy(dtype=np.float32)
+    np.fill_diagonal(T, 0.)
+    N = load_population(config['data']['population_size'])['n'].to_numpy(dtype=np.float32)
 
-solution_times = np.arange(0., 365., 1.)
+    param = sanitise_parameter(config['parameter'])
+    settings = sanitise_settings(config['settings'])
 
-print("Running...", flush=True)
-result = solve_ode(rates=h, t_init=0., state_init=state, t=solution_times)
-print("Done")
-print(result)
+    model = CovidUKODE(K, T, N, T.shape[0])
+
+    state_init = model.create_initial_state()
+    start = time.perf_counter()
+    t, sim = model.simulate(param, state_init,
+                            settings['start'], settings['end'],
+                            settings['time_step'])
+    end = time.perf_counter()
+    print(f"Complete in {end-start} seconds")
+    plt.plot(t, sim[:, 2, 0], 'r-')
+    plt.show()

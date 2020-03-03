@@ -2,10 +2,12 @@
 
 import tensorflow as tf
 import tensorflow_probability as tfp
+
 tode = tfp.math.ode
 import numpy as np
 
 from covid.impl.chainbinom_simulate import chain_binomial_simulate
+
 
 class CovidUK:
     def __init__(self, K, T, W):
@@ -38,17 +40,16 @@ class CovidUK:
 
 class Homogeneous:
     def __init__(self):
-
         self.stoichiometry = tf.constant([[-1, 1, 0, 0],
-                                         [0, -1, 1, 0],
-                                         [0, 0, -1, 1]], dtype=tf.float32)
+                                          [0, -1, 1, 0],
+                                          [0, 0, -1, 1]], dtype=tf.float32)
 
     def h(self, state):
         state = tf.unstack(state, axis=0)
         S, E, I, R = state
 
         hazard_rates = tf.stack([
-            self.param['beta'] * I/tf.reduce_sum(state),
+            self.param['beta'] * I / tf.reduce_sum(state),
             self.param['nu'] * tf.ones_like(I),
             self.param['gamma'] * tf.ones_like(I)
         ])
@@ -63,7 +64,7 @@ class Homogeneous:
 
 class CovidUKODE:
 
-    def __init__(self, K, T, N, n_lads=152):
+    def __init__(self, K, T, N, n_lads):
         """Represents a CovidUK ODE model
 
         :param K: a MxM matrix of age group mixing
@@ -71,23 +72,26 @@ class CovidUKODE:
         :param N: a vector of population sizes in each LAD
         :param n_lads: the number of LADS
         """
-        K = tf.linalg.LinearOperatorFullMatrix(K)
-        eye = tf.linalg.LinearOperatorDiag(n_lads)
-        self.K = tf.linalg.LinearOperatorKronecker([K, eye])
+        self.Kbar = tf.reduce_mean(K)
+        self.K = tf.linalg.LinearOperatorFullMatrix(K)
+        eye = tf.linalg.LinearOperatorIdentity(n_lads)
+        self.K = tf.linalg.LinearOperatorKronecker([self.K, eye])
 
-        T = tf.linalg.LinearOperatorFullMatrix(T)
-        shp = tf.linalg.LinearOperatorFullMatrix(np.ones([n_lads, n_lads]))
-        self.T = tf.linalg.LinearOperatorKronecker([T, shp])
+        self.T = tf.linalg.LinearOperatorFullMatrix(T)
+        shp = tf.linalg.LinearOperatorFullMatrix(np.ones_like(K, dtype=np.float32))
+        self.T = tf.linalg.LinearOperatorKronecker([self.T, shp])
+
+        self.N = N
+        self.n_lads = n_lads
 
     def make_h(self, param):
-        @tf.function
-        def h_fn(state):
+        def h_fn(t, state):
             state = tf.unstack(state, axis=0)
             S, E, I, R = state
 
-            infec_rate = tf.matvec(self.K, I)
-            infec_rate += tf.reduce_mean(self.K) * tf.matvec(self.T, I/self.N)
-            infec_rate  = infec_rate * S / self.N
+            infec_rate = tf.linalg.matvec(self.K, I)
+            infec_rate += self.Kbar * tf.linalg.matvec(self.T, I / self.N)
+            infec_rate = param['beta'] * S / self.N * infec_rate
 
             dS = -infec_rate
             dE = infec_rate - param['nu'] * E
@@ -96,12 +100,22 @@ class CovidUKODE:
 
             df = tf.stack([dS, dE, dI, dR])
             return df
+
         return h_fn
+
+    def create_initial_state(self, init_matrix=None):
+        if init_matrix is None:
+            I = np.ones(self.N.shape, dtype=np.float32)
+            S = self.N - I
+            E = np.zeros(self.N.shape, dtype=np.float32)
+            R = np.zeros(self.N.shape, dtype=np.float32)
+            return np.stack([S, E, I, R])
 
     @tf.function
     def simulate(self, param, state_init, t_start, t_end, t_step=1.):
         h = self.make_h(param)
-        t = np.linspace(t_start, t_end, t_step)
-        sim = tode.DormandPrince(first_step_size=1., max_num_steps=5000).solve(h, t_start, state_init,
-                                                                               solution_times=t)
-        return sim
+        t = np.arange(start=t_start, stop=t_end, step=t_step)
+        print(f"Running simulation with times {t_start}-{t_end}:{t_step}")
+        solver = tode.DormandPrince()
+        results = solver.solve(ode_fn=h, initial_time=t_start, initial_state=state_init, solution_times=t)
+        return results.times, results.states
