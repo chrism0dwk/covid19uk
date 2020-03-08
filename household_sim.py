@@ -52,7 +52,7 @@ class HHstochastic(CovidUK):
 if __name__=='__main__':
     hh = draw_households(100, hh_size_distr)
     K = (hh[:, None] == hh[None, :])
-    nsim = 120
+    nsim = 1000
     model = HHstochastic(hh.astype(np.float64))
     init_state = np.stack([np.broadcast_to(hh, [nsim, hh.shape[0]]),
                            np.zeros([nsim, hh.shape[0]]),

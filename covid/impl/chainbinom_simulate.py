@@ -38,5 +38,6 @@ def chain_binomial_simulate(hazard_fn, state, start, end, time_step, stoichiomet
         state = propagate(state)
         output = output.write(i, state)
 
-    sim = output.gather(tf.range(times.shape[0]))
+    with tf.device("/CPU:0"):
+        sim = output.gather(tf.range(times.shape[0]))
     return times, sim
