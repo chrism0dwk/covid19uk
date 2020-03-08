@@ -1,19 +1,24 @@
 # Covid_ODE model configuration
 
 data:
-  age_mixing_matrix: data/polymod_normal_df.rds
+  age_mixing_matrix_term: data/polymod_normal_df.rds
+  age_mixing_matrix_hol: data/polymod_no_school_df.rds
   mobility_matrix: data/movement.rds
   population_size: data/pop.rds
 
 parameter:
-  beta: 0.09
+  beta1: 0.04  # R0 2.4
+  beta2: 0.33  # Contact with commuters 1/3rd of the time
   nu: 0.25
-  gamma: 0.65
+  gamma: 0.25
 
 settings:
-  start: 0.
-  end: 365.
+  start: 2020-02-04
+  end: 2020-12-30
+  holiday:
+    - 2020-04-06
+    - 2020-05-01
   time_step: 1.
 
 output:
-  simulation: covid_ode.sim
+  simulation: covid_ode.hd5

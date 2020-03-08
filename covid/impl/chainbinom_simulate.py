@@ -31,7 +31,7 @@ def chain_binomial_simulate(hazard_fn, state, start, end, time_step, stoichiomet
     propagate = chain_binomial_propagate(hazard_fn, time_step, stoichiometry)
     times = tf.range(start, end, time_step)
 
-    output = tf.TensorArray(tf.float32, size=times.shape[0])
+    output = tf.TensorArray(tf.float64, size=times.shape[0])
     output = output.write(0, state)
 
     for i in tf.range(1, times.shape[0]):
