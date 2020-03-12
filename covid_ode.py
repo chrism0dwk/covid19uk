@@ -12,7 +12,7 @@ from covid.rdata import *
 
 def sanitise_parameter(par_dict):
     """Sanitises a dictionary of parameters"""
-    par = ['beta1', 'beta2', 'nu','gamma']
+    par = ['beta1', 'beta2', 'nu', 'gamma']
     d = {key: np.float64(par_dict[key]) for key in par}
     return d
 
@@ -82,7 +82,6 @@ def write_hdf5(filename, param, t, sim):
             d_beta[()] = v
 
 
-
 def plot_total_curve(sim):
     infec_uk = sum_la(sim)
     infec_uk = infec_uk.sum(axis=1)
@@ -94,6 +93,13 @@ def plot_total_curve(sim):
     plt.xlabel('Date')
     plt.ylabel('Num infected or removed')
     plt.legend()
+
+
+def plot_infec_curve(ax, sim, label, color):
+    infec_uk = sum_la(sim)
+    infec_uk = infec_uk.sum(axis=1)
+    times = np.datetime64('2020-02-20') + np.arange(infec_uk.shape[0])
+    ax.plot(times, infec_uk, '-', label=label, color=color)
 
 
 def plot_by_age(sim, labels, t0=np.datetime64('2020-02-20'), ax=None):
@@ -109,7 +115,7 @@ def plot_by_age(sim, labels, t0=np.datetime64('2020-02-20'), ax=None):
     return ax
 
 
-def plot_by_la(sim, labels,t0=np.datetime64('2020-02-20'), ax=None):
+def plot_by_la(sim, labels, t0=np.datetime64('2020-02-20'), ax=None):
     if ax is None:
         ax = plt.figure().gca()
     infec_uk = sum_age_groups(sim)
@@ -128,7 +134,7 @@ def draw_figs(sim, N):
     fs = final_size(sim)
     attack_rate = fs / N
     print("Attack rate:", attack_rate)
-    print("Overall attack rate: ", np.sum(fs)/np.sum(N))
+    print("Overall attack rate: ", np.sum(fs) / np.sum(N))
 
     # Total UK epidemic curve
     plot_total_curve(sim)
@@ -155,6 +161,23 @@ def draw_figs(sim, N):
     plt.show()
 
 
+def doubling_time(t, sim, t1, t2):
+    t1 = np.where(t == np.datetime64(t1))[0]
+    t2 = np.where(t == np.datetime64(t2))[0]
+    delta = t2 - t1
+    r = sum_total_removals(sim)
+    q1 = r[t1]
+    q2 = r[t2]
+    return delta * np.log(2) / np.log(q2 / q1)
+
+
+def plot_age_attack_rate(ax, sim, N, label, color):
+    Ns = N.reshape([152, 17]).sum(axis=0)
+    fs = final_size(sim.numpy())
+    attack_rate = fs / Ns
+    ax.plot(age_groups, attack_rate, 'o-', color=color, label=label)
+
+
 if __name__ == '__main__':
 
     parser = optparse.OptionParser()
@@ -176,40 +199,69 @@ if __name__ == '__main__':
     settings = sanitise_settings(config['settings'])
 
 
-# Straight, no school closures
-    model_term = CovidUKODE(K_tt, T, N)
-    model_holiday = CovidUKODE(K_hh/2., T/2., N)
+    # Effect of cocooning on elderly (70+)
+    def cocooning_model(cocooning_ratio=1.):
 
-    seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
-    state_init = model_term.create_initial_state(init_matrix=seeding)
+        K1_tt = K_tt.copy()
+        K1_hh = K_hh.copy()
 
-    print('R_term=', model_term.eval_R0(param))
-    print('R_holiday=', model_holiday.eval_R0(param))
+        K1_tt[14:, :] *= cocooning_ratio
+        K1_tt[:, 14:] *= cocooning_ratio
+        K1_hh[14:, :] *= cocooning_ratio
+        K1_hh[:, 14:] *= cocooning_ratio
 
-    # School holidays and closures
-    @tf.function
-    def simulate():
-        t0, sim_0 = model_term.simulate(param, state_init,
-                                        settings['start'], settings['holiday'][0],
-                                        settings['time_step'])
-        t1, sim_1 = model_holiday.simulate(param, sim_0[-1, :, :],
-                                           settings['holiday'][0], settings['holiday'][1],
-                                           settings['time_step'])
-        t2, sim_2 = model_term.simulate(param, sim_1[-1, :, :],
-                                        settings['holiday'][1], settings['end'],
-                                        settings['time_step'])
-        t = tf.concat([t0, t1, t2], axis=0)
-        sim = tf.concat([tf.expand_dims(state_init, axis=0), sim_0, sim_1, sim_2], axis=0)
+        model_term = CovidUKODE(K1_tt, T, N)
+        model_holiday = CovidUKODE(K1_hh, T, N)
+
+        seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
+        state_init = model_term.create_initial_state(init_matrix=seeding)
+
+        print('R_term=', model_term.eval_R0(param))
+        print('R_holiday=', model_holiday.eval_R0(param))
+
+        # School holidays and closures
+
+        def simulate():
+            t0, sim_0, solve0 = model_term.simulate(param, state_init,
+                                                    settings['start'], settings['holiday'][0],
+                                                    settings['time_step'])
+            t1, sim_1, solve1 = model_holiday.simulate(param, sim_0[-1, :, :],
+                                                       settings['holiday'][0], settings['holiday'][1],
+                                                       settings['time_step'], solver_state=None)
+            t2, sim_2, _ = model_term.simulate(param, sim_1[-1, :, :],
+                                               settings['holiday'][1], settings['end'],
+                                               settings['time_step'], solver_state=None)
+            t = tf.concat([t0, t1 + t0[-1], t2 + t0[-1] + t1[-1]], axis=0)
+            sim = tf.concat([tf.expand_dims(state_init, axis=0), sim_0, sim_1, sim_2], axis=0)
+            return t, sim
+
+        start = time.perf_counter()
+        t, sim = simulate()
+        end = time.perf_counter()
+        print(f'Complete in {end - start} seconds')
+
+        dates = settings['start'] + t.numpy().astype(np.timedelta64)
+        dt = doubling_time(dates, sim.numpy(), '2020-03-01', '2020-04-01')
+        print(f"Doubling time: {dt}")
         return t, sim
 
-    start = time.perf_counter()
-    t, sim = simulate()
-    end = time.perf_counter()
-    print(f'Complete in {end-start} seconds')
+    fig_attack = plt.figure()
+    fig_uk = plt.figure()
+    cocoon_ratios = [1.]
+    for i, r in enumerate(cocoon_ratios):
+        print(f"Simulation, r={r}", flush=True)
+        t, sim = cocooning_model(r)
 
-    draw_figs(sim.numpy(), N)
+        plot_age_attack_rate(fig_attack.gca(), sim, N, f"{1 - r}", f"C{i}")
+        #fig_attack.gca().legend(title="Contact ratio")
+        plot_infec_curve(fig_uk.gca(), sim.numpy(), f"{1 - r}", f"C{i}")
+        #fig_uk.gca().legend(title="Contact ratio")
 
-    if 'simulation' in config['output']:
-        write_hdf5(config['output']['simulation'], param, t, sim)
+    fig_attack.autofmt_xdate()
+    fig_uk.autofmt_xdate()
+    fig_attack.gca().grid(True)
+    fig_uk.gca().grid(True)
+    plt.show()
 
-    print(f"Complete in {end-start} seconds")
+    # if 'simulation' in config['output']:
+    #     write_hdf5(config['output']['simulation'], param, t, sim)

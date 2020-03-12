@@ -7,17 +7,18 @@ data:
   population_size: data/pop.rds
 
 parameter:
-  beta1: 0.04  # R0 2.4
+#  beta1: 0.0347  # R0 2.4
+  beta1: 0.04
   beta2: 0.33  # Contact with commuters 1/3rd of the time
   nu: 0.25
   gamma: 0.25
 
 settings:
   start: 2020-02-04
-  end: 2020-12-30
+  end: 2020-05-01
   holiday:
     - 2020-04-06
-    - 2020-05-01
+    - 2020-04-17
   time_step: 1.
 
 output:

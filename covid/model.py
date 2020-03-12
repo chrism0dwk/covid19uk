@@ -1,5 +1,5 @@
 """Functions for infection rates"""
-
+from warnings import warn
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -49,7 +49,7 @@ class CovidUK:
         ])
         return hazard_rates
 
-
+    #@tf.function
     def sample(self, initial_state, time_lims, param):
         self.param = param
         return chain_binomial_simulate(self.h, initial_state, time_lims[0],
@@ -98,7 +98,7 @@ class CovidUKODE:
         eye = tf.linalg.LinearOperatorIdentity(self.n_lads)
         self.K = tf.linalg.LinearOperatorKronecker([eye, self.K])
 
-        self.T = tf.linalg.LinearOperatorFullMatrix(T)
+        self.T = tf.linalg.LinearOperatorFullMatrix(T + tf.transpose(T))
         shp = tf.linalg.LinearOperatorFullMatrix(np.ones_like(K, dtype=np.float32))
         self.T = tf.linalg.LinearOperatorKronecker([self.T, shp])
 
@@ -144,14 +144,15 @@ class CovidUKODE:
         return np.stack([S, E, I, R])
 
     @tf.function
-    def simulate(self, param, state_init, t_start, t_end, t_step=1.):
+    def simulate(self, param, state_init, t_start, t_end, t_step=1., solver_state=None):
         h = self.make_h(param)
         t0 = 0.
         t1 = (t_end - t_start) / np.timedelta64(1, 'D')
         t = np.arange(start=t0, stop=t1, step=t_step)[1:]
         solver = tode.DormandPrince()
-        results = solver.solve(ode_fn=h, initial_time=t0, initial_state=state_init, solution_times=t)
-        return results.times, results.states
+        results = solver.solve(ode_fn=h, initial_time=t0, initial_state=state_init, solution_times=t,
+                               previous_solver_internal_state=solver_state)
+        return results.times, results.states, results.solver_internal_state
 
     def ngm(self, param):
         infec_rate = param['beta1'] * self.K.to_dense()

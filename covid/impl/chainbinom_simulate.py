@@ -14,9 +14,11 @@ def update_state(update, state, stoichiometry):
 
 def chain_binomial_propagate(h, time_step, stoichiometry):
     def propagate_fn(state):
-        rates = h(state)
+        state_idx, rates = h(state)
         probs = 1 - tf.exp(-rates*time_step)  # RxN
-        update = tfd.Binomial(state[:-1], probs=probs).sample()  # RxN
+        state_mult = tf.scatter_nd(state_idx[:, None], state,
+                                   shape=[state_idx.shape[0], state.shape[1], state.shape[2]])
+        update = tfd.Binomial(state_mult, probs=probs).sample()  # RxN
         update = tf.expand_dims(update, 1)  # Rx1xN
         upd_shape = tf.concat([stoichiometry.shape, tf.fill([tf.rank(state)-1], 1)], axis=0)
         update *= tf.reshape(stoichiometry, upd_shape)  # RxSx1
