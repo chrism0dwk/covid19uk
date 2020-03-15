@@ -7,8 +7,8 @@ data:
   population_size: data/pop.rds
 
 parameter:
-#  beta1: 0.0347  # R0 2.4
-  beta1: 0.04
+  beta1: 0.035  # R0 2.4
+  #beta1: 0.04
   beta2: 0.33  # Contact with commuters 1/3rd of the time
   nu: 0.25
   gamma: 0.25

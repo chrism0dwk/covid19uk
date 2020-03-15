@@ -92,6 +92,7 @@ def plot_total_curve(sim):
     plt.title('UK total cases')
     plt.xlabel('Date')
     plt.ylabel('Num infected or removed')
+    plt.grid()
     plt.legend()
 
 
@@ -220,7 +221,7 @@ if __name__ == '__main__':
         print('R_holiday=', model_holiday.eval_R0(param))
 
         # School holidays and closures
-
+        @tf.function()
         def simulate():
             t0, sim_0, solve0 = model_term.simulate(param, state_init,
                                                     settings['start'], settings['holiday'][0],

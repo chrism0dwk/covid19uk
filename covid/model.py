@@ -109,6 +109,8 @@ class CovidUKODE:
         N_sum = N_sum[:, None] * tf.ones([1, self.n_ages])
         self.N_sum = tf.reshape(N_sum, [-1])
 
+        self.solver = tode.DormandPrince()
+
     def make_h(self, param):
 
         def h_fn(t, state):
@@ -149,8 +151,8 @@ class CovidUKODE:
         t0 = 0.
         t1 = (t_end - t_start) / np.timedelta64(1, 'D')
         t = np.arange(start=t0, stop=t1, step=t_step)[1:]
-        solver = tode.DormandPrince()
-        results = solver.solve(ode_fn=h, initial_time=t0, initial_state=state_init, solution_times=t,
+
+        results = self.solver.solve(ode_fn=h, initial_time=t0, initial_state=state_init, solution_times=t,
                                previous_solver_internal_state=solver_state)
         return results.times, results.states, results.solver_internal_state
 
