@@ -80,35 +80,44 @@ class Homogeneous:
                                        time_lims[1], 1., self.stoichiometry)
 
 
-class CovidUKODE:
+def dense_to_block_diagonal(A, n_blocks):
+    A_dense = tf.linalg.LinearOperatorFullMatrix(A)
+    eye = tf.linalg.LinearOperatorIdentity(n_blocks)
+    A_block = tf.linalg.LinearOperatorKronecker([eye, A_dense])
+    return A_block
 
-    def __init__(self, K, T, N):
+
+class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. \epsilon term.
+    def __init__(self, M_tt, M_hh, C, N, start, end, holidays, t_step):
         """Represents a CovidUK ODE model
 
-        :param K: a MxM matrix of age group mixing in term time
-        :param T: a n_ladsxn_lads matrix of inter-LAD commuting
+        :param K_tt: a MxM matrix of age group mixing in term time
+        :param K_hh: a MxM matrix of age group mixing in holiday time
+        :param holidays: a list of length-2 tuples containing dates of holidays
+        :param C: a n_ladsxn_lads matrix of inter-LAD commuting
         :param N: a vector of population sizes in each LAD
         :param n_lads: the number of LADS
         """
-        self.n_ages = K.shape[0]
-        self.n_lads = T.shape[0]
+        self.n_ages = M_tt.shape[0]
+        self.n_lads = C.shape[0]
 
-        self.Kbar = tf.reduce_mean(K)
-        self.K = tf.linalg.LinearOperatorFullMatrix(K)
-        eye = tf.linalg.LinearOperatorIdentity(self.n_lads)
-        self.K = tf.linalg.LinearOperatorKronecker([eye, self.K])
+        self.Kbar = tf.reduce_mean(M_tt)
+        self.M = tf.tuple([dense_to_block_diagonal(M_tt, self.n_lads),
+                           dense_to_block_diagonal(M_hh, self.n_lads)])
 
-        self.T = tf.linalg.LinearOperatorFullMatrix(T + tf.transpose(T))
-        shp = tf.linalg.LinearOperatorFullMatrix(np.ones_like(K, dtype=np.float32))
-        self.T = tf.linalg.LinearOperatorKronecker([self.T, shp])
+        self.C = tf.linalg.LinearOperatorFullMatrix(C + tf.transpose(C))
+        shp = tf.linalg.LinearOperatorFullMatrix(np.ones_like(M_tt, dtype=np.float32))
+        self.C = tf.linalg.LinearOperatorKronecker([self.C, shp])
 
         self.N = tf.constant(N, dtype=tf.float32)
-
         N_matrix = tf.reshape(self.N, [self.n_lads, self.n_ages])
         N_sum = tf.reduce_sum(N_matrix, axis=1)
         N_sum = N_sum[:, None] * tf.ones([1, self.n_ages])
         self.N_sum = tf.reshape(N_sum, [-1])
 
+        self.times = np.arange(start, end, np.timedelta64(t_step, 'D'))
+        m_select = (np.less_equal(holidays[0], self.times) & np.less(self.times, holidays[1])).astype(np.int64)
+        self.m_select = tf.constant(m_select)
         self.solver = tode.DormandPrince()
 
     def make_h(self, param):
@@ -116,9 +125,12 @@ class CovidUKODE:
         def h_fn(t, state):
             state = tf.unstack(state, axis=0)
             S, E, I, R = state
-
-            infec_rate = param['beta1'] * tf.linalg.matvec(self.K, I)
-            infec_rate += param['beta1'] * param['beta2'] * self.Kbar * tf.linalg.matvec(self.T, I / self.N_sum)
+            m_switch = tf.gather(self.m_select, tf.cast(t, tf.int64))
+            if m_switch == 0:
+               infec_rate = param['beta1'] * tf.linalg.matvec(self.M[0], I)
+            else:
+                infec_rate = param['beta1'] * tf.linalg.matvec(self.M[1], I)
+            infec_rate += param['beta1'] * param['beta2'] * self.Kbar * tf.linalg.matvec(self.C, I / self.N_sum)
             infec_rate = S / self.N * infec_rate
 
             dS = -infec_rate
@@ -146,19 +158,16 @@ class CovidUKODE:
         return np.stack([S, E, I, R])
 
     @tf.function
-    def simulate(self, param, state_init, t_start, t_end, t_step=1., solver_state=None):
+    def simulate(self, param, state_init, solver_state=None):
         h = self.make_h(param)
-        t0 = 0.
-        t1 = (t_end - t_start) / np.timedelta64(1, 'D')
-        t = np.arange(start=t0, stop=t1, step=t_step)[1:]
-
-        results = self.solver.solve(ode_fn=h, initial_time=t0, initial_state=state_init, solution_times=t,
-                               previous_solver_internal_state=solver_state)
+        t = np.arange(self.times.shape[0])
+        results = self.solver.solve(ode_fn=h, initial_time=t[0], initial_state=state_init,
+                                    solution_times=t, previous_solver_internal_state=solver_state)
         return results.times, results.states, results.solver_internal_state
 
     def ngm(self, param):
-        infec_rate = param['beta1'] * self.K.to_dense()
-        infec_rate += param['beta1'] * param['beta2'] * self.Kbar * self.T.to_dense() / self.N_sum[None, :]
+        infec_rate = param['beta1'] * self.M[0].to_dense()
+        infec_rate += param['beta1'] * param['beta2'] * self.Kbar * self.C.to_dense() / self.N_sum[None, :]
         ngm = infec_rate / param['gamma']
         return ngm
 
@@ -168,3 +177,11 @@ class CovidUKODE:
         dom_eigen_vec, i = power_iteration(ngm, tol=tol)
         R0 = rayleigh_quotient(ngm, dom_eigen_vec)
         return tf.squeeze(R0), i
+
+
+def covid19uk_logp(y, sim, phi):
+        # Sum daily increments in removed
+        r_incr = sim[1:, 3, :] - sim[:-1, 3, :]
+        r_incr = tf.reduce_sum(r_incr, axis=1)
+        y_ = tfp.distributions.Poisson(rate=phi*r_incr)
+        return y_.log_prob(y)

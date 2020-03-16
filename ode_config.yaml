@@ -5,6 +5,7 @@ data:
   age_mixing_matrix_hol: data/polymod_no_school_df.rds
   mobility_matrix: data/movement.rds
   population_size: data/pop.rds
+  reported_cases: data/DailyConfirmedCases.csv
 
 parameter:
   beta1: 0.035  # R0 2.4

@@ -45,7 +45,7 @@ if __name__ == '__main__':
     param = sanitise_parameter(config['parameter'])
     settings = sanitise_settings(config['settings'])
 
-    model_term = CovidUKODE(K_tt, T, N)
+    model_term = CovidUKODE(K_tt, K_hh, T, N)
     model_holiday = CovidUKODE(K_hh, T, N)
 
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
