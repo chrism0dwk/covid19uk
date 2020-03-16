@@ -1,0 +1,130 @@
+%% LyX 2.2.4 created this file.  For more info, see http://www.lyx.org/.
+%% Do not edit unless you really know what you are doing.
+\documentclass[english]{article}
+\usepackage[T1]{fontenc}
+\usepackage[latin9]{inputenc}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setlength{\parskip}{\medskipamount}
+\setlength{\parindent}{0pt}
+\usepackage{url}
+\usepackage{bm}
+\usepackage{amsmath}
+\usepackage{babel}
+\begin{document}
+
+\title{UK Age and Space structured Covid-19 model}
+
+\author{Chris Jewell, Barry Rowlingson, Jon Read}
+\maketitle
+
+\section{Concept}
+
+We wish to develop a model that will enable us to assess spatial spread
+of Covid-19 across the UK, respecting the availability of human mobility
+data as well as known contact behaviour between individuals of different
+ages.
+
+A deterministic SEIR model is posited in which infection rate is written
+as a function of known age-structured contact from Polymod, known
+human mobility between MSOAs (Middle Super Output Area), and Census-derived
+age structured population density in regions across the UK.
+
+Currently, this model is populated with data for England only, though
+we are in the process of extending this to Scotland and Wales.
+
+Noise in daily case numbers $y_{it}$ for age-group $i$ in location
+$k$ on day $t$ is assumed to be Poisson-distributed such that
+\[
+y_{ikt}\sim\mbox{Poisson}(R_{ikt}-R_{ikt-1})
+\]
+
+
+\section{Data}
+
+\subsection{Age-mixing}
+
+Standard Polymod data for the UK are used, with 17 5-year age groups
+$[0-5),[5-10),\dots,[75-80),[80-\infty)$. Estimated contact matrices
+for term-time $M_{tt}$ and school-holidays $M_{hh}$ were extracted
+of dimension $n_{m}\times n_{m}$ where $n_{m}=17$.
+
+\subsection{Human mobility}
+
+2011 Census data from ONS on daily mean numbers of commuters moving
+from each Residential MSOA to Workplace MSOA. MSOAs are aggregated
+to Local Authority Districts (LADs) for which we have age-structured
+population density. The resulting matrix $C$ is of dimension $n_{c}\times n_{c}$
+where $n_{c}=152$. Since this matrix is for Residence to Workplace
+movement only, we assume that the mean number of journeys between
+each LAD is given by
+\[
+T=C+C^{T}
+\]
+with 0 diagonal.
+
+\subsection{Population size}
+
+Age-structured population size within each LAD is taken from publicly
+available 2019 Local Authority data giving a vector $N$ of length
+$n_{m}n_{c}$, i.e. population for each of $n_{m}$ age groups and
+$n_{c}$ LADs.
+
+\section{Model}
+
+\subsection{Connectivity matrix}
+
+We assemble a country-wide connectivity matrices as Kronecker products,
+such that
+\[
+K^{\star}=I_{n_{c}}\bigotimes M
+\]
+ and
+\[
+T^{\star}=C\bigotimes\bm{1}_{n_{m}\times n_{c}}
+\]
+giving two matrices of dimension $n_{m}n_{c}$. $K^{\star}$ is block
+diagonal with Polymod mixing matrices. $T^{\star}$ expands the mobility
+matrix $C$ such that a block structure of connectivity between LADs
+results.
+
+\subsection{Disease progression model}
+
+We assume an SEIR model described as a system of ODEs. We denote the
+number of individual in each age-group-LAD combination at time $t$
+by the vectors $\vec{S}(t),\vec{E}(t),\vec{I}(t),\vec{R}(t)$. We
+therefore have
+\begin{align*}
+\frac{\mathrm{d\vec{S}(t)}}{dt} & =-\beta_{1}\left[K^{\star}\vec{I}(t)+\beta_{2}\bar{K}T^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}\\
+\frac{\mathrm{d}\vec{E}(t)}{dt} & =\beta_{1}\left[K^{\star}\vec{I}(t)+\beta_{2}\bar{K}T^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}-\nu\vec{E}(t)\\
+\frac{\mathrm{d}\vec{I}(t)}{dt} & =\nu\vec{E}(t)-\gamma\vec{I}(t)\\
+\frac{\mathrm{d}\vec{R}(t)}{dt} & =\gamma\vec{I}(t)
+\end{align*}
+with parameters: baseline infection rate $\beta_{1}$, commuting infection
+ratio $\beta_{2}$, latent period $\frac{1}{\nu}$, and infectious
+period $\frac{1}{\gamma}$.
+
+\subsection{Noise model}
+
+Currently, and subject to discussion, we assume that all detected
+cases are synonymous with individuals transitioning $I\rightarrow R$.
+We assume the number of new cases in each age-LAD combination are
+given by
+\[
+y_{ik}(t)\sim\mbox{Poisson}\left(R_{ik}(t)-R_{ik}(t-1)\right)
+\]
+
+This could be relaxed to a Negative Binomial distribution to account
+for Poisson overdispersion.
+
+\subsection{Implementation}
+
+The model is currently implemented in Python3, using Tensorflow 2.1
+with the RK5 differential equation solver implemented in the \texttt{DormandPrince}
+class provided by Tensorflow Probability 0.9. Code may be found at
+\url{http://fhm-chicas-code.lancs.ac.uk/jewell/covid19uk}. 
+
+\section{Quick results}
+
+See attached SPI-M report.
+\end{document}
