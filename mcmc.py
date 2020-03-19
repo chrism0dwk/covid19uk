@@ -88,7 +88,7 @@ if __name__ == '__main__':
 
 
     unconstraining_bijector = [tfb.Exp(), tfb.Exp()]
-    initial_mcmc_state = [0.00001, 0.03]
+    initial_mcmc_state = [0.00001,   0.03]
     print("Initial log likelihood:", logp(*initial_mcmc_state))
 
     @tf.function
