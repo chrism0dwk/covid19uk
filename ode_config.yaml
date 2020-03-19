@@ -8,18 +8,19 @@ data:
   reported_cases: data/DailyConfirmedCases.csv
 
 parameter:
-  beta1: 0.035  # R0 2.4
-  #beta1: 0.04
+  epsilon: 1.0e-6
+  beta1: 0.04  # R0 2.4
   beta2: 0.33  # Contact with commuters 1/3rd of the time
   nu: 0.25
   gamma: 0.25
 
 settings:
   start: 2020-02-04
-  end: 2020-05-01
+  end: 2020-04-01
   holiday:
     - 2020-04-06
     - 2020-04-17
+  bg_max_time: 2020-03-01
   time_step: 1.
 
 output:

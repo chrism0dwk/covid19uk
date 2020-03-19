@@ -88,7 +88,7 @@ def dense_to_block_diagonal(A, n_blocks):
 
 
 class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. \epsilon term.
-    def __init__(self, M_tt, M_hh, C, N, start, end, holidays, t_step):
+    def __init__(self, M_tt, M_hh, C, N, start, end, holidays, bg_max_t, t_step):
         """Represents a CovidUK ODE model
 
         :param K_tt: a MxM matrix of age group mixing in term time
@@ -117,7 +117,8 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
 
         self.times = np.arange(start, end, np.timedelta64(t_step, 'D'))
         m_select = (np.less_equal(holidays[0], self.times) & np.less(self.times, holidays[1])).astype(np.int64)
-        self.m_select = tf.constant(m_select)
+        self.m_select = tf.constant(m_select, dtype=tf.int64)
+        self.bg_select = tf.constant(np.less(bg_max_t, self.times), dtype=tf.int64)
         self.solver = tode.DormandPrince()
 
     def make_h(self, param):
@@ -125,13 +126,15 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         def h_fn(t, state):
             state = tf.unstack(state, axis=0)
             S, E, I, R = state
-            m_switch = tf.gather(self.m_select, tf.cast(t, tf.int64))
+            t = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.m_select.shape[0]-1)
+            m_switch = tf.gather(self.m_select, t)
+            epsilon = param['epsilon'] * tf.cast(tf.gather(self.bg_select, t), tf.float32)
             if m_switch == 0:
                infec_rate = param['beta1'] * tf.linalg.matvec(self.M[0], I)
             else:
                 infec_rate = param['beta1'] * tf.linalg.matvec(self.M[1], I)
             infec_rate += param['beta1'] * param['beta2'] * self.Kbar * tf.linalg.matvec(self.C, I / self.N_sum)
-            infec_rate = S / self.N * infec_rate
+            infec_rate = S / self.N * (infec_rate + epsilon)
 
             dS = -infec_rate
             dE = infec_rate - param['nu'] * E

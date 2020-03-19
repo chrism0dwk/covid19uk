@@ -2,9 +2,10 @@
 
 import numpy as np
 
+
 def sanitise_parameter(par_dict):
     """Sanitises a dictionary of parameters"""
-    par = ['beta1', 'beta2', 'nu', 'gamma']
+    par = ['epsilon', 'beta1', 'beta2', 'nu', 'gamma']
     d = {key: np.float64(par_dict[key]) for key in par}
     return d
 
@@ -13,7 +14,8 @@ def sanitise_settings(par_dict):
     d = {'start': np.datetime64(par_dict['start']),
          'end': np.datetime64(par_dict['end']),
          'time_step': float(par_dict['time_step']),
-         'holiday': np.array([np.datetime64(date) for date in par_dict['holiday']])}
+         'holiday': np.array([np.datetime64(date) for date in par_dict['holiday']]),
+         'bg_max_time': np.datetime64(par_dict['bg_max_time'])}
     return d
 
 

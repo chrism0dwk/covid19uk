@@ -12,7 +12,7 @@ from covid.rdata import *
 
 def sanitise_parameter(par_dict):
     """Sanitises a dictionary of parameters"""
-    par = ['beta1', 'beta2', 'nu', 'gamma']
+    par = ['epsilon', 'beta1', 'beta2', 'nu', 'gamma']
     d = {key: np.float64(par_dict[key]) for key in par}
     return d
 
@@ -21,7 +21,8 @@ def sanitise_settings(par_dict):
     d = {'start': np.datetime64(par_dict['start']),
          'end': np.datetime64(par_dict['end']),
          'time_step': float(par_dict['time_step']),
-         'holiday': np.array([np.datetime64(date) for date in par_dict['holiday']])}
+         'holiday': np.array([np.datetime64(date) for date in par_dict['holiday']]),
+         'bg_max_time': np.datetime64(par_dict['bg_max_time'])}
     return d
 
 
@@ -211,33 +212,17 @@ if __name__ == '__main__':
         K1_hh[14:, :] *= cocooning_ratio
         K1_hh[:, 14:] *= cocooning_ratio
 
-        model_term = CovidUKODE(K1_tt, T, N)
-        model_holiday = CovidUKODE(K1_hh, T, N)
+        model = CovidUKODE(K1_tt, K_hh, T, N, settings['start'], settings['end'], settings['holiday'],
+                           settings['bg_max_time'], 1)
 
         seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
-        state_init = model_term.create_initial_state(init_matrix=seeding)
+        state_init = model.create_initial_state(init_matrix=seeding)
 
-        print('R_term=', model_term.eval_R0(param))
-        print('R_holiday=', model_holiday.eval_R0(param))
-
-        # School holidays and closures
-        @tf.function()
-        def simulate():
-            t0, sim_0, solve0 = model_term.simulate(param, state_init,
-                                                    settings['start'], settings['holiday'][0],
-                                                    settings['time_step'])
-            t1, sim_1, solve1 = model_holiday.simulate(param, sim_0[-1, :, :],
-                                                       settings['holiday'][0], settings['holiday'][1],
-                                                       settings['time_step'], solver_state=None)
-            t2, sim_2, _ = model_term.simulate(param, sim_1[-1, :, :],
-                                               settings['holiday'][1], settings['end'],
-                                               settings['time_step'], solver_state=None)
-            t = tf.concat([t0, t1 + t0[-1], t2 + t0[-1] + t1[-1]], axis=0)
-            sim = tf.concat([tf.expand_dims(state_init, axis=0), sim_0, sim_1, sim_2], axis=0)
-            return t, sim
+        print('R_term=', model.eval_R0(param))
+        #print('R_holiday=', model_holiday.eval_R0(param))
 
         start = time.perf_counter()
-        t, sim = simulate()
+        t, sim, _ = model.simulate(param, state_init)
         end = time.perf_counter()
         print(f'Complete in {end - start} seconds')
 
@@ -252,11 +237,10 @@ if __name__ == '__main__':
     for i, r in enumerate(cocoon_ratios):
         print(f"Simulation, r={r}", flush=True)
         t, sim = cocooning_model(r)
-
         plot_age_attack_rate(fig_attack.gca(), sim, N, f"{1 - r}", f"C{i}")
-        #fig_attack.gca().legend(title="Contact ratio")
+        # fig_attack.gca().legend(title="Contact ratio")
         plot_infec_curve(fig_uk.gca(), sim.numpy(), f"{1 - r}", f"C{i}")
-        #fig_uk.gca().legend(title="Contact ratio")
+        # fig_uk.gca().legend(title="Contact ratio")
 
     fig_attack.autofmt_xdate()
     fig_uk.autofmt_xdate()

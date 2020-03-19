@@ -31,6 +31,7 @@ if __name__ == '__main__':
     N, n_names = load_population(config['data']['population_size'])
 
     param = sanitise_parameter(config['parameter'])
+    param['epsilon'] = 0.0
     settings = sanitise_settings(config['settings'])
 
     case_reports = pd.read_csv(config['data']['reported_cases'])
@@ -47,11 +48,11 @@ if __name__ == '__main__':
                            date_range[1]+np.timedelta64(1,'D'),
                            np.timedelta64(1, 'D'))
     simulator = CovidUKODE(K_tt, K_hh, T, N, date_range[0] - np.timedelta64(1, 'D'),
-                           np.datetime64('2020-07-01'), settings['holiday'], 1)
+                           np.datetime64('2020-05-01'), settings['holiday'], settings['bg_max_time'], 1)
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
-    #@tf.function
+    @tf.function
     def prediction(beta):
         sims = tf.TensorArray(tf.float32, size=beta.shape[0])
         for i in tf.range(beta.shape[0]):
@@ -65,7 +66,7 @@ if __name__ == '__main__':
     draws = pi_beta[0].numpy()[np.arange(0, pi_beta[0].shape[0], 20)]
     sims = prediction(draws)
 
-    dates = np.arange(date_range[0]-np.timedelta64(1, 'D'), np.datetime64('2020-07-01'),
+    dates = np.arange(date_range[0]-np.timedelta64(1, 'D'), np.datetime64('2020-05-01'),
                       np.timedelta64(1, 'D'))
     total_infected = tfs.percentile(tf.reduce_sum(sims[:, :, 1:3], axis=2), q=[2.5, 50, 97.5], axis=0)
     removed = tfs.percentile(sims[:, :, 3], q=[2.5, 50, 97.5], axis=0)

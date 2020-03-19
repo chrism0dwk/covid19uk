@@ -63,54 +63,72 @@ if __name__ == '__main__':
     y_incr = np.round((y[1:] - y[:-1]) * 0.8)
 
     simulator = CovidUKODE(K_tt, K_hh, T, N, date_range[0]-np.timedelta64(1,'D'),
-                           date_range[1], settings['holiday'], int(settings['time_step']))
+                           date_range[1], settings['holiday'], settings['bg_max_time'], int(settings['time_step']))
 
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     #@tf.function
-    def logp(beta1):
+    def logp(epsilon, beta):
         p = param
-        p['beta1'] = beta1
+        p['epsilon'] = epsilon
+        p['beta1'] = beta
+        epsilon_logp = tfd.Gamma(concentration=1., rate=1.).log_prob(p['epsilon'])
         beta_logp = tfd.Gamma(concentration=1., rate=1.).log_prob(p['beta1'])
         t, sim, solve = simulator.simulate(p, state_init)
         y_logp = covid19uk_logp(y_incr, sim, 0.1)
-        return beta_logp + tf.reduce_sum(y_logp)
+        logp = epsilon_logp + beta_logp + tf.reduce_sum(y_logp)
+        return logp
 
-    unconstraining_bijector = [tfb.Log()]
-    initial_mcmc_state = [0.03]
-    print("Initial log likelihood:", logp(0.03))
+    def trace_fn(_, pkr):
+      return (
+          pkr.inner_results.log_accept_ratio,
+          pkr.inner_results.accepted_results.target_log_prob,
+          pkr.inner_results.accepted_results.step_size)
+
+
+    unconstraining_bijector = [tfb.Exp(), tfb.Exp()]
+    initial_mcmc_state = [0.00001, 0.03]
+    print("Initial log likelihood:", logp(*initial_mcmc_state))
 
     @tf.function
-    def sample():
+    def sample(n_samples, step_size=[0.01, 0.1]):
         return tfp.mcmc.sample_chain(
-            num_results=2000,
-            num_burnin_steps=500,
+            num_results=n_samples,
+            num_burnin_steps=0,
             current_state=initial_mcmc_state,
             kernel=tfp.mcmc.SimpleStepSizeAdaptation(
                 tfp.mcmc.TransformedTransitionKernel(
                     inner_kernel=tfp.mcmc.HamiltonianMonteCarlo(
                         target_log_prob_fn=logp,
-                        step_size=0.0001,
+                        step_size=step_size,
                         num_leapfrog_steps=5),
                     bijector=unconstraining_bijector),
-                num_adaptation_steps=400),
-            trace_fn=lambda _, pkr: pkr.inner_results.inner_results.is_accepted)
+                num_adaptation_steps=500),
+            trace_fn=lambda _, pkr: pkr.inner_results.inner_results.accepted_results.step_size)
 
-    start = time.perf_counter()
-    pi_beta, accept = sample()
-    end = time.perf_counter()
-    print(f"Simulation complete in {end-start} seconds")
+    with tf.device("/CPU:0"):
+        start = time.perf_counter()
+        pi_beta, results = sample(1000, [0.1, 0.1])
+        # sd = tfp.stats.stddev(pi_beta, sample_axis=1)
+        # sd = sd / tf.reduce_sum(sd)
+        # new_step_size = [results[-1] * sd[0], results[-1] * sd[1]]
+        # print("New step size:",new_step_size)
+        # pi_beta, results = sample(1000, step_size=new_step_size)
+        end = time.perf_counter()
+        print(f"Simulation complete in {end-start} seconds")
+        print(results)
 
-    plt.plot(pi_beta[0])
+
+
+    fig, ax = plt.subplots(1, 2)
+    ax[0].plot(pi_beta[0])
+    ax[1].plot(pi_beta[1])
     plt.show()
     print(f"Posterior mean: {np.mean(pi_beta[0])}")
 
-    with open('pi_beta_2020-03-15.pkl','wb') as f:
+    with open('pi_beta_2020-03-15.pkl', 'wb') as f:
         pkl.dump(pi_beta, f)
-
 
     #dates = settings['start'] + t.numpy().astype(np.timedelta64)
     #plotting(dates, sim)
-
-
