@@ -8,6 +8,7 @@ import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
 from tensorflow_probability import bijectors as tfb
 import matplotlib.pyplot as plt
+from tensorflow_probability.python.util import SeedStream
 
 from covid.rdata import load_population, load_age_mixing, load_mobility_matrix
 from covid.model import CovidUKODE, covid19uk_logp
@@ -34,6 +35,18 @@ def plotting(dates, sim):
     plt.grid(True)
     fig.autofmt_xdate()
     plt.show()
+
+
+def random_walk_mvnorm_fn(covariance, name=None):
+    """Returns callable that adds Multivariate Normal noise to the input"""
+
+    rv = tfp.distributions.MultivariateNormalTriL(loc=tf.zeros(covariance.shape[0], dtype=tf.float64),
+                                                           scale_tril=tf.linalg.cholesky(tf.convert_to_tensor(covariance, dtype=tf.float64)))
+
+    def _fn(state_parts, seed):
+        with tf.name_scope(name or 'random_walk_mvnorm_fn'):
+            seed_stream = SeedStream(seed, salt='RandomWalkNormalFn')
+            return rv.sample() + state_parts
 
 
 if __name__ == '__main__':
@@ -68,16 +81,18 @@ if __name__ == '__main__':
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
-    #@tf.function
-    def logp(epsilon, beta):
+    @tf.function
+    def logp(par):
         p = param
-        p['epsilon'] = epsilon
-        p['beta1'] = beta
-        epsilon_logp = tfd.Gamma(concentration=1., rate=1.).log_prob(p['epsilon'])
-        beta_logp = tfd.Gamma(concentration=1., rate=1.).log_prob(p['beta1'])
+        p['epsilon'] = par[0]
+        p['beta1'] = par[1]
+        p['gamma'] = par[2]
+        epsilon_logp = tfd.Gamma(concentration=tf.constant(1., tf.float64), rate=tf.constant(1., tf.float64)).log_prob(p['epsilon'])
+        beta_logp = tfd.Gamma(concentration=tf.constant(1., tf.float64), rate=tf.constant(1., tf.float64)).log_prob(p['beta1'])
+        gamma_logp = tfd.Gamma(concentration=tf.constant(100., tf.float64), rate=tf.constant(400., tf.float64)).log_prob(p['gamma'])
         t, sim, solve = simulator.simulate(p, state_init)
         y_logp = covid19uk_logp(y_incr, sim, 0.1)
-        logp = epsilon_logp + beta_logp + tf.reduce_sum(y_logp)
+        logp = epsilon_logp + beta_logp + gamma_logp + tf.reduce_sum(y_logp)
         return logp
 
     def trace_fn(_, pkr):
@@ -87,48 +102,51 @@ if __name__ == '__main__':
           pkr.inner_results.accepted_results.step_size)
 
 
-    unconstraining_bijector = [tfb.Exp(), tfb.Exp()]
-    initial_mcmc_state = [0.00001,   0.03]
-    print("Initial log likelihood:", logp(*initial_mcmc_state))
+    unconstraining_bijector = [tfb.Exp()]
+    initial_mcmc_state = np.array([0.001,  0.036, 0.25], dtype=np.float64)
+    print("Initial log likelihood:", logp(initial_mcmc_state))
 
     @tf.function
-    def sample(n_samples, step_size=[0.01, 0.1]):
+    def sample(n_samples, init_state, scale):
         return tfp.mcmc.sample_chain(
             num_results=n_samples,
             num_burnin_steps=0,
-            current_state=initial_mcmc_state,
-            kernel=tfp.mcmc.SimpleStepSizeAdaptation(
-                tfp.mcmc.TransformedTransitionKernel(
-                    inner_kernel=tfp.mcmc.HamiltonianMonteCarlo(
+            current_state=init_state,
+            kernel=tfp.mcmc.TransformedTransitionKernel(
+                    inner_kernel=tfp.mcmc.RandomWalkMetropolis(
                         target_log_prob_fn=logp,
-                        step_size=step_size,
-                        num_leapfrog_steps=5),
+                        new_state_fn=random_walk_mvnorm_fn(scale)
+                    ),
                     bijector=unconstraining_bijector),
-                num_adaptation_steps=500),
-            trace_fn=lambda _, pkr: pkr.inner_results.inner_results.accepted_results.step_size)
+            trace_fn=lambda _, pkr: pkr.inner_results.is_accepted)
 
     with tf.device("/CPU:0"):
+        cov = np.diag([0.001, 0.03, 1.02]) * 2.38**2 / 3
         start = time.perf_counter()
-        pi_beta, results = sample(1000, [0.1, 0.1])
-        # sd = tfp.stats.stddev(pi_beta, sample_axis=1)
-        # sd = sd / tf.reduce_sum(sd)
-        # new_step_size = [results[-1] * sd[0], results[-1] * sd[1]]
-        # print("New step size:",new_step_size)
-        # pi_beta, results = sample(1000, step_size=new_step_size)
+        joint_posterior, results = sample(100, init_state=initial_mcmc_state, scale=cov)
+        for i in range(10):
+            cov = tfp.stats.covariance(tf.math.log(joint_posterior)) * 2.38**2 / joint_posterior.shape[0] + tf.eye(cov.shape[0], dtype=tf.float64)*1.e-7
+            print(cov.numpy())
+            posterior_new, results = sample(100, joint_posterior[-1, :], cov)
+            joint_posterior = tf.concat([joint_posterior, posterior_new], axis=0)
+        posterior_new, results = sample(2000, init_state=joint_posterior[-1, :], scale=cov)
+        joint_posterior = tf.concat([joint_posterior, posterior_new], axis=0)
         end = time.perf_counter()
         print(f"Simulation complete in {end-start} seconds")
-        print(results)
+        print("Acceptance: ", np.mean(results.numpy()))
+        print(tfp.stats.covariance(tf.math.log(joint_posterior[1000:, :])))
 
 
 
-    fig, ax = plt.subplots(1, 2)
-    ax[0].plot(pi_beta[0])
-    ax[1].plot(pi_beta[1])
+    fig, ax = plt.subplots(1, 3)
+    ax[0].plot(joint_posterior[:, 0])
+    ax[1].plot(joint_posterior[:, 1])
+    ax[2].plot(joint_posterior[:, 2])
     plt.show()
-    print(f"Posterior mean: {np.mean(pi_beta[0])}")
+    print(f"Posterior mean: {np.mean(joint_posterior, axis=0)}")
 
     with open('pi_beta_2020-03-15.pkl', 'wb') as f:
-        pkl.dump(pi_beta, f)
+        pkl.dump(joint_posterior, f)
 
     #dates = settings['start'] + t.numpy().astype(np.timedelta64)
     #plotting(dates, sim)

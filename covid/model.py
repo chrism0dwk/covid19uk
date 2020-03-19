@@ -82,7 +82,7 @@ class Homogeneous:
 
 def dense_to_block_diagonal(A, n_blocks):
     A_dense = tf.linalg.LinearOperatorFullMatrix(A)
-    eye = tf.linalg.LinearOperatorIdentity(n_blocks)
+    eye = tf.linalg.LinearOperatorIdentity(n_blocks, dtype=tf.float64)
     A_block = tf.linalg.LinearOperatorKronecker([eye, A_dense])
     return A_block
 
@@ -101,24 +101,25 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         self.n_ages = M_tt.shape[0]
         self.n_lads = C.shape[0]
 
-        self.Kbar = tf.reduce_mean(M_tt)
-        self.M = tf.tuple([dense_to_block_diagonal(M_tt, self.n_lads),
-                           dense_to_block_diagonal(M_hh, self.n_lads)])
+        self.Kbar = tf.reduce_mean(tf.cast(M_tt, tf.float64))
+        self.M = tf.tuple([dense_to_block_diagonal(tf.cast(M_tt, tf.float64), self.n_lads),
+                           dense_to_block_diagonal(tf.cast(M_hh, tf.float64), self.n_lads)])
 
+        C = tf.cast(C, tf.float64)
         self.C = tf.linalg.LinearOperatorFullMatrix(C + tf.transpose(C))
-        shp = tf.linalg.LinearOperatorFullMatrix(np.ones_like(M_tt, dtype=np.float32))
+        shp = tf.linalg.LinearOperatorFullMatrix(np.ones_like(M_tt, dtype=np.float64))
         self.C = tf.linalg.LinearOperatorKronecker([self.C, shp])
 
-        self.N = tf.constant(N, dtype=tf.float32)
+        self.N = tf.constant(N, dtype=tf.float64)
         N_matrix = tf.reshape(self.N, [self.n_lads, self.n_ages])
         N_sum = tf.reduce_sum(N_matrix, axis=1)
-        N_sum = N_sum[:, None] * tf.ones([1, self.n_ages])
+        N_sum = N_sum[:, None] * tf.ones([1, self.n_ages], dtype=tf.float64)
         self.N_sum = tf.reshape(N_sum, [-1])
 
         self.times = np.arange(start, end, np.timedelta64(t_step, 'D'))
         m_select = (np.less_equal(holidays[0], self.times) & np.less(self.times, holidays[1])).astype(np.int64)
         self.m_select = tf.constant(m_select, dtype=tf.int64)
-        self.bg_select = tf.constant(np.less(bg_max_t, self.times), dtype=tf.int64)
+        self.bg_select = tf.constant(np.less(self.times, bg_max_t), dtype=tf.int64)
         self.solver = tode.DormandPrince()
 
     def make_h(self, param):
@@ -128,7 +129,7 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
             S, E, I, R = state
             t = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.m_select.shape[0]-1)
             m_switch = tf.gather(self.m_select, t)
-            epsilon = param['epsilon'] * tf.cast(tf.gather(self.bg_select, t), tf.float32)
+            epsilon = param['epsilon'] * tf.cast(tf.gather(self.bg_select, t), tf.float64)
             if m_switch == 0:
                infec_rate = param['beta1'] * tf.linalg.matvec(self.M[0], I)
             else:
@@ -148,7 +149,7 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
 
     def create_initial_state(self, init_matrix=None):
         if init_matrix is None:
-            I = np.zeros(self.N.shape, dtype=np.float32)
+            I = np.zeros(self.N.shape, dtype=np.float64)
             I[149*17+10] = 30. # Middle-aged in Surrey
         else:
             np.testing.assert_array_equal(init_matrix.shape, [self.n_lads, self.n_ages],
@@ -156,8 +157,8 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
                                           ({self.n_lads},{self.n_ages})")
             I = init_matrix.flatten()
         S = self.N - I
-        E = np.zeros(self.N.shape, dtype=np.float32)
-        R = np.zeros(self.N.shape, dtype=np.float32)
+        E = np.zeros(self.N.shape, dtype=np.float64)
+        R = np.zeros(self.N.shape, dtype=np.float64)
         return np.stack([S, E, I, R])
 
     @tf.function

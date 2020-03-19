@@ -1,5 +1,7 @@
 """Prediction functions"""
 import optparse
+
+import seaborn
 import yaml
 import pickle as pkl
 import numpy as np
@@ -7,10 +9,22 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow_probability import stats as tfs
 import matplotlib.pyplot as plt
+import h5py
 
 from covid.model import CovidUKODE
 from covid.rdata import load_age_mixing, load_mobility_matrix, load_population
-from covid.util import sanitise_settings, sanitise_parameter, seed_areas
+from covid.util import sanitise_settings, sanitise_parameter, seed_areas, doubling_time
+
+
+def save_sims(sims, la_names, age_groups, filename):
+    f = h5py.File(filename, 'w')
+    dset_sim = f.create_dataset('prediction', data=sims)
+    la_long = np.repeat(la_names, age_groups.shape[0]).astype(np.string_)
+    age_long = np.tile(age_groups, la_names.shape[0]).astype(np.string_)
+    dset_dims = f.create_dataset("dimnames", data=[b'sim_id', b't', b'state', b'la_age'])
+    dset_la = f.create_dataset('la_names', data=la_long)
+    dset_age = f.create_dataset('age_names', data=age_long)
+    f.close()
 
 
 if __name__ == '__main__':
@@ -48,25 +62,42 @@ if __name__ == '__main__':
                            date_range[1]+np.timedelta64(1,'D'),
                            np.timedelta64(1, 'D'))
     simulator = CovidUKODE(K_tt, K_hh, T, N, date_range[0] - np.timedelta64(1, 'D'),
-                           np.datetime64('2020-05-01'), settings['holiday'], settings['bg_max_time'], 1)
+                           np.datetime64('2020-09-01'), settings['holiday'], settings['bg_max_time'], 1)
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     @tf.function
-    def prediction(beta):
+    def prediction(epsilon, beta):
         sims = tf.TensorArray(tf.float32, size=beta.shape[0])
+        R0 = tf.TensorArray(tf.float32, size=beta.shape[0])
+        #d_time = tf.TensorArray(tf.float32, size=beta.shape[0])
         for i in tf.range(beta.shape[0]):
             p = param
+            p['epsilon'] = epsilon[i]
             p['beta1'] = beta[i]
             t, sim, solver_results = simulator.simulate(p, state_init)
-            sim_aggr = tf.reduce_sum(sim, axis=2)
-            sims = sims.write(i, sim_aggr)
-        return sims.gather(range(beta.shape[0]))
+            r = simulator.eval_R0(p)
+            R0 = R0.write(i, r[0])
+            #d_time = d_time.write(i, doubling_time(t, sim, '2002-03-01', '2002-04-01'))
+            #sim_aggr = tf.reduce_sum(sim, axis=2)
+            sims = sims.write(i, sim)
+        return sims.gather(range(beta.shape[0])), R0.gather(range(beta.shape[0]))
 
-    draws = pi_beta[0].numpy()[np.arange(0, pi_beta[0].shape[0], 20)]
-    sims = prediction(draws)
+    draws = [pi_beta[0].numpy()[np.arange(500, pi_beta[0].shape[0], 10)],
+             pi_beta[1].numpy()[np.arange(500, pi_beta[1].shape[0], 10)]]
+    with tf.device('/CPU:0'):
+        sims, R0 = prediction(draws[0], draws[1])
+    sims = tf.stack(sims) # shape=[n_sims, n_times, n_states, n_metapops]
 
-    dates = np.arange(date_range[0]-np.timedelta64(1, 'D'), np.datetime64('2020-05-01'),
+    save_sims(sims, la_names, age_groups, 'pred_2020-03-15.h5')
+
+    dub_time = [doubling_time(simulator.times, sim, '2020-03-01', '2020-04-01') for sim in sims.numpy()]
+
+    # Sum over country
+    sims = tf.reduce_sum(sims, axis=3)
+
+    print("Plotting...", flush=True)
+    dates = np.arange(date_range[0]-np.timedelta64(1, 'D'), np.datetime64('2020-09-01'),
                       np.timedelta64(1, 'D'))
     total_infected = tfs.percentile(tf.reduce_sum(sims[:, :, 1:3], axis=2), q=[2.5, 50, 97.5], axis=0)
     removed = tfs.percentile(sims[:, :, 3], q=[2.5, 50, 97.5], axis=0)
@@ -98,3 +129,15 @@ if __name__ == '__main__':
     plt.ylabel("Incidence per 10,000")
     fig.autofmt_xdate()
     plt.show()
+
+    # R0
+    R0_ci = tfs.percentile(R0, q=[2.5, 50, 97.5])
+    print("R0:", R0_ci)
+    fig = plt.figure()
+    seaborn.kdeplot(R0.numpy(), ax=fig.gca())
+    plt.title("R0")
+    plt.show()
+
+    # Doubling time
+    dub_ci = tfs.percentile(dub_time, q=[2.5, 50, 97.5])
+    print("Doubling time:", dub_ci)

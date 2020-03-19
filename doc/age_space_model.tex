@@ -25,29 +25,28 @@ of Covid-19 across the UK, respecting the availability of human mobility
 data as well as known contact behaviour between individuals of different
 ages.
 
-A deterministic SEIR model is posited in which infection rate is written
+A deterministic SEIR state transition model is posited in which individuals
+transition from Susceptible to Exposed (i.e. infected but not yet
+infectious) to Infectious to Removed (i.e. quarantined, got better,
+or died). 
+
+We model the infection rate (rate of S$\rightarrow$E transition)
 as a function of known age-structured contact from Polymod, known
 human mobility between MSOAs (Middle Super Output Area), and Census-derived
 age structured population density in regions across the UK.
 
 Currently, this model is populated with data for England only, though
-we are in the process of extending this to Scotland and Wales.
-
-Noise in daily case numbers $y_{it}$ for age-group $i$ in location
-$k$ on day $t$ is assumed to be Poisson-distributed such that
-\[
-y_{ikt}\sim\mbox{Poisson}(R_{ikt}-R_{ikt-1})
-\]
-
+we are in the process of extending this to Scotland, Wales, and Northern
+Ireland.
 
 \section{Data}
 
 \subsection{Age-mixing}
 
-Standard Polymod data for the UK are used, with 17 5-year age groups
-$[0-5),[5-10),\dots,[75-80),[80-\infty)$. Estimated contact matrices
-for term-time $M_{tt}$ and school-holidays $M_{hh}$ were extracted
-of dimension $n_{m}\times n_{m}$ where $n_{m}=17$.
+Standard Polymod social mixing data for the UK are used, with 17 5-year
+age groups $[0-5),[5-10),\dots,[75-80),[80-\infty)$. Estimated contact
+matrices for term-time $M_{tt}$ and school-holidays $M_{hh}$ were
+extracted of dimension $n_{m}\times n_{m}$ where $n_{m}=17$.
 
 \subsection{Human mobility}
 
@@ -67,8 +66,8 @@ with 0 diagonal.
 
 Age-structured population size within each LAD is taken from publicly
 available 2019 Local Authority data giving a vector $N$ of length
-$n_{m}n_{c}$, i.e. population for each of $n_{m}$ age groups and
-$n_{c}$ LADs.
+$n_{m}n_{c}=2584$, i.e. population for each of $n_{m}$ age groups
+and $n_{c}$ LADs.
 
 \section{Model}
 
@@ -77,16 +76,16 @@ $n_{c}$ LADs.
 We assemble a country-wide connectivity matrices as Kronecker products,
 such that
 \[
-K^{\star}=I_{n_{c}}\bigotimes M
+M^{\star}=I_{n_{c}}\bigotimes M
 \]
  and
 \[
-T^{\star}=C\bigotimes\bm{1}_{n_{m}\times n_{c}}
+C^{\star}=C\bigotimes\bm{1}_{n_{m}\times n_{c}}
 \]
-giving two matrices of dimension $n_{m}n_{c}$. $K^{\star}$ is block
-diagonal with Polymod mixing matrices. $T^{\star}$ expands the mobility
-matrix $C$ such that a block structure of connectivity between LADs
-results.
+giving two matrices of dimension $n_{m}n_{c}\times n_{m}n_{c}$. $M^{\star}$
+is block diagonal with Polymod mixing matrices. $C^{\star}$ expands
+the mobility matrix $C$ such that a block structure of connectivity
+between LADs results.
 
 \subsection{Disease progression model}
 
@@ -95,16 +94,19 @@ number of individual in each age-group-LAD combination at time $t$
 by the vectors $\vec{S}(t),\vec{E}(t),\vec{I}(t),\vec{R}(t)$. We
 therefore have
 \begin{align*}
-\frac{\mathrm{d\vec{S}(t)}}{dt} & =-\beta_{1}\left[K^{\star}\vec{I}(t)+\beta_{2}\bar{K}T^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}\\
-\frac{\mathrm{d}\vec{E}(t)}{dt} & =\beta_{1}\left[K^{\star}\vec{I}(t)+\beta_{2}\bar{K}T^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}-\nu\vec{E}(t)\\
+\frac{\mathrm{d\vec{S}(t)}}{dt} & =-\beta_{1}\left[M^{\star}\vec{I}(t)+\beta_{2}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}\\
+\frac{\mathrm{d}\vec{E}(t)}{dt} & =\beta_{1}\left[M^{\star}\vec{I}(t)+\beta_{2}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}-\nu\vec{E}(t)\\
 \frac{\mathrm{d}\vec{I}(t)}{dt} & =\nu\vec{E}(t)-\gamma\vec{I}(t)\\
 \frac{\mathrm{d}\vec{R}(t)}{dt} & =\gamma\vec{I}(t)
 \end{align*}
-with parameters: baseline infection rate $\beta_{1}$, commuting infection
-ratio $\beta_{2}$, latent period $\frac{1}{\nu}$, and infectious
-period $\frac{1}{\gamma}$.
+where $\bar{M}$ is the global mean person-person contact rate. Parameters
+are: baseline infection rate $\beta_{1}$, commuting infection ratio
+$\beta_{2}$, latent period $\frac{1}{\nu}$, and infectious period
+$\frac{1}{\gamma}$. Typically, we assume that contact with commuters
+is $\beta_{2}=\frac{1}{3}$ of that between members of the same age-LAD
+combination assuming an 8 hour working day.
 
-\subsection{Noise model}
+\subsection{Noise model (under construction)}
 
 Currently, and subject to discussion, we assume that all detected
 cases are synonymous with individuals transitioning $I\rightarrow R$.
@@ -122,9 +124,7 @@ for Poisson overdispersion.
 The model is currently implemented in Python3, using Tensorflow 2.1
 with the RK5 differential equation solver implemented in the \texttt{DormandPrince}
 class provided by Tensorflow Probability 0.9. Code may be found at
-\url{http://fhm-chicas-code.lancs.ac.uk/jewell/covid19uk}. 
+\url{http://fhm-chicas-code.lancs.ac.uk/jewell/covid19uk}.
 
-\section{Quick results}
-
-See attached SPI-M report.
+The code is a work in progress \textendash{} see README.
 \end{document}
