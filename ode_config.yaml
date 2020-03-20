@@ -2,8 +2,7 @@
 
 data:
   age_mixing_matrix_term: data/polymod_normal_df.rds
-  #age_mixing_matrix_hol: data/polymod_no_school_df.rds
-  age_mixing_matrix_hol: data/polymod_weekend_df.rds
+  age_mixing_matrix_hol: data/polymod_no_school_df.rds
   mobility_matrix: data/movement.rds
   population_size: data/pop.rds
   reported_cases: data/DailyConfirmedCases.csv

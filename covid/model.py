@@ -1,12 +1,13 @@
 """Functions for infection rates"""
-from warnings import warn
 import tensorflow as tf
 import tensorflow_probability as tfp
-
-tode = tfp.math.ode
 import numpy as np
 
 from covid.impl.chainbinom_simulate import chain_binomial_simulate
+
+tode = tfp.math.ode
+tla = tf.linalg
+
 
 def power_iteration(A, tol=1e-3):
     b_k = tf.random.normal([A.shape[1], 1], dtype=tf.float64)
@@ -21,63 +22,12 @@ def power_iteration(A, tol=1e-3):
         i += 1
     return b_k, i
 
-#@tf.function
+
 def rayleigh_quotient(A, b):
     b = tf.reshape(b, [b.shape[0], 1])
     numerator = tf.matmul(tf.transpose(b), tf.matmul(A, b))
     denominator = tf.matmul(tf.transpose(b), b)
     return numerator / denominator
-
-class CovidUK:
-    def __init__(self, K, T, W):
-        self.K = K
-        self.T = T
-        self.W = W
-
-        self.stoichiometry = [[-1, 1, 0, 0],
-                              [0, -1, 1, 0],
-                              [0, 0, -1, 1]]
-
-    def h(self, state):
-        state = tf.unstack(state, axis=0)
-        S, E, I, R = state
-
-        hazard_rates = tf.stack([
-            self.param['beta1'] * tf.dot(self.T, tf.dot(self.K, I))/self.K.shape[0],
-            self.param['nu'],
-            self.param['gamma']
-        ])
-        return hazard_rates
-
-    #@tf.function
-    def sample(self, initial_state, time_lims, param):
-        self.param = param
-        return chain_binomial_simulate(self.h, initial_state, time_lims[0],
-                                       time_lims[1], 1., self.stoichiometry)
-
-
-class Homogeneous:
-    def __init__(self):
-        self.stoichiometry = tf.constant([[-1, 1, 0, 0],
-                                          [0, -1, 1, 0],
-                                          [0, 0, -1, 1]], dtype=tf.float32)
-
-    def h(self, state):
-        state = tf.unstack(state, axis=0)
-        S, E, I, R = state
-
-        hazard_rates = tf.stack([
-            self.param['beta'] * I / tf.reduce_sum(state),
-            self.param['nu'] * tf.ones_like(I),
-            self.param['gamma'] * tf.ones_like(I)
-        ])
-        return hazard_rates
-
-    @tf.function
-    def sample(self, initial_state, time_lims, param):
-        self.param = param
-        return chain_binomial_simulate(self.h, initial_state, time_lims[0],
-                                       time_lims[1], 1., self.stoichiometry)
 
 
 def dense_to_block_diagonal(A, n_blocks):
@@ -100,15 +50,15 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         """
         self.n_ages = M_tt.shape[0]
         self.n_lads = C.shape[0]
+        self.M_tt = tf.convert_to_tensor(M_tt, dtype=tf.float64)
+        self.M_hh = tf.convert_to_tensor(M_hh, dtype=tf.float64)
 
-        self.Kbar = tf.reduce_mean(tf.cast(M_tt, tf.float64))
-        self.M = tf.tuple([dense_to_block_diagonal(tf.cast(M_tt, tf.float64), self.n_lads),
-                           dense_to_block_diagonal(tf.cast(M_hh, tf.float64), self.n_lads)])
+        self.Kbar = tf.reduce_mean(self.M_tt)
 
         C = tf.cast(C, tf.float64)
-        self.C = tf.linalg.LinearOperatorFullMatrix(C + tf.transpose(C))
-        shp = tf.linalg.LinearOperatorFullMatrix(np.ones_like(M_tt, dtype=np.float64))
-        self.C = tf.linalg.LinearOperatorKronecker([self.C, shp])
+        self.C = tla.LinearOperatorFullMatrix(C + tf.transpose(C))
+        shp = tla.LinearOperatorFullMatrix(np.ones_like(M_tt, dtype=np.float64))
+        self.C = tla.LinearOperatorKronecker([self.C, shp])
 
         self.N = tf.constant(N, dtype=tf.float64)
         N_matrix = tf.reshape(self.N, [self.n_lads, self.n_ages])
@@ -117,9 +67,10 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         self.N_sum = tf.reshape(N_sum, [-1])
 
         self.times = np.arange(start, end, np.timedelta64(t_step, 'D'))
-        m_select = (np.less_equal(holidays[0], self.times) & np.less(self.times, holidays[1])).astype(np.int64)
-        self.m_select = tf.constant(m_select, dtype=tf.int64)
-        self.bg_select = tf.constant(np.less(self.times, bg_max_t), dtype=tf.int64)
+        self.school_hols = [tf.constant((holidays[0] - start) // np.timedelta64(1, 'D'), dtype=tf.float64),
+                            tf.constant((holidays[1] - start) // np.timedelta64(1, 'D'), dtype=tf.float64)]
+
+        self.bg_max_t = tf.convert_to_tensor(bg_max_t, dtype=tf.float64)
         self.solver = tode.DormandPrince()
 
     def make_h(self, param):
@@ -127,14 +78,16 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         def h_fn(t, state):
             state = tf.unstack(state, axis=0)
             S, E, I, R = state
-            t = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.m_select.shape[0]-1)
-            m_switch = tf.gather(self.m_select, t)
-            epsilon = param['epsilon'] * tf.cast(tf.gather(self.bg_select, t), tf.float64)
-            if m_switch == 0:
-               infec_rate = param['beta1'] * tf.linalg.matvec(self.M[0], I)
-            else:
-                infec_rate = param['beta1'] * tf.linalg.matvec(self.M[1], I)
-            infec_rate += param['beta1'] * param['beta2'] * self.Kbar * tf.linalg.matvec(self.C, I / self.N_sum)
+
+            M = tf.where(tf.less_equal(self.school_hols[0], t) & tf.less(t, self.school_hols[1]),
+                         self.M_hh, self.M_tt)
+
+            M = dense_to_block_diagonal(M, self.n_lads)
+
+            epsilon = tf.where(t < self.bg_max_t, param['epsilon'], tf.constant(0., dtype=tf.float64))
+
+            infec_rate = param['beta1'] * tla.matvec(M, I)
+            infec_rate += param['beta1'] * param['beta2'] * self.Kbar * tla.matvec(self.C, I / self.N_sum)
             infec_rate = S / self.N * (infec_rate + epsilon)
 
             dS = -infec_rate
@@ -161,7 +114,6 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         R = np.zeros(self.N.shape, dtype=np.float64)
         return np.stack([S, E, I, R])
 
-    @tf.function
     def simulate(self, param, state_init, solver_state=None):
         h = self.make_h(param)
         t = np.arange(self.times.shape[0])
@@ -170,7 +122,7 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         return results.times, results.states, results.solver_internal_state
 
     def ngm(self, param):
-        infec_rate = param['beta1'] * self.M[0].to_dense()
+        infec_rate = param['beta1'] * dense_to_block_diagonal(self.M_tt, self.n_lads).to_dense()
         infec_rate += param['beta1'] * param['beta2'] * self.Kbar * self.C.to_dense() / self.N_sum[None, :]
         ngm = infec_rate / param['gamma']
         return ngm

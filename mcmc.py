@@ -48,7 +48,7 @@ def random_walk_mvnorm_fn(covariance, name=None):
 
     def _fn(state_parts, seed):
         with tf.name_scope(name or 'random_walk_mvnorm_fn'):
-            new_state_parts = rv.sample() + state_parts
+            new_state_parts = [rv.sample() + state_part for state_part in state_parts]
             return new_state_parts
 
     return _fn
@@ -132,10 +132,8 @@ if __name__ == '__main__':
         for i in range(200):
             cov = tfp.stats.covariance(tf.math.log(joint_posterior)) * 2.38**2 / joint_posterior.shape[1]
             print(cov.numpy())
-            posterior_new, results = sample(50, joint_posterior[-1, :], cov)
+            posterior_new, results = sample(50, joint_posterior[-1, :].numpy(), cov)
             joint_posterior = tf.concat([joint_posterior, posterior_new], axis=0)
-        #posterior_new, results = sample(2000, init_state=joint_posterior[-1, :], scale=cov)
-        #joint_posterior = tf.concat([joint_posterior, posterior_new], axis=0)
         end = time.perf_counter()
         print(f"Simulation complete in {end-start} seconds")
         print("Acceptance: ", np.mean(results.numpy()))

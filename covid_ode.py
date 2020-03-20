@@ -97,11 +97,11 @@ def plot_total_curve(sim):
     plt.legend()
 
 
-def plot_infec_curve(ax, sim, label, color):
+def plot_infec_curve(ax, sim, label):
     infec_uk = sum_la(sim)
     infec_uk = infec_uk.sum(axis=1)
     times = np.datetime64('2020-02-20') + np.arange(infec_uk.shape[0])
-    ax.plot(times, infec_uk, '-', label=label, color=color)
+    ax.plot(times, infec_uk, '-', label=label)
 
 
 def plot_by_age(sim, labels, t0=np.datetime64('2020-02-20'), ax=None):
@@ -173,11 +173,11 @@ def doubling_time(t, sim, t1, t2):
     return delta * np.log(2) / np.log(q2 / q1)
 
 
-def plot_age_attack_rate(ax, sim, N, label, color):
+def plot_age_attack_rate(ax, sim, N, label):
     Ns = N.reshape([152, 17]).sum(axis=0)
     fs = final_size(sim.numpy())
     attack_rate = fs / Ns
-    ax.plot(age_groups, attack_rate, 'o-', color=color, label=label)
+    ax.plot(age_groups, attack_rate, 'o-', label=label)
 
 
 if __name__ == '__main__':
@@ -200,47 +200,31 @@ if __name__ == '__main__':
     param = sanitise_parameter(config['parameter'])
     settings = sanitise_settings(config['settings'])
 
+    model = CovidUKODE(K_tt, K_hh, T, N, settings['start'], settings['end'], settings['holiday'],
+                       settings['bg_max_time'], 1)
 
-    # Effect of cocooning on elderly (70+)
-    def cocooning_model(cocooning_ratio=1.):
+    seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
+    state_init = model.create_initial_state(init_matrix=seeding)
 
-        K1_tt = K_tt.copy()
-        K1_hh = K_hh.copy()
+    print('R0_term=', model.eval_R0(param))
 
-        K1_tt[14:, :] *= cocooning_ratio
-        K1_tt[:, 14:] *= cocooning_ratio
-        K1_hh[14:, :] *= cocooning_ratio
-        K1_hh[:, 14:] *= cocooning_ratio
+    start = time.perf_counter()
+    t, sim, _ = model.simulate(param, state_init)
+    end = time.perf_counter()
+    print(f'Complete in {end - start} seconds')
 
-        model = CovidUKODE(K1_tt, K_hh, T, N, settings['start'], settings['end'], settings['holiday'],
-                           settings['bg_max_time'], 1)
+    dates = settings['start'] + t.numpy().astype(np.timedelta64)
+    dt = doubling_time(dates, sim.numpy(), '2020-03-01', '2020-03-31')
+    print(f"Doubling time: {dt}")
 
-        seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
-        state_init = model.create_initial_state(init_matrix=seeding)
-
-        print('R_term=', model.eval_R0(param))
-        #print('R_holiday=', model_holiday.eval_R0(param))
-
-        start = time.perf_counter()
-        t, sim, _ = model.simulate(param, state_init)
-        end = time.perf_counter()
-        print(f'Complete in {end - start} seconds')
-
-        dates = settings['start'] + t.numpy().astype(np.timedelta64)
-        dt = doubling_time(dates, sim.numpy(), '2020-03-01', '2020-04-01')
-        print(f"Doubling time: {dt}")
-        return t, sim
 
     fig_attack = plt.figure()
     fig_uk = plt.figure()
-    cocoon_ratios = [1.]
-    for i, r in enumerate(cocoon_ratios):
-        print(f"Simulation, r={r}", flush=True)
-        t, sim = cocooning_model(r)
-        plot_age_attack_rate(fig_attack.gca(), sim, N, f"{1 - r}", f"C{i}")
-        # fig_attack.gca().legend(title="Contact ratio")
-        plot_infec_curve(fig_uk.gca(), sim.numpy(), f"{1 - r}", f"C{i}")
-        # fig_uk.gca().legend(title="Contact ratio")
+
+    plot_age_attack_rate(fig_attack.gca(), sim, N, "Attack Rate")
+    fig_attack.suptitle("Attack Rate")
+    plot_infec_curve(fig_uk.gca(), sim.numpy(), "Infections")
+    fig_uk.suptitle("UK Infections")
 
     fig_attack.autofmt_xdate()
     fig_uk.autofmt_xdate()
@@ -248,5 +232,3 @@ if __name__ == '__main__':
     fig_uk.gca().grid(True)
     plt.show()
 
-    # if 'simulation' in config['output']:
-    #     write_hdf5(config['output']['simulation'], param, t, sim)
