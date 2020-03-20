@@ -30,7 +30,7 @@ def save_sims(sims, la_names, age_groups, filename):
 if __name__ == '__main__':
 
     parser = optparse.OptionParser()
-    parser.add_option("--config", "-c", dest="config",
+    parser.add_option("--config", "-c", dest="config", default="ode_config.yaml",
                       help="configuration file")
     options, args = parser.parse_args()
     with open(options.config, 'r') as ymlfile:

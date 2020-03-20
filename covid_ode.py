@@ -1,5 +1,6 @@
 import optparse
 import time
+import sys
 
 import h5py
 import matplotlib.pyplot as plt
@@ -183,9 +184,10 @@ def plot_age_attack_rate(ax, sim, N, label):
 if __name__ == '__main__':
 
     parser = optparse.OptionParser()
-    parser.add_option("--config", "-c", dest="config",
+    parser.add_option("--config", "-c", dest="config", default="ode_config.yaml",
                       help="configuration file")
     options, args = parser.parse_args()
+
     with open(options.config, 'r') as ymlfile:
         config = yaml.load(ymlfile)
 
