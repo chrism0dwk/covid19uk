@@ -2,7 +2,8 @@
 
 data:
   age_mixing_matrix_term: data/polymod_normal_df.rds
-  age_mixing_matrix_hol: data/polymod_no_school_df.rds
+  #age_mixing_matrix_hol: data/polymod_no_school_df.rds
+  age_mixing_matrix_hol: data/polymod_weekend_df.rds
   mobility_matrix: data/movement.rds
   population_size: data/pop.rds
   reported_cases: data/DailyConfirmedCases.csv
@@ -18,8 +19,8 @@ settings:
   start: 2020-02-04
   end: 2020-04-01
   holiday:
-    - 2020-04-06
-    - 2020-04-17
+    - 2020-03-23
+    - 2020-10-01
   bg_max_time: 2020-03-01
   time_step: 1.
 

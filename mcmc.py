@@ -92,7 +92,7 @@ if __name__ == '__main__':
         p = param
         p['epsilon'] = par[0]
         p['beta1'] = par[1]
-        #p['gamma'] = par[2]
+        p['gamma'] = par[2]
         epsilon_logp = tfd.Gamma(concentration=tf.constant(1., tf.float64), rate=tf.constant(1., tf.float64)).log_prob(p['epsilon'])
         beta_logp = tfd.Gamma(concentration=tf.constant(1., tf.float64), rate=tf.constant(1., tf.float64)).log_prob(p['beta1'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., tf.float64), rate=tf.constant(400., tf.float64)).log_prob(p['gamma'])
@@ -109,10 +109,10 @@ if __name__ == '__main__':
 
 
     unconstraining_bijector = [tfb.Exp()]
-    initial_mcmc_state = np.array([0.001,  0.036], dtype=np.float64)
+    initial_mcmc_state = np.array([0.001,  0.036, 0.25], dtype=np.float64)
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
-    #@tf.function
+    @tf.function(experimental_compile=True)
     def sample(n_samples, init_state, scale):
         return tfp.mcmc.sample_chain(
             num_results=n_samples,
@@ -124,19 +124,19 @@ if __name__ == '__main__':
                         new_state_fn=random_walk_mvnorm_fn(scale)
                     ),
                     bijector=unconstraining_bijector),
-            trace_fn=lambda _, pkr: pkr)
+            trace_fn=lambda _, pkr: pkr.inner_results.is_accepted)
 
     with tf.device("/CPU:0"):
-        cov = np.diag([0.00001, 0.00001])
+        cov = np.diag([0.00001, 0.00001, 0.00001])
         start = time.perf_counter()
         joint_posterior, results = sample(50, init_state=initial_mcmc_state, scale=cov)
-        for i in range(20):
+        for i in range(200):
             cov = tfp.stats.covariance(tf.math.log(joint_posterior)) * 2.38**2 / joint_posterior.shape[1]
             print(cov.numpy())
             posterior_new, results = sample(50, joint_posterior[-1, :], cov)
             joint_posterior = tf.concat([joint_posterior, posterior_new], axis=0)
-        posterior_new, results = sample(1000, init_state=joint_posterior[-1, :], scale=cov)
-        joint_posterior = tf.concat([joint_posterior, posterior_new], axis=0)
+        #posterior_new, results = sample(2000, init_state=joint_posterior[-1, :], scale=cov)
+        #joint_posterior = tf.concat([joint_posterior, posterior_new], axis=0)
         end = time.perf_counter()
         print(f"Simulation complete in {end-start} seconds")
         print("Acceptance: ", np.mean(results.numpy()))
@@ -145,7 +145,7 @@ if __name__ == '__main__':
     fig, ax = plt.subplots(1, 3)
     ax[0].plot(joint_posterior[:, 0])
     ax[1].plot(joint_posterior[:, 1])
-    #ax[2].plot(joint_posterior[:, 2])
+    ax[2].plot(joint_posterior[:, 2])
     plt.show()
     print(f"Posterior mean: {np.mean(joint_posterior, axis=0)}")
 

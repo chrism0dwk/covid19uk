@@ -9,8 +9,8 @@ import numpy as np
 from covid.impl.chainbinom_simulate import chain_binomial_simulate
 
 def power_iteration(A, tol=1e-3):
-    b_k = tf.random.normal([A.shape[1], 1])
-    epsilon = 1.
+    b_k = tf.random.normal([A.shape[1], 1], dtype=tf.float64)
+    epsilon = tf.constant(1., dtype=tf.float64)
     i = 0
     while tf.greater(epsilon, tol):
         b_k1 = tf.matmul(A, b_k)
@@ -178,7 +178,7 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
     def eval_R0(self, param, tol=1e-8):
         ngm = self.ngm(param)
         # Dominant eigen value by power iteration
-        dom_eigen_vec, i = power_iteration(ngm, tol=tol)
+        dom_eigen_vec, i = power_iteration(ngm, tol=tf.cast(tol, tf.float64))
         R0 = rayleigh_quotient(ngm, dom_eigen_vec)
         return tf.squeeze(R0), i
 

@@ -67,26 +67,23 @@ if __name__ == '__main__':
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     @tf.function
-    def prediction(epsilon, beta):
-        sims = tf.TensorArray(tf.float32, size=beta.shape[0])
-        R0 = tf.TensorArray(tf.float32, size=beta.shape[0])
-        #d_time = tf.TensorArray(tf.float32, size=beta.shape[0])
+    def prediction(epsilon, beta, gamma):
+        sims = tf.TensorArray(tf.float64, size=beta.shape[0])
+        R0 = tf.TensorArray(tf.float64, size=beta.shape[0])
         for i in tf.range(beta.shape[0]):
             p = param
             p['epsilon'] = epsilon[i]
             p['beta1'] = beta[i]
+            p['gamma'] = gamma[i]
             t, sim, solver_results = simulator.simulate(p, state_init)
             r = simulator.eval_R0(p)
             R0 = R0.write(i, r[0])
-            #d_time = d_time.write(i, doubling_time(t, sim, '2002-03-01', '2002-04-01'))
-            #sim_aggr = tf.reduce_sum(sim, axis=2)
             sims = sims.write(i, sim)
         return sims.gather(range(beta.shape[0])), R0.gather(range(beta.shape[0]))
 
-    draws = [pi_beta[0].numpy()[np.arange(500, pi_beta[0].shape[0], 10)],
-             pi_beta[1].numpy()[np.arange(500, pi_beta[1].shape[0], 10)]]
+    draws = pi_beta.numpy()[np.arange(5000, pi_beta.shape[0], 10), :]
     with tf.device('/CPU:0'):
-        sims, R0 = prediction(draws[0], draws[1])
+        sims, R0 = prediction(draws[:, 0], draws[:, 1], draws[:, 2])
     sims = tf.stack(sims) # shape=[n_sims, n_times, n_states, n_metapops]
 
     save_sims(sims, la_names, age_groups, 'pred_2020-03-15.h5')
@@ -104,18 +101,18 @@ if __name__ == '__main__':
     removed_observed = tfs.percentile(removed * 0.1, q=[2.5, 50, 97.5], axis=0)
 
     fig = plt.figure()
-    filler = plt.fill_between(dates, total_infected[0, :], total_infected[2, :], color='lightgray', label="95% credible interval")
-    plt.fill_between(dates, removed[0, :], removed[2, :], color='lightgray')
-    plt.fill_between(dates, removed_observed[0, :], removed_observed[2, :], color='lightgray')
+    filler = plt.fill_between(dates, total_infected[0, :], total_infected[2, :], color='lightgray', alpha=0.8, label="95% credible interval")
+    plt.fill_between(dates, removed[0, :], removed[2, :], color='lightgray', alpha=0.8)
+    plt.fill_between(dates, removed_observed[0, :], removed_observed[2, :], color='lightgray', alpha=0.8)
     ti_line = plt.plot(dates, total_infected[1, :], '-', color='red', alpha=0.4, label="Infected")
     rem_line = plt.plot(dates, removed[1, :], '-', color='blue', label="Removed")
     ro_line = plt.plot(dates, removed_observed[1, :], '-', color='orange', label='Predicted detections')
     marks = plt.plot(data_dates, y, '+', label='Observed cases')
     plt.legend([ti_line[0], rem_line[0], ro_line[0], filler, marks[0]],
                ["Infected", "Removed", "Predicted detections", "95% credible interval", "Observed counts"])
-    plt.grid()
+    plt.grid(color='lightgray', linestyle='dotted')
     plt.xlabel("Date")
-    plt.ylabel("$10^7$ individuals")
+    plt.ylabel("Individuals")
     fig.autofmt_xdate()
     plt.show()
 
@@ -124,7 +121,7 @@ if __name__ == '__main__':
     fig = plt.figure()
     plt.fill_between(dates[:-1], new_cases[0, :], new_cases[2, :], color='lightgray', label="95% credible interval")
     plt.plot(dates[:-1], new_cases[1, :], '-', alpha=0.2, label='New cases')
-    plt.grid()
+    plt.grid(color='lightgray', linestyle='dotted')
     plt.xlabel("Date")
     plt.ylabel("Incidence per 10,000")
     fig.autofmt_xdate()
@@ -141,3 +138,7 @@ if __name__ == '__main__':
     # Doubling time
     dub_ci = tfs.percentile(dub_time, q=[2.5, 50, 97.5])
     print("Doubling time:", dub_ci)
+
+    # Infectious period
+    ip = tfs.percentile(1./pi_beta[3000:, 2], q=[2.5, 50, 97.5])
+    print("Infectious period:", ip)
