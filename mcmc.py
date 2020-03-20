@@ -87,7 +87,6 @@ if __name__ == '__main__':
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
-    #@tf.function
     def logp(par):
         p = param
         p['epsilon'] = par[0]
@@ -112,7 +111,7 @@ if __name__ == '__main__':
     initial_mcmc_state = np.array([0.001,  0.036, 0.25], dtype=np.float64)
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
-    @tf.function(experimental_compile=True)
+    @tf.function
     def sample(n_samples, init_state, scale):
         return tfp.mcmc.sample_chain(
             num_results=n_samples,
