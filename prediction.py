@@ -84,21 +84,21 @@ if __name__ == '__main__':
     draws = pi_beta.numpy()[np.arange(5000, pi_beta.shape[0], 10), :]
     with tf.device('/CPU:0'):
         sims, R0 = prediction(draws[:, 0], draws[:, 1], draws[:, 2])
-    sims = tf.stack(sims) # shape=[n_sims, n_times, n_states, n_metapops]
+        sims = tf.stack(sims) # shape=[n_sims, n_times, n_states, n_metapops]
 
-    save_sims(sims, la_names, age_groups, 'pred_2020-03-15.h5')
+        save_sims(sims, la_names, age_groups, 'pred_2020-03-15.h5')
 
-    dub_time = [doubling_time(simulator.times, sim, '2020-03-01', '2020-04-01') for sim in sims.numpy()]
+        dub_time = [doubling_time(simulator.times, sim, '2020-03-01', '2020-04-01') for sim in sims.numpy()]
 
-    # Sum over country
-    sims = tf.reduce_sum(sims, axis=3)
+        # Sum over country
+        sims = tf.reduce_sum(sims, axis=3)
 
-    print("Plotting...", flush=True)
-    dates = np.arange(date_range[0]-np.timedelta64(1, 'D'), np.datetime64('2020-09-01'),
-                      np.timedelta64(1, 'D'))
-    total_infected = tfs.percentile(tf.reduce_sum(sims[:, :, 1:3], axis=2), q=[2.5, 50, 97.5], axis=0)
-    removed = tfs.percentile(sims[:, :, 3], q=[2.5, 50, 97.5], axis=0)
-    removed_observed = tfs.percentile(removed * 0.1, q=[2.5, 50, 97.5], axis=0)
+        print("Plotting...", flush=True)
+        dates = np.arange(date_range[0]-np.timedelta64(1, 'D'), np.datetime64('2020-09-01'),
+                          np.timedelta64(1, 'D'))
+        total_infected = tfs.percentile(tf.reduce_sum(sims[:, :, 1:3], axis=2), q=[2.5, 50, 97.5], axis=0)
+        removed = tfs.percentile(sims[:, :, 3], q=[2.5, 50, 97.5], axis=0)
+        removed_observed = tfs.percentile(removed * 0.1, q=[2.5, 50, 97.5], axis=0)
 
     fig = plt.figure()
     filler = plt.fill_between(dates, total_infected[0, :], total_infected[2, :], color='lightgray', alpha=0.8, label="95% credible interval")

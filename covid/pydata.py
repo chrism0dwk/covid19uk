@@ -39,5 +39,37 @@ def ingest_data(lad_shp, lad_pop):
     return {'geo': lad, 'N': N}
 
 
+def phe_death_timeseries(filename, date_range=['2020-02-02', '2020-03-21']):
+    date_range = [np.datetime64(x) for x in date_range]
+    csv = pd.read_excel(filename)
+    cases = pd.DataFrame({'hospital': csv.groupby(['Hospital admission date (non-HCID)', 'Region']).size(),
+                          'deaths': csv.groupby(['PATIENT_DEATH_DATE', 'Region']).size()})
+    cases.index.rename(['date', 'region'], [0, 1], inplace=True)
+    cases.reset_index(inplace=True)
+    cases = cases.pivot(index='date', columns='region')
+    dates = pd.DataFrame(index=pd.DatetimeIndex(np.arange(*date_range, np.timedelta64(1, 'D'))))
+    combined = dates.merge(cases, how='left', left_index=True, right_index=True)
+    combined.columns = pd.MultiIndex.from_tuples(combined.columns, names=['timeseries','region'])
+    combined[combined.isna()] = 0.0
+
+    output = {k: combined.loc[:, [k, None]] for k in combined.columns.levels[0]}
+    return output
+
+
+def phe_death_hosp_to_death(filename, date_range=['2020-02-02', '2020-03-21']):
+    date_range = [np.datetime64(x) for x in date_range]
+    csv = pd.read_excel(filename)
+
+    data = csv.loc[:, ['Sex', 'Age', 'Underlying medical condition?', 'Hospital admission date (non-HCID)',
+                   'PATIENT_DEATH_DATE']]
+    data.columns = ['sex','age','underlying_condition', 'hosp_adm_date', 'death_date']
+    data.loc[:, 'underlying_condition'] = data['underlying_condition'] == 'Yes'
+    data['adm_to_death'] = (data['death_date'] - data['hosp_adm_date']) / np.timedelta64(1, 'D')
+    return data.dropna(axis=0)
+
+
+
+
+
 if __name__=='__main__':
     pass

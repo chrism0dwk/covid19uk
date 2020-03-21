@@ -148,6 +148,3 @@ if __name__ == '__main__':
 
     with open('pi_beta_2020-03-15.pkl', 'wb') as f:
         pkl.dump(joint_posterior, f)
-
-    #dates = settings['start'] + t.numpy().astype(np.timedelta64)
-    #plotting(dates, sim)
