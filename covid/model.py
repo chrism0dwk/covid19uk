@@ -1,6 +1,7 @@
 """Functions for infection rates"""
 import tensorflow as tf
 import tensorflow_probability as tfp
+from tensorflow_probability.python.internal import dtype_util
 import numpy as np
 
 from covid.impl.chainbinom_simulate import chain_binomial_simulate
@@ -10,8 +11,8 @@ tla = tf.linalg
 
 
 def power_iteration(A, tol=1e-3):
-    b_k = tf.random.normal([A.shape[1], 1], dtype=tf.float64)
-    epsilon = tf.constant(1., dtype=tf.float64)
+    b_k = tf.random.normal([A.shape[1], 1], dtype=A.dtype)
+    epsilon = tf.constant(1., dtype=A.dtype)
     i = 0
     while tf.greater(epsilon, tol):
         b_k1 = tf.matmul(A, b_k)
@@ -32,7 +33,7 @@ def rayleigh_quotient(A, b):
 
 def dense_to_block_diagonal(A, n_blocks):
     A_dense = tf.linalg.LinearOperatorFullMatrix(A)
-    eye = tf.linalg.LinearOperatorIdentity(n_blocks, dtype=tf.float64)
+    eye = tf.linalg.LinearOperatorIdentity(n_blocks, dtype=A.dtype)
     A_block = tf.linalg.LinearOperatorKronecker([eye, A_dense])
     return A_block
 
@@ -48,29 +49,46 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         :param N: a vector of population sizes in each LAD
         :param n_lads: the number of LADS
         """
+        dtype = dtype_util.common_dtype([M_tt, M_hh, C, N], dtype_hint=np.float64)
         self.n_ages = M_tt.shape[0]
         self.n_lads = C.shape[0]
         self.M_tt = tf.convert_to_tensor(M_tt, dtype=tf.float64)
         self.M_hh = tf.convert_to_tensor(M_hh, dtype=tf.float64)
 
-        self.Kbar = tf.reduce_mean(self.M_tt)
+        # Create one linear operator comprising both the term and holiday
+        # matrices. This is nice because
+        #   - the dense "M" parts will take up memory of shape [2, M, M]
+        #   - the identity matirix will only take up memory of shape [M]
+        #   - matmuls/matvecs will be quite efficient because of the
+        #     LinearOperatorKronecker structure and diagonal structure of the
+        #     identity piece thereof.
+        # It should be sufficiently efficient that we can just get rid of the
+        # control flow switching between the two operators, and instead just do
+        # both matmuls in one big (vectorized!) pass, and pull out what we want
+        # after the fact with tf.gather.
+        self.M = dense_to_block_diagonal(
+            np.stack([M_tt, M_hh], axis=0), self.n_lads)
 
-        C = tf.cast(C, tf.float64)
-        self.C = tla.LinearOperatorFullMatrix(C + tf.transpose(C))
-        shp = tla.LinearOperatorFullMatrix(np.ones_like(M_tt, dtype=np.float64))
-        self.C = tla.LinearOperatorKronecker([self.C, shp])
+        self.Kbar = tf.reduce_mean(M_tt)
 
-        self.N = tf.constant(N, dtype=tf.float64)
+        self.C = tf.linalg.LinearOperatorFullMatrix(C + tf.transpose(C))
+        shp = tf.linalg.LinearOperatorFullMatrix(tf.ones_like(M_tt, dtype=dtype))
+        self.C = tf.linalg.LinearOperatorKronecker([self.C, shp])
+
+        self.N = tf.constant(N, dtype=dtype)
         N_matrix = tf.reshape(self.N, [self.n_lads, self.n_ages])
         N_sum = tf.reduce_sum(N_matrix, axis=1)
-        N_sum = N_sum[:, None] * tf.ones([1, self.n_ages], dtype=tf.float64)
+        N_sum = N_sum[:, None] * tf.ones([1, self.n_ages], dtype=dtype)
         self.N_sum = tf.reshape(N_sum, [-1])
 
         self.times = np.arange(start, end, np.timedelta64(t_step, 'D'))
-        self.school_hols = [tf.constant((holidays[0] - start) // np.timedelta64(1, 'D'), dtype=tf.float64),
-                            tf.constant((holidays[1] - start) // np.timedelta64(1, 'D'), dtype=tf.float64)]
 
-        self.bg_max_t = tf.convert_to_tensor(bg_max_t, dtype=tf.float64)
+        self.m_select = np.int64((self.times >= holidays[0]) &
+                                 (self.times < holidays[1]))
+        self.max_t = self.m_select.shape[0] - 1
+        self.bg_select = tf.constant(self.times < bg_max_t, dtype=dtype)
+
+        self.bg_max_t = tf.convert_to_tensor(bg_max_t, dtype=dtype)
         self.solver = tode.DormandPrince()
 
     def make_h(self, param):
@@ -78,16 +96,16 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         def h_fn(t, state):
             state = tf.unstack(state, axis=0)
             S, E, I, R = state
+            # Integrator may produce time values outside the range desired, so
+            # we clip, implicitly assuming the outside dates have the same
+            # holiday status as their nearest neighbors in the desired range.
+            t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
+            m_switch = tf.gather(self.m_select, t_idx)
+            epsilon = param['epsilon'] * tf.gather(self.bg_select, t_idx)
 
-            M = tf.where(tf.less_equal(self.school_hols[0], t) & tf.less(t, self.school_hols[1]),
-                         self.M_hh, self.M_tt)
-
-            M = dense_to_block_diagonal(M, self.n_lads)
-
-            epsilon = tf.where(t < self.bg_max_t, param['epsilon'], tf.constant(0., dtype=tf.float64))
-
-            infec_rate = param['beta1'] * tla.matvec(M, I)
-            infec_rate += param['beta1'] * param['beta2'] * self.Kbar * tla.matvec(self.C, I / self.N_sum)
+            infec_rate = param['beta1'] * (
+                tf.gather(self.M.matvec(I), m_switch) +
+                param['beta2'] * self.Kbar * self.C.matvec(I / self.N_sum))
             infec_rate = S / self.N * (infec_rate + epsilon)
 
             dS = -infec_rate
@@ -122,8 +140,10 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         return results.times, results.states, results.solver_internal_state
 
     def ngm(self, param):
-        infec_rate = param['beta1'] * dense_to_block_diagonal(self.M_tt, self.n_lads).to_dense()
-        infec_rate += param['beta1'] * param['beta2'] * self.Kbar * self.C.to_dense() / self.N_sum[None, :]
+        infec_rate = param['beta1'] * (
+            self.M.to_dense()[0, ...] +
+            (param['beta2'] * self.Kbar * self.C.to_dense() /
+             self.N_sum[np.newaxis, :]))
         ngm = infec_rate / param['gamma']
         return ngm
 

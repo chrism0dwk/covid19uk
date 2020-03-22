@@ -5,7 +5,7 @@ data:
   age_mixing_matrix_hol: data/polymod_no_school_df.rds
   mobility_matrix: data/movement.rds
   population_size: data/pop.rds
-  reported_cases: data/DailyConfirmedCases.csv
+  reported_cases: data/DailyConfirmedCases_2020-03-20.csv
 
 parameter:
   epsilon: 1.0e-6
@@ -15,7 +15,7 @@ parameter:
   gamma: 0.25
 
 settings:
-  start: 2020-02-04
+  start: 2020-02-19
   end: 2020-04-01
   holiday:
     - 2020-03-23

@@ -14,6 +14,8 @@ from covid.rdata import load_population, load_age_mixing, load_mobility_matrix
 from covid.model import CovidUKODE, covid19uk_logp
 from covid.util import *
 
+DTYPE = np.float64
+
 
 def plotting(dates, sim):
     print("Initial R0:", simulator.eval_R0(param))
@@ -40,11 +42,9 @@ def plotting(dates, sim):
 def random_walk_mvnorm_fn(covariance, name=None):
     """Returns callable that adds Multivariate Normal noise to the input"""
     covariance = covariance + tf.eye(covariance.shape[0], dtype=tf.float64) * 1.e-9
-
+    scale_tril = tf.linalg.cholesky(covariance)
     rv = tfp.distributions.MultivariateNormalTriL(loc=tf.zeros(covariance.shape[0], dtype=tf.float64),
-                                                  scale_tril=tf.linalg.cholesky(
-                                                      tf.convert_to_tensor(covariance,
-                                                                           dtype=tf.float64)))
+                                                  scale_tril=scale_tril)
 
     def _fn(state_parts, seed):
         with tf.name_scope(name or 'random_walk_mvnorm_fn'):
@@ -72,17 +72,31 @@ if __name__ == '__main__':
 
     N, n_names = load_population(config['data']['population_size'])
 
+    K_tt = K_tt.astype(DTYPE)
+    K_hh = K_hh.astype(DTYPE)
+    T = T.astype(DTYPE)
+    N = N.astype(DTYPE)
+
     param = sanitise_parameter(config['parameter'])
     settings = sanitise_settings(config['settings'])
 
     case_reports = pd.read_csv(config['data']['reported_cases'])
     case_reports['DateVal'] = pd.to_datetime(case_reports['DateVal'])
+    case_reports = case_reports[case_reports['DateVal'] >= '2020-02-19']
     date_range = [case_reports['DateVal'].min(), case_reports['DateVal'].max()]
     y = case_reports['CumCases'].to_numpy()
     y_incr = np.round((y[1:] - y[:-1]) * 0.8)
 
-    simulator = CovidUKODE(K_tt, K_hh, T, N, date_range[0]-np.timedelta64(1,'D'),
-                           date_range[1], settings['holiday'], settings['bg_max_time'], int(settings['time_step']))
+    simulator = CovidUKODE(
+        M_tt=K_tt,
+        M_hh=K_hh,
+        C=T,
+        N=N,
+        start=date_range[0]-np.timedelta64(1,'D'),
+        end=date_range[1],
+        holidays=settings['holiday'],
+        bg_max_t=settings['bg_max_time'],
+        t_step=int(settings['time_step']))
 
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
@@ -92,7 +106,7 @@ if __name__ == '__main__':
         p['epsilon'] = par[0]
         p['beta1'] = par[1]
         p['gamma'] = par[2]
-        epsilon_logp = tfd.Gamma(concentration=tf.constant(1., tf.float64), rate=tf.constant(1., tf.float64)).log_prob(p['epsilon'])
+        epsilon_logp = tfd.Gamma(concentration=tf.constant(8., tf.float64), rate=tf.constant(1000., tf.float64)).log_prob(p['epsilon'])
         beta_logp = tfd.Gamma(concentration=tf.constant(1., tf.float64), rate=tf.constant(1., tf.float64)).log_prob(p['beta1'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., tf.float64), rate=tf.constant(400., tf.float64)).log_prob(p['gamma'])
         t, sim, solve = simulator.simulate(p, state_init)
@@ -108,14 +122,14 @@ if __name__ == '__main__':
 
 
     unconstraining_bijector = [tfb.Exp()]
-    initial_mcmc_state = np.array([0.001,  0.036, 0.25], dtype=np.float64)
+    initial_mcmc_state = np.array([0.008,  0.05, 0.25], dtype=np.float64)
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
-    @tf.function
-    def sample(n_samples, init_state, scale):
+    @tf.function(autograph=False, experimental_compile=True)
+    def sample(n_samples, init_state, scale, num_burnin_steps=0):
         return tfp.mcmc.sample_chain(
             num_results=n_samples,
-            num_burnin_steps=0,
+            num_burnin_steps=num_burnin_steps,
             current_state=init_state,
             kernel=tfp.mcmc.TransformedTransitionKernel(
                     inner_kernel=tfp.mcmc.RandomWalkMetropolis(
@@ -125,15 +139,36 @@ if __name__ == '__main__':
                     bijector=unconstraining_bijector),
             trace_fn=lambda _, pkr: pkr.inner_results.is_accepted)
 
+    joint_posterior = tf.zeros([0] + list(initial_mcmc_state.shape), dtype=DTYPE)
+
+    scale = np.diag([0.00001, 0.00001, 0.00001])
+    overall_start = time.perf_counter()
+
+    num_covariance_estimation_iterations = 50
+    num_covariance_estimation_samples = 50
+    num_final_samples = 10000
     with tf.device("/CPU:0"):
-        cov = np.diag([0.00001, 0.00001, 0.00001])
         start = time.perf_counter()
-        joint_posterior, results = sample(50, init_state=initial_mcmc_state, scale=cov)
-        for i in range(200):
-            cov = tfp.stats.covariance(tf.math.log(joint_posterior)) * 2.38**2 / joint_posterior.shape[1]
+        for i in range(num_covariance_estimation_iterations):
+            step_start = time.perf_counter()
+            samples, results = sample(num_covariance_estimation_samples,
+                                      initial_mcmc_state,
+                                      scale)
+            step_end = time.perf_counter()
+            print(f'{i} time {step_end - step_start}')
+            print("Acceptance: ", results.numpy().mean())
+            joint_posterior = tf.concat([joint_posterior, samples], axis=0)
+            cov = tfp.stats.covariance(tf.math.log(joint_posterior))
             print(cov.numpy())
-            posterior_new, results = sample(50, joint_posterior[-1, :].numpy(), cov)
-            joint_posterior = tf.concat([joint_posterior, posterior_new], axis=0)
+            scale = cov * 2.38**2 / joint_posterior.shape[1]
+            initial_mcmc_state = joint_posterior[-1, :]
+
+        step_start = time.perf_counter()
+        samples, results = sample(num_final_samples,
+                                  init_state=joint_posterior[-1, :], scale=scale,)
+        joint_posterior = tf.concat([joint_posterior, samples], axis=0)
+        step_end = time.perf_counter()
+        print(f'Sampling step time {step_end - step_start}')
         end = time.perf_counter()
         print(f"Simulation complete in {end-start} seconds")
         print("Acceptance: ", np.mean(results.numpy()))
