@@ -103,15 +103,13 @@ if __name__ == '__main__':
 
     def logp(par):
         p = param
-        p['epsilon'] = par[0]
-        p['beta1'] = par[1]
-        p['gamma'] = par[2]
-        epsilon_logp = tfd.Gamma(concentration=tf.constant(8., tf.float64), rate=tf.constant(1000., tf.float64)).log_prob(p['epsilon'])
+        p['beta1'] = par[0]
+        p['gamma'] = par[1]
         beta_logp = tfd.Gamma(concentration=tf.constant(1., tf.float64), rate=tf.constant(1., tf.float64)).log_prob(p['beta1'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., tf.float64), rate=tf.constant(400., tf.float64)).log_prob(p['gamma'])
         t, sim, solve = simulator.simulate(p, state_init)
         y_logp = covid19uk_logp(y_incr, sim, 0.1)
-        logp = epsilon_logp + beta_logp + gamma_logp + tf.reduce_sum(y_logp)
+        logp = beta_logp + gamma_logp + tf.reduce_sum(y_logp)
         return logp
 
     def trace_fn(_, pkr):
@@ -122,7 +120,7 @@ if __name__ == '__main__':
 
 
     unconstraining_bijector = [tfb.Exp()]
-    initial_mcmc_state = np.array([0.008,  0.05, 0.25], dtype=np.float64)
+    initial_mcmc_state = np.array([0.05, 0.25], dtype=np.float64)
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
     @tf.function(autograph=False, experimental_compile=True)
@@ -141,7 +139,7 @@ if __name__ == '__main__':
 
     joint_posterior = tf.zeros([0] + list(initial_mcmc_state.shape), dtype=DTYPE)
 
-    scale = np.diag([0.00001, 0.00001, 0.00001])
+    scale = np.diag([0.1, 0.1])
     overall_start = time.perf_counter()
 
     num_covariance_estimation_iterations = 50
@@ -177,7 +175,6 @@ if __name__ == '__main__':
     fig, ax = plt.subplots(1, 3)
     ax[0].plot(joint_posterior[:, 0])
     ax[1].plot(joint_posterior[:, 1])
-    ax[2].plot(joint_posterior[:, 2])
     plt.show()
     print(f"Posterior mean: {np.mean(joint_posterior, axis=0)}")
 

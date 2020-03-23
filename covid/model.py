@@ -86,9 +86,7 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         self.m_select = np.int64((self.times >= holidays[0]) &
                                  (self.times < holidays[1]))
         self.max_t = self.m_select.shape[0] - 1
-        self.bg_select = tf.constant(self.times < bg_max_t, dtype=dtype)
 
-        self.bg_max_t = tf.convert_to_tensor(bg_max_t, dtype=dtype)
         self.solver = tode.DormandPrince()
 
     def make_h(self, param):
@@ -101,12 +99,11 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
             # holiday status as their nearest neighbors in the desired range.
             t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
             m_switch = tf.gather(self.m_select, t_idx)
-            epsilon = param['epsilon'] * tf.gather(self.bg_select, t_idx)
 
             infec_rate = param['beta1'] * (
                 tf.gather(self.M.matvec(I), m_switch) +
                 param['beta2'] * self.Kbar * self.C.matvec(I / self.N_sum))
-            infec_rate = S / self.N * (infec_rate + epsilon)
+            infec_rate = S / self.N * infec_rate
 
             dS = -infec_rate
             dE = infec_rate - param['nu'] * E

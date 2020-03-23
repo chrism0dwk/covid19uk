@@ -15,6 +15,7 @@ from covid.model import CovidUKODE
 from covid.rdata import load_age_mixing, load_mobility_matrix, load_population
 from covid.util import sanitise_settings, sanitise_parameter, seed_areas, doubling_time
 
+DTYPE = np.float64
 
 def save_sims(sims, la_names, age_groups, filename):
     f = h5py.File(filename, 'w')
@@ -44,12 +45,18 @@ if __name__ == '__main__':
 
     N, n_names = load_population(config['data']['population_size'])
 
+    K_tt = K_tt.astype(DTYPE)
+    K_hh = K_hh.astype(DTYPE)
+    T = T.astype(DTYPE)
+    N = N.astype(DTYPE)
+
     param = sanitise_parameter(config['parameter'])
     param['epsilon'] = 0.0
     settings = sanitise_settings(config['settings'])
 
     case_reports = pd.read_csv(config['data']['reported_cases'])
     case_reports['DateVal'] = pd.to_datetime(case_reports['DateVal'])
+    case_reports = case_reports[case_reports['DateVal'] >= '2020-02-19']
     date_range = [case_reports['DateVal'].min(), case_reports['DateVal'].max()]
     y = case_reports['CumCases'].to_numpy()
     y_incr = y[1:] - y[-1:]
@@ -67,12 +74,11 @@ if __name__ == '__main__':
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     @tf.function
-    def prediction(epsilon, beta, gamma):
+    def prediction(beta, gamma):
         sims = tf.TensorArray(tf.float64, size=beta.shape[0])
         R0 = tf.TensorArray(tf.float64, size=beta.shape[0])
         for i in tf.range(beta.shape[0]):
             p = param
-            p['epsilon'] = epsilon[i]
             p['beta1'] = beta[i]
             p['gamma'] = gamma[i]
             t, sim, solver_results = simulator.simulate(p, state_init)
@@ -83,7 +89,7 @@ if __name__ == '__main__':
 
     draws = pi_beta.numpy()[np.arange(5000, pi_beta.shape[0], 10), :]
     with tf.device('/CPU:0'):
-        sims, R0 = prediction(draws[:, 0], draws[:, 1], draws[:, 2])
+        sims, R0 = prediction(draws[:, 0], draws[:, 1])
         sims = tf.stack(sims) # shape=[n_sims, n_times, n_states, n_metapops]
 
         save_sims(sims, la_names, age_groups, 'pred_2020-03-15.h5')
@@ -140,5 +146,5 @@ if __name__ == '__main__':
     print("Doubling time:", dub_ci)
 
     # Infectious period
-    ip = tfs.percentile(1./pi_beta[3000:, 2], q=[2.5, 50, 97.5])
+    ip = tfs.percentile(1./pi_beta[3000:, 1], q=[2.5, 50, 97.5])
     print("Infectious period:", ip)

@@ -68,7 +68,21 @@ def phe_death_hosp_to_death(filename, date_range=['2020-02-02', '2020-03-21']):
     return data.dropna(axis=0)
 
 
+def phe_linelist_timeseries(filename, date_range):
 
+    linelist = pd.read_excel(filename)
+    linelist['age_group'] = (linelist['Age_in_Years'] // 5)  # id of 5-year age group
+    cols = ['patienttable_Specimen_Date', 'UTLA Code', 'age_group']
+    missing = linelist[cols].apply(lambda x: np.sum(x.isna()), axis=0)
+    missingness = {k: v for k, v in zip(cols, missing)}
+    grouped = linelist.groupby(cols)
+    case_counts = grouped.size()
+    print("Missing:", missingness)
+    return case_counts
+
+
+def spatial_report(cases, utla_geom):
+    pass
 
 
 if __name__=='__main__':
