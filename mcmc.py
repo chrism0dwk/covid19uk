@@ -2,41 +2,17 @@ import optparse
 import yaml
 import time
 import pickle as pkl
-import pandas as pd
-import tensorflow as tf
-import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
 from tensorflow_probability import bijectors as tfb
 import matplotlib.pyplot as plt
-from tensorflow_probability.python.util import SeedStream
+
 
 from covid.rdata import load_population, load_age_mixing, load_mobility_matrix
+from covid.pydata import load_commute_volume
 from covid.model import CovidUKODE, covid19uk_logp
 from covid.util import *
 
 DTYPE = np.float64
-
-
-def plotting(dates, sim):
-    print("Initial R0:", simulator.eval_R0(param))
-    print("Doubling time:", doubling_time(dates, sim.numpy(), '2020-02-27','2020-03-13'))
-
-    fig = plt.figure()
-    removals = tf.reduce_sum(sim[:, 3, :], axis=1)
-    infected = tf.reduce_sum(sim[:, 1:3, :], axis=[1,2])
-    exposed = tf.reduce_sum(sim[:, 1, :], axis=1)
-    date = np.squeeze(np.where(dates == np.datetime64('2020-03-13'))[0])
-    print("Daily incidence 2020-03-13:", exposed[date]-exposed[date-1])
-
-    plt.plot(dates, removals*0.10, '-', label='10% reporting')
-    plt.plot(dates, infected, '-', color='red', label='Total infected')
-    plt.plot(dates, removals, '-', color='gray', label='Total recovered/detected/died')
-
-    plt.scatter(np.datetime64('2020-03-13'), 600, label='gov.uk cases 13th March 2020')
-    plt.legend()
-    plt.grid(True)
-    fig.autofmt_xdate()
-    plt.show()
 
 
 def random_walk_mvnorm_fn(covariance, name=None):
@@ -64,21 +40,26 @@ if __name__ == '__main__':
     with open(options.config, 'r') as ymlfile:
         config = yaml.load(ymlfile)
 
+    param = sanitise_parameter(config['parameter'])
+    settings = sanitise_settings(config['settings'])
+
     K_tt, age_groups = load_age_mixing(config['data']['age_mixing_matrix_term'])
     K_hh, _ = load_age_mixing(config['data']['age_mixing_matrix_hol'])
 
     T, la_names = load_mobility_matrix(config['data']['mobility_matrix'])
     np.fill_diagonal(T, 0.)
 
+    W = load_commute_volume(config['data']['commute_volume'], settings['inference_period'])['percent']
+
     N, n_names = load_population(config['data']['population_size'])
 
     K_tt = K_tt.astype(DTYPE)
     K_hh = K_hh.astype(DTYPE)
+    W = W.to_numpy().astype(DTYPE)
     T = T.astype(DTYPE)
     N = N.astype(DTYPE)
 
-    param = sanitise_parameter(config['parameter'])
-    settings = sanitise_settings(config['settings'])
+
 
     case_reports = pd.read_csv(config['data']['reported_cases'])
     case_reports['DateVal'] = pd.to_datetime(case_reports['DateVal'])
@@ -91,11 +72,10 @@ if __name__ == '__main__':
         M_tt=K_tt,
         M_hh=K_hh,
         C=T,
+        W=W,
         N=N,
-        start=date_range[0]-np.timedelta64(1,'D'),
-        end=date_range[1],
+        date_range=[date_range[0]-np.timedelta64(1,'D'), date_range[1]],
         holidays=settings['holiday'],
-        bg_max_t=settings['bg_max_time'],
         t_step=int(settings['time_step']))
 
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
