@@ -4,46 +4,12 @@ import sys
 
 import h5py
 import matplotlib.pyplot as plt
-import tensorflow as tf
 import yaml
 
 from covid.model import CovidUKODE
 from covid.rdata import *
-
-
-def sanitise_parameter(par_dict):
-    """Sanitises a dictionary of parameters"""
-    par = ['epsilon', 'beta1', 'beta2', 'nu', 'gamma']
-    d = {key: np.float64(par_dict[key]) for key in par}
-    return d
-
-
-def sanitise_settings(par_dict):
-    d = {'start': np.datetime64(par_dict['start']),
-         'end': np.datetime64(par_dict['end']),
-         'time_step': float(par_dict['time_step']),
-         'holiday': np.array([np.datetime64(date) for date in par_dict['holiday']]),
-         'bg_max_time': np.datetime64(par_dict['bg_max_time'])}
-    return d
-
-
-def seed_areas(N, names, age_group=8, num_la=152, num_age=17, n_seed=30.):
-    areas = ['Inner London',
-             'Outer London',
-             'West Midlands (Met County)',
-             'Greater Manchester (Met County)']
-
-    names_matrix = names['Area.name.2'].to_numpy().reshape([num_la, num_age])
-
-    seed_areas = np.in1d(names_matrix[:, age_group], areas)
-    N_matrix = N.reshape([num_la, num_age])  # LA x Age
-
-    pop_size_sub = N_matrix[seed_areas, age_group]  # Gather
-    n = np.round(n_seed * pop_size_sub / pop_size_sub.sum())
-
-    seeding = np.zeros_like(N_matrix)
-    seeding[seed_areas, age_group] = n  # Scatter
-    return seeding
+from covid.pydata import load_commute_volume
+from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 
 
 def sum_age_groups(sim):

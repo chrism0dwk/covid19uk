@@ -39,17 +39,27 @@ def dense_to_block_diagonal(A, n_blocks):
 
 
 class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. \epsilon term.
-    def __init__(self, M_tt, M_hh, C, N, start, end, holidays, bg_max_t, t_step):
+    def __init__(self,
+                 M_tt: np.float64,
+                 M_hh: np.float64,
+                 W: np.float64,
+                 C: np.float64,
+                 N: np.float64,
+                 date_range: list,
+                 holidays: list,
+                 t_step: np.int64):
         """Represents a CovidUK ODE model
 
         :param K_tt: a MxM matrix of age group mixing in term time
         :param K_hh: a MxM matrix of age group mixing in holiday time
+        :param W: Commuting volume
+        :param date_range: a time range [start, end)
         :param holidays: a list of length-2 tuples containing dates of holidays
         :param C: a n_ladsxn_lads matrix of inter-LAD commuting
         :param N: a vector of population sizes in each LAD
         :param n_lads: the number of LADS
         """
-        dtype = dtype_util.common_dtype([M_tt, M_hh, C, N], dtype_hint=np.float64)
+        dtype = dtype_util.common_dtype([M_tt, M_hh, W, C, N], dtype_hint=np.float64)
         self.n_ages = M_tt.shape[0]
         self.n_lads = C.shape[0]
         self.M_tt = tf.convert_to_tensor(M_tt, dtype=tf.float64)
@@ -74,14 +84,14 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         self.C = tf.linalg.LinearOperatorFullMatrix(C + tf.transpose(C))
         shp = tf.linalg.LinearOperatorFullMatrix(tf.ones_like(M_tt, dtype=dtype))
         self.C = tf.linalg.LinearOperatorKronecker([self.C, shp])
-
+        self.W = tf.constant(W, dtype=dtype)
         self.N = tf.constant(N, dtype=dtype)
         N_matrix = tf.reshape(self.N, [self.n_lads, self.n_ages])
         N_sum = tf.reduce_sum(N_matrix, axis=1)
         N_sum = N_sum[:, None] * tf.ones([1, self.n_ages], dtype=dtype)
         self.N_sum = tf.reshape(N_sum, [-1])
 
-        self.times = np.arange(start, end, np.timedelta64(t_step, 'D'))
+        self.times = np.arange(date_range[0], date_range[1], np.timedelta64(t_step, 'D'))
 
         self.m_select = np.int64((self.times >= holidays[0]) &
                                  (self.times < holidays[1]))
@@ -99,10 +109,11 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
             # holiday status as their nearest neighbors in the desired range.
             t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
             m_switch = tf.gather(self.m_select, t_idx)
+            commute_volume = tf.pow(tf.gather(self.W, t_idx), param['omega'])
 
             infec_rate = param['beta1'] * (
                 tf.gather(self.M.matvec(I), m_switch) +
-                param['beta2'] * self.Kbar * self.C.matvec(I / self.N_sum))
+                param['beta2'] * self.Kbar * commute_volume * self.C.matvec(I / self.N_sum))
             infec_rate = S / self.N * infec_rate
 
             dS = -infec_rate

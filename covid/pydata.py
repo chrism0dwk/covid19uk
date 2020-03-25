@@ -4,6 +4,18 @@ import numpy as np
 import pandas as pd
 import geopandas as gp
 
+
+def load_commute_volume(filename, date_range):
+    """Loads commute data and clips or extends date range"""
+    commute_raw = pd.read_csv(filename, index_col='date')
+    commute_raw.sort_index(axis=0, inplace=True)
+    commute = pd.DataFrame(index=np.arange(date_range[0], date_range[1], np.timedelta64(1,'D')))
+    commute = commute.merge(commute_raw, left_index=True, right_index=True, how='left')
+    commute[commute.index < commute_raw.index[0]] = commute_raw.iloc[0, 0]
+    commute[commute.index > commute_raw.index[-1]] = commute_raw.iloc[-1, 0]
+    return commute
+
+
 def group_ages(df):
     """
     Sums age groups

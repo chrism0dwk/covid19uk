@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from tensorflow_probability.python.util import SeedStream
 
 from covid.rdata import load_population, load_age_mixing, load_mobility_matrix
+from covid.pydata import load_commute_volume
 from covid.model import CovidUKODE, covid19uk_logp
 from covid.util import *
 
@@ -64,8 +65,13 @@ if __name__ == '__main__':
     with open(options.config, 'r') as ymlfile:
         config = yaml.load(ymlfile)
 
+    param = sanitise_parameter(config['parameter'])
+    settings = sanitise_settings(config['settings'])
+
     K_tt, age_groups = load_age_mixing(config['data']['age_mixing_matrix_term'])
     K_hh, _ = load_age_mixing(config['data']['age_mixing_matrix_hol'])
+
+    W = load_commute_volume(config['data']['commute_volume'], settings['inference_period'])
 
     T, la_names = load_mobility_matrix(config['data']['mobility_matrix'])
     np.fill_diagonal(T, 0.)
@@ -76,9 +82,7 @@ if __name__ == '__main__':
     K_hh = K_hh.astype(DTYPE)
     T = T.astype(DTYPE)
     N = N.astype(DTYPE)
-
-    param = sanitise_parameter(config['parameter'])
-    settings = sanitise_settings(config['settings'])
+    W = W.to_numpy().astype(DTYPE)
 
     case_reports = pd.read_csv(config['data']['reported_cases'])
     case_reports['DateVal'] = pd.to_datetime(case_reports['DateVal'])
@@ -92,10 +96,10 @@ if __name__ == '__main__':
         M_hh=K_hh,
         C=T,
         N=N,
-        start=date_range[0]-np.timedelta64(1,'D'),
-        end=date_range[1],
+        W=W,
+        date_range=[date_range[0]-np.timedelta64(1,'D'),
+                    date_range[1]],
         holidays=settings['holiday'],
-        bg_max_t=settings['bg_max_time'],
         t_step=int(settings['time_step']))
 
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
@@ -120,7 +124,7 @@ if __name__ == '__main__':
 
 
     unconstraining_bijector = [tfb.Exp()]
-    initial_mcmc_state = np.array([0.05, 0.25], dtype=np.float64)
+    initial_mcmc_state = np.array([0.06, 0.3], dtype=np.float64)
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
     @tf.function(autograph=False, experimental_compile=True)
@@ -145,32 +149,32 @@ if __name__ == '__main__':
     num_covariance_estimation_iterations = 50
     num_covariance_estimation_samples = 50
     num_final_samples = 10000
-    with tf.device("/CPU:0"):
-        start = time.perf_counter()
-        for i in range(num_covariance_estimation_iterations):
-            step_start = time.perf_counter()
-            samples, results = sample(num_covariance_estimation_samples,
-                                      initial_mcmc_state,
-                                      scale)
-            step_end = time.perf_counter()
-            print(f'{i} time {step_end - step_start}')
-            print("Acceptance: ", results.numpy().mean())
-            joint_posterior = tf.concat([joint_posterior, samples], axis=0)
-            cov = tfp.stats.covariance(tf.math.log(joint_posterior))
-            print(cov.numpy())
-            scale = cov * 2.38**2 / joint_posterior.shape[1]
-            initial_mcmc_state = joint_posterior[-1, :]
 
+    start = time.perf_counter()
+    for i in range(num_covariance_estimation_iterations):
         step_start = time.perf_counter()
-        samples, results = sample(num_final_samples,
-                                  init_state=joint_posterior[-1, :], scale=scale,)
-        joint_posterior = tf.concat([joint_posterior, samples], axis=0)
+        samples, results = sample(num_covariance_estimation_samples,
+                                  initial_mcmc_state,
+                                  scale)
         step_end = time.perf_counter()
-        print(f'Sampling step time {step_end - step_start}')
-        end = time.perf_counter()
-        print(f"Simulation complete in {end-start} seconds")
-        print("Acceptance: ", np.mean(results.numpy()))
-        print(tfp.stats.covariance(tf.math.log(joint_posterior)))
+        print(f'{i} time {step_end - step_start}')
+        print("Acceptance: ", results.numpy().mean())
+        joint_posterior = tf.concat([joint_posterior, samples], axis=0)
+        cov = tfp.stats.covariance(tf.math.log(joint_posterior))
+        print(cov.numpy())
+        scale = cov * 2.38**2 / joint_posterior.shape[1]
+        initial_mcmc_state = joint_posterior[-1, :]
+
+    step_start = time.perf_counter()
+    samples, results = sample(num_final_samples,
+                              init_state=joint_posterior[-1, :], scale=scale,)
+    joint_posterior = tf.concat([joint_posterior, samples], axis=0)
+    step_end = time.perf_counter()
+    print(f'Sampling step time {step_end - step_start}')
+    end = time.perf_counter()
+    print(f"Simulation complete in {end-start} seconds")
+    print("Acceptance: ", np.mean(results.numpy()))
+    print(tfp.stats.covariance(tf.math.log(joint_posterior)))
 
     fig, ax = plt.subplots(1, 3)
     ax[0].plot(joint_posterior[:, 0])
@@ -178,5 +182,5 @@ if __name__ == '__main__':
     plt.show()
     print(f"Posterior mean: {np.mean(joint_posterior, axis=0)}")
 
-    with open('pi_beta_2020-03-15.pkl', 'wb') as f:
+    with open('pi_beta_2020-03-23.pkl', 'wb') as f:
         pkl.dump(joint_posterior, f)
