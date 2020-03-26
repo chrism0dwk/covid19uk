@@ -12,13 +12,13 @@ def chain_binomial_propagate(h, time_step):
     :param time_step: the time step
     :returns : a function that propagate `state[t]` -> `state[t+time_step]`
     """
-    def propagate_fn(state):
+    def propagate_fn(t, state):
         # State is assumed to be of shape [s, n] where s is the number of states
         #   and n is the number of population strata.
         # TODO: having state as [s, n] means we have to do some funky transposition.  It may be better
         #       to have state.shape = [n, s] which avoids transposition below, but may lead to slower
         #       rate calculations.
-        rate_matrix = h(state)
+        rate_matrix = h(t, state)
         rate_matrix = tf.transpose(rate_matrix, perm=[2, 0, 1])
         # Set diagonal to be the negative of the sum of other elements in each row
         rate_matrix = tf.linalg.set_diag(rate_matrix, -tf.reduce_sum(rate_matrix, axis=2))
@@ -41,7 +41,7 @@ def chain_binomial_simulate(hazard_fn, state, start, end, time_step):
     output = output.write(0, state)
 
     for i in tf.range(1, times.shape[0]):
-        state = propagate(state)
+        state = propagate(i, state)
         output = output.write(i, state)
 
     sim = output.gather(tf.range(times.shape[0]))

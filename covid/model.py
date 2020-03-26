@@ -38,7 +38,7 @@ def dense_to_block_diagonal(A, n_blocks):
     return A_block
 
 
-class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. \epsilon term.
+class CovidUK:
     def __init__(self,
                  M_tt: np.float64,
                  M_hh: np.float64,
@@ -47,7 +47,7 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
                  N: np.float64,
                  date_range: list,
                  holidays: list,
-                 t_step: np.int64):
+                 time_step: np.int64):
         """Represents a CovidUK ODE model
 
         :param K_tt: a MxM matrix of age group mixing in term time
@@ -91,13 +91,34 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
         N_sum = N_sum[:, None] * tf.ones([1, self.n_ages], dtype=dtype)
         self.N_sum = tf.reshape(N_sum, [-1])
 
-        self.times = np.arange(date_range[0], date_range[1], np.timedelta64(t_step, 'D'))
+        self.time_step = time_step
+        self.times = np.arange(date_range[0], date_range[1], np.timedelta64(int(time_step), 'D'))
 
         self.m_select = np.int64((self.times >= holidays[0]) &
                                  (self.times < holidays[1]))
         self.max_t = self.m_select.shape[0] - 1
 
+    def create_initial_state(self, init_matrix=None):
+        if init_matrix is None:
+            I = np.zeros(self.N.shape, dtype=np.float64)
+            I[149*17+10] = 30. # Middle-aged in Surrey
+        else:
+            np.testing.assert_array_equal(init_matrix.shape, [self.n_lads, self.n_ages],
+                                          err_msg=f"init_matrix does not have shape [<num lads>,<num ages>] \
+                                          ({self.n_lads},{self.n_ages})")
+            I = init_matrix.flatten()
+        S = self.N - I
+        E = np.zeros(self.N.shape, dtype=np.float64)
+        R = np.zeros(self.N.shape, dtype=np.float64)
+        return np.stack([S, E, I, R])
+
+
+class CovidUKODE(CovidUK):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.solver = tode.DormandPrince()
+
 
     def make_h(self, param):
 
@@ -124,20 +145,6 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
             return p
 
         return h_fn
-
-    def create_initial_state(self, init_matrix=None):
-        if init_matrix is None:
-            I = np.zeros(self.N.shape, dtype=np.float64)
-            I[149*17+10] = 30. # Middle-aged in Surrey
-        else:
-            np.testing.assert_array_equal(init_matrix.shape, [self.n_lads, self.n_ages],
-                                          err_msg=f"init_matrix does not have shape [<num lads>,<num ages>] \
-                                          ({self.n_lads},{self.n_ages})")
-            I = init_matrix.flatten()
-        S = self.N - I
-        E = np.zeros(self.N.shape, dtype=np.float64)
-        R = np.zeros(self.N.shape, dtype=np.float64)
-        return np.stack([S, E, I, R])
 
     def simulate(self, param, state_init, solver_state=None):
         h = self.make_h(param)
@@ -168,3 +175,57 @@ def covid19uk_logp(y, sim, phi):
         r_incr = tf.reduce_sum(r_incr, axis=1)
         y_ = tfp.distributions.Poisson(rate=phi*r_incr)
         return y_.log_prob(y)
+
+
+
+class CovidUKStochastic(CovidUK):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def make_h(self, param):
+        """Constructs a function that takes `state` and outputs a
+        transition rate matrix (with 0 diagonal).
+        """
+
+        def h(t, state):
+            """Computes a transition rate matrix
+
+            :param state: a tensor of shape [ns, nc] for ns states and nc population strata. States
+              are S, E, I, R.  We arrange the state like this because the state vectors are then arranged
+              contiguously in memory for fast calculation below.
+            :return a tensor of shape [ns, ns, nc] containing transition matric for each i=0,...,(c-1)
+            """
+            t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
+            m_switch = tf.gather(self.m_select, t_idx)
+            commute_volume = tf.pow(tf.gather(self.W, t_idx), param['omega'])
+
+            infec_rate = param['beta1'] * (
+                    tf.gather(self.M.matvec(state[2]), m_switch) +
+                    param['beta2'] * self.Kbar * commute_volume * self.C.matvec(state[2] / self.N_sum))
+            infec_rate = infec_rate / self.N
+
+            ei = tf.broadcast_to([param['nu']], shape=[state.shape[1]])
+            ir = tf.broadcast_to([param['gamma']], shape=[state.shape[1]])
+
+            # Scatter rates into a [ns, ns, nc] tensor
+            rates = [infec_rate, ei, ir]
+            rates = tf.scatter_nd(updates=rates,
+                                  indices=[[0, 1], [1, 2], [2, 3]],
+                                  shape=[state.shape[0], state.shape[0], state.shape[1]])
+            return rates
+        return h
+
+    @tf.function
+    def simulate(self, param, state_init):
+        """Runs a simulation from the epidemic model
+
+        :param param: a dictionary of model parameters
+        :param state_init: the initial state
+        :returns: a tuple of times and simulated states.
+        """
+        param = {k: tf.constant(v, dtype=tf.float64) for k, v in param.items()}
+        hazard = self.make_h(param)
+        t, sim = chain_binomial_simulate(hazard, state_init, np.float64(0.),
+                                         np.float64(self.times.shape[0]), self.time_step)
+        return t, sim
