@@ -102,7 +102,7 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
     def make_h(self, param):
 
         def h_fn(t, state):
-            state = tf.unstack(state, axis=0)
+
             S, E, I, R = state
             # Integrator may produce time values outside the range desired, so
             # we clip, implicitly assuming the outside dates have the same
@@ -114,15 +114,14 @@ class CovidUKODE:  # TODO: add background case importation rate to the UK, e.g. 
             infec_rate = param['beta1'] * (
                 tf.gather(self.M.matvec(I), m_switch) +
                 param['beta2'] * self.Kbar * commute_volume * self.C.matvec(I / self.N_sum))
-            infec_rate = S / self.N * infec_rate
+            infec_rate = infec_rate / self.N
 
-            dS = -infec_rate
-            dE = infec_rate - param['nu'] * E
-            dI = param['nu'] * E - param['gamma'] * I
-            dR = param['gamma'] * I
+            SE = infec_rate
+            EI = param['nu']
+            IR = param['gamma']
 
-            df = tf.stack([dS, dE, dI, dR])
-            return df
+            p = 1 - tf.exp([SE, EI, IR])
+            return p
 
         return h_fn
 
