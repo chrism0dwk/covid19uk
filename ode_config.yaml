@@ -9,7 +9,7 @@ data:
   reported_cases: data/DailyConfirmedCases_2020-03-20.csv
 
 parameter:
-  beta1: 0.04  # R0 2.4
+  beta1: 0.1  # R0 2.4
   beta2: 0.33  # Contact with commuters 1/3rd of the time
   omega: 1.0
   nu: 0.25
@@ -18,7 +18,7 @@ parameter:
 settings:
   inference_period:
     - 2020-02-19
-    - 2020-04-01
+    - 2020-09-01
   holiday:
     - 2020-03-23
     - 2020-10-01

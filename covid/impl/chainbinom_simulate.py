@@ -40,11 +40,11 @@ def chain_binomial_simulate(hazard_fn, state, start, end, time_step):
     output = tf.TensorArray(tf.float64, size=times.shape[0])
     output = output.write(0, state)
 
-    for i in tf.range(1, times.shape[0]):
+    for i in range(1, times.shape[0]):
         state = propagate(i, state)
         output = output.write(i, state)
 
-    sim = output.gather(tf.range(times.shape[0]))
+    sim = output.gather(tf.range(1, times.shape[0]))
     return times, sim
 
 

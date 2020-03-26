@@ -179,25 +179,20 @@ if __name__ == '__main__':
                               C=C,
                               N=N,
                               W=W,
-                              date_range=settings['prediction_period'],
+                              date_range=settings['inference_period'],
                               holidays=settings['holiday'],
                               time_step=1.)
 
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = model.create_initial_state(init_matrix=seeding)
 
-    with tf.device('CPU'):
+    with tf.device('/CPU:0'):
         start = time.perf_counter()
         t, sim = model.simulate(param, state_init)
         end = time.perf_counter()
         print(f'Complete in {end - start} seconds')
 
-
     # Plotting functions
-    dates = settings['start'] + t.numpy().astype(np.timedelta64)
-    dt = doubling_time(dates, sim.numpy(), '2020-03-01', '2020-03-31')
-    print(f"Doubling time: {dt}")
-
     fig_attack = plt.figure()
     fig_uk = plt.figure()
 

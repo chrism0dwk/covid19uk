@@ -216,7 +216,7 @@ class CovidUKStochastic(CovidUK):
             return rates
         return h
 
-    @tf.function
+    @tf.function(experimental_compile=True)
     def simulate(self, param, state_init):
         """Runs a simulation from the epidemic model
 
