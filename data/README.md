@@ -12,6 +12,7 @@ UTLA: Upper Tier Local Authority
 LAD: Local Authority District
 
 Polymod: research output from [this](https://journals.plos.org/plosmedicine/article?id=10.1371/journal.pmed.0050074) social mixing study
+
 ## Files contained in this directory
 
 * `DailyConfirmedCases_2020-03-20.csv` -- total England daily case data scraped from Public Health England's page [here](https://www.gov.uk/government/publications/covid-19-track-coronavirus-cases)
@@ -20,4 +21,5 @@ Polymod: research output from [this](https://journals.plos.org/plosmedicine/arti
 * `polymod_normal_df.rds` -- R "RDS" file containing the [Polymod](https://journals.plos.org/plosmedicine/article?id=10.1371/journal.pmed.0050074) social mixing data for school time
 * `pop.rds` -- a R "RDS" file containing the ONS 2019 projected population size in each UTLA
 * `ukmidyearestimates20182019ladcodes.csv` -- ONS 2019 projected population size in each LAD (no currently used)
+* `commute_vol_2020-03-20.csv` -- a measure of the UK-wide commuter activity
 
