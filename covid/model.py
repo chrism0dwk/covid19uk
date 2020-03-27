@@ -110,7 +110,7 @@ class CovidUK:
         S = self.N - I
         E = np.zeros(self.N.shape, dtype=np.float64)
         R = np.zeros(self.N.shape, dtype=np.float64)
-        return np.stack([S, E, I, R])
+        return np.stack([S, E, I, R], axis=-1)
 
 
 class CovidUKODE(CovidUK):
@@ -124,7 +124,7 @@ class CovidUKODE(CovidUK):
 
         def h_fn(t, state):
 
-            S, E, I, R = state
+            S, E, I, R = tf.unstack(state, axis=-1)
             # Integrator may produce time values outside the range desired, so
             # we clip, implicitly assuming the outside dates have the same
             # holiday status as their nearest neighbors in the desired range.
@@ -141,7 +141,7 @@ class CovidUKODE(CovidUK):
             EI = param['nu']
             IR = param['gamma']
 
-            p = 1 - tf.exp([SE, EI, IR])
+            p = 1 - tf.exp(tf.stack([SE, EI, IR], axis=-1))
             return p
 
         return h_fn
@@ -171,8 +171,8 @@ class CovidUKODE(CovidUK):
 
 def covid19uk_logp(y, sim, phi):
         # Sum daily increments in removed
-        r_incr = sim[1:, 3, :] - sim[:-1, 3, :]
-        r_incr = tf.reduce_sum(r_incr, axis=1)
+        r_incr = sim[1:, :, 3] - sim[:-1, :, 3]
+        r_incr = tf.reduce_sum(r_incr, axis=-1)
         y_ = tfp.distributions.Poisson(rate=phi*r_incr)
         return y_.log_prob(y)
 
@@ -201,22 +201,30 @@ class CovidUKStochastic(CovidUK):
             commute_volume = tf.pow(tf.gather(self.W, t_idx), param['omega'])
 
             infec_rate = param['beta1'] * (
-                    tf.gather(self.M.matvec(state[2]), m_switch) +
-                    param['beta2'] * self.Kbar * commute_volume * self.C.matvec(state[2] / self.N_sum))
+                tf.gather(self.M.matvec(state[:, 2]), m_switch) +
+                param['beta2'] * self.Kbar * commute_volume * self.C.matvec(state[:, 2] / self.N_sum))
             infec_rate = infec_rate / self.N
 
-            ei = tf.broadcast_to([param['nu']], shape=[state.shape[1]])
-            ir = tf.broadcast_to([param['gamma']], shape=[state.shape[1]])
+            ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])
+            ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])
 
             # Scatter rates into a [ns, ns, nc] tensor
-            rates = [infec_rate, ei, ir]
-            rates = tf.scatter_nd(updates=rates,
-                                  indices=[[0, 1], [1, 2], [2, 3]],
-                                  shape=[state.shape[0], state.shape[0], state.shape[1]])
-            return rates
+            n = state.shape[0]
+            b = tf.stack([tf.range(n),
+                          tf.zeros(n, dtype=tf.int32),
+                          tf.ones(n, dtype=tf.int32)], axis=-1)
+            indices = tf.stack([b, b + [0, 1, 1], b + [0, 2, 2]], axis=-2)
+            # Un-normalised rate matrix (diag is 0 here)
+            rate_matrix = tf.scatter_nd(indices=indices,
+                                        updates=tf.stack([infec_rate, ei, ir], axis=-1),
+                                        shape=[state.shape[0],
+                                               state.shape[1],
+                                               state.shape[1]])
+
+            return rate_matrix
         return h
 
-    @tf.function(experimental_compile=True)
+    @tf.function(autograph=False)
     def simulate(self, param, state_init):
         """Runs a simulation from the epidemic model
 
