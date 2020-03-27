@@ -13,38 +13,32 @@ def chain_binomial_propagate(h, time_step):
     :returns : a function that propagate `state[t]` -> `state[t+time_step]`
     """
     def propagate_fn(t, state):
-        # State is assumed to be of shape [s, n] where s is the number of states
-        #   and n is the number of population strata.
-        # TODO: having state as [s, n] means we have to do some funky transposition.  It may be better
-        #       to have state.shape = [n, s] which avoids transposition below, but may lead to slower
-        #       rate calculations.
         rate_matrix = h(t, state)
-        rate_matrix = tf.transpose(rate_matrix, perm=[2, 0, 1])
         # Set diagonal to be the negative of the sum of other elements in each row
-        rate_matrix = tf.linalg.set_diag(rate_matrix, -tf.reduce_sum(rate_matrix, axis=2))
+        rate_matrix = tf.linalg.set_diag(rate_matrix,
+                                         -tf.reduce_sum(rate_matrix, axis=-1))
         # Calculate Markov transition probability matrix
         markov_transition = tf.linalg.expm(rate_matrix*time_step)
         # Sample new state
-        new_state = tfd.Multinomial(total_count=tf.transpose(state),
+        new_state = tfd.Multinomial(total_count=state,
                                     probs=markov_transition).sample()
-        new_state = tf.reduce_sum(new_state, axis=1)
-        return tf.transpose(new_state)
+        new_state = tf.reduce_sum(new_state, axis=-1)
+        return new_state
     return propagate_fn
 
 
+@tf.function(autograph=False)  # Algorithm runs super slow if uncommented.  Weird!
 def chain_binomial_simulate(hazard_fn, state, start, end, time_step):
-
     propagate = chain_binomial_propagate(hazard_fn, time_step)
     times = tf.range(start, end, time_step)
 
-    output = tf.TensorArray(tf.float64, size=times.shape[0])
+    output = tf.TensorArray(state.dtype, size=times.shape[0])
     output = output.write(0, state)
 
-    for i in range(1, times.shape[0]):
-        state = propagate(i, state)
-        output = output.write(i, state)
-
-    sim = output.gather(tf.range(1, times.shape[0]))
-    return times, sim
-
-
+    cond = lambda i, *_: i < times.shape[0]
+    def body(i, state, output):
+      state = propagate(i, state)
+      output = output.write(i, state)
+      return i + 1, state, output
+    _, state, output = tf.while_loop(cond, body, loop_vars=(0, state, output))
+    return times, output.stack()

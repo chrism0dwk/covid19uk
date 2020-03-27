@@ -13,26 +13,26 @@ from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 
 
 def sum_age_groups(sim):
-    infec = sim[:, 2, :]
+    infec = sim[:, :, 2]
     infec = infec.reshape([infec.shape[0], 152, 17])
     infec_uk = infec.sum(axis=2)
     return infec_uk
 
 
 def sum_la(sim):
-    infec = sim[:, 2, :]
+    infec = sim[:, :, 2]
     infec = infec.reshape([infec.shape[0], 152, 17])
     infec_uk = infec.sum(axis=1)
     return infec_uk
 
 
 def sum_total_removals(sim):
-    remove = sim[:, 3, :]
+    remove = sim[:, :, 3]
     return remove.sum(axis=1)
 
 
 def final_size(sim):
-    remove = sim[:, 3, :]
+    remove = sim[:, :, 3]
     remove = remove.reshape([remove.shape[0], 152, 17])
     fs = remove[-1, :, :].sum(axis=0)
     return fs
@@ -52,7 +52,7 @@ def write_hdf5(filename, param, t, sim):
 
 def plot_total_curve(sim):
     infec_uk = sum_la(sim)
-    infec_uk = infec_uk.sum(axis=1)
+    infec_uk = infec_uk.sum(axis=-1)
     removals = sum_total_removals(sim)
     times = np.datetime64('2020-02-20') + np.arange(removals.shape[0])
     plt.plot(times, infec_uk, 'r-', label='Infected')
@@ -66,7 +66,7 @@ def plot_total_curve(sim):
 
 def plot_infec_curve(ax, sim, label):
     infec_uk = sum_la(sim)
-    infec_uk = infec_uk.sum(axis=1)
+    infec_uk = infec_uk.sum(axis=-1)
     times = np.datetime64('2020-02-20') + np.arange(infec_uk.shape[0])
     ax.plot(times, infec_uk, '-', label=label)
 
@@ -75,7 +75,7 @@ def plot_by_age(sim, labels, t0=np.datetime64('2020-02-20'), ax=None):
     if ax is None:
         ax = plt.figure().gca()
     infec_uk = sum_la(sim)
-    total_uk = infec_uk.mean(axis=1)
+    total_uk = infec_uk.mean(axis=-1)
     t = t0 + np.arange(infec_uk.shape[0])
     colours = plt.cm.viridis(np.linspace(0., 1., infec_uk.shape[1]))
     for i in range(infec_uk.shape[1]):
@@ -88,7 +88,7 @@ def plot_by_la(sim, labels, t0=np.datetime64('2020-02-20'), ax=None):
     if ax is None:
         ax = plt.figure().gca()
     infec_uk = sum_age_groups(sim)
-    total_uk = infec_uk.mean(axis=1)
+    total_uk = infec_uk.mean(axis=-1)
     t = t0 + np.arange(infec_uk.shape[0])
     colours = plt.cm.viridis(np.linspace(0., 1., infec_uk.shape[1]))
     for i in range(infec_uk.shape[1]):
