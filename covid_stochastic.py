@@ -20,7 +20,7 @@ def sum_age_groups(sim):
 
 
 def sum_la(sim):
-    infec = sim[:, 2, :]
+    infec = sim[:, :, 2]
     infec = infec.reshape([infec.shape[0], 152, 17])
     infec_uk = infec.sum(axis=1)
     return infec_uk
