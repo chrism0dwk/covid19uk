@@ -186,11 +186,17 @@ if __name__ == '__main__':
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = model.create_initial_state(init_matrix=seeding)
 
-    with tf.device('CPU'):
-        start = time.perf_counter()
+
+    start = time.perf_counter()
+    t, sim = model.simulate(param, state_init)
+    end = time.perf_counter()
+    print(f'Run 1 Complete in {end - start} seconds')
+
+    start = time.perf_counter()
+    for i in range(10):
         t, sim = model.simulate(param, state_init)
-        end = time.perf_counter()
-        print(f'Complete in {end - start} seconds')
+    end = time.perf_counter()
+    print(f'Run 2 Complete in {(end - start)/10.} seconds')
 
     # Plotting functions
     fig_attack = plt.figure()
