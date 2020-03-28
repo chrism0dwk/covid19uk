@@ -20,7 +20,7 @@ def chain_binomial_propagate(h, time_step):
         # Calculate Markov transition probability matrix
         markov_transition = tf.linalg.expm(rate_matrix*time_step)
         num_states = markov_transition.shape[-1]
-        prev_prob = tf.zeros_like(markov_transition[..., :, 0])
+        prev_probs = tf.zeros_like(markov_transition[..., :, 0])
         counts = tf.zeros(markov_transition.shape[:-1].as_list() + [0],
                           dtype=markov_transition.dtype)
         total_count = state
@@ -29,13 +29,15 @@ def chain_binomial_propagate(h, time_step):
         # as a ~10 states it should probably be fine, just increasing the size
         # of the graph a bit.
         for i in range(num_states - 1):
+          probs = markov_transition[..., :, i]
           binom = tfd.Binomial(
               total_count=total_count,
-              probs=markov_transition[..., :, i] / (1. - prev_prob))
+              probs=tf.clip_by_value(probs / (1. - prev_probs), 0., 1.)
           sample = binom.sample()
           counts = tf.concat([counts, sample[..., tf.newaxis]], axis=-1)
           total_count -= sample
-          prev_prob = binom.probs
+          prev_probs += probs
+
         counts = tf.concat([counts, total_count[..., tf.newaxis]], axis=-1)
         new_state = tf.reduce_sum(counts, axis=-2)
         return new_state
