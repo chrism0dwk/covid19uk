@@ -101,7 +101,7 @@ class CovidUK:
     def create_initial_state(self, init_matrix=None):
         if init_matrix is None:
             I = np.zeros(self.N.shape, dtype=np.float64)
-            I[149*17+10] = 30. # Middle-aged in Surrey
+            I[149*17+10] = 30.  # Middle-aged in Surrey
         else:
             np.testing.assert_array_equal(init_matrix.shape, [self.n_lads, self.n_ages],
                                           err_msg=f"init_matrix does not have shape [<num lads>,<num ages>] \
@@ -224,7 +224,7 @@ class CovidUKStochastic(CovidUK):
             return rate_matrix
         return h
 
-    @tf.function(autograph=False)
+    @tf.function(autograph=False, experimental_compile=True)
     def simulate(self, param, state_init):
         """Runs a simulation from the epidemic model
 

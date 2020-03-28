@@ -32,7 +32,7 @@ def sum_total_removals(sim):
 
 
 def final_size(sim):
-    remove = sim[:, 3, :]
+    remove = sim[:, :, 3]
     remove = remove.reshape([remove.shape[0], 152, 17])
     fs = remove[-1, :, :].sum(axis=0)
     return fs
@@ -186,7 +186,7 @@ if __name__ == '__main__':
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = model.create_initial_state(init_matrix=seeding)
 
-    with tf.device('/CPU:0'):
+    with tf.device('CPU'):
         start = time.perf_counter()
         t, sim = model.simulate(param, state_init)
         end = time.perf_counter()

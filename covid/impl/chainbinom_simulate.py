@@ -32,7 +32,7 @@ def chain_binomial_propagate(h, time_step):
           probs = markov_transition[..., :, i]
           binom = tfd.Binomial(
               total_count=total_count,
-              probs=tf.clip_by_value(probs / (1. - prev_probs), 0., 1.)
+              probs=tf.clip_by_value(probs / (1. - prev_probs), 0., 1.))
           sample = binom.sample()
           counts = tf.concat([counts, sample[..., tf.newaxis]], axis=-1)
           total_count -= sample
@@ -47,7 +47,6 @@ def chain_binomial_propagate(h, time_step):
 def chain_binomial_simulate(hazard_fn, state, start, end, time_step):
     propagate = chain_binomial_propagate(hazard_fn, time_step)
     times = tf.range(start, end, time_step)
-    print(times.shape[0])
 
     output = tf.TensorArray(state.dtype, size=times.shape[0])
     output = output.write(0, state)
