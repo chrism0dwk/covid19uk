@@ -47,6 +47,7 @@ class CovidUK:
                  N: np.float64,
                  date_range: list,
                  holidays: list,
+                 lockdown: list,
                  time_step: np.int64):
         """Represents a CovidUK ODE model
 
@@ -96,6 +97,8 @@ class CovidUK:
 
         self.m_select = np.int64((self.times >= holidays[0]) &
                                  (self.times < holidays[1]))
+        self.lockdown_select = np.int64((self.times >= lockdown[0]) &
+                                        (self.times < lockdown[1]))
         self.max_t = self.m_select.shape[0] - 1
 
     def create_initial_state(self, init_matrix=None):
@@ -132,8 +135,10 @@ class CovidUKODE(CovidUK):
             t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
             m_switch = tf.gather(self.m_select, t_idx)
             commute_volume = tf.pow(tf.gather(self.W, t_idx), param['omega'])
+            lockdown = tf.gather(self.lockdown_select, t_idx)
+            beta = tf.where(lockdown == 0, param['beta1'], param['beta1']*param['beta3'])
 
-            infec_rate = param['beta1'] * (
+            infec_rate = beta * (
                 tf.gather(self.M.matvec(I), m_switch) +
                 param['beta2'] * self.Kbar * commute_volume * self.C.matvec(I / self.N_sum))
             infec_rate = S * infec_rate / self.N
@@ -224,7 +229,6 @@ class CovidUKStochastic(CovidUK):
                                         shape=[state.shape[0],
                                                state.shape[1],
                                                state.shape[1]])
-
             return rate_matrix
         return h
 

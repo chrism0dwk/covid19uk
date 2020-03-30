@@ -76,6 +76,7 @@ if __name__ == '__main__':
         N=N,
         date_range=[date_range[0]-np.timedelta64(1,'D'), date_range[1]],
         holidays=settings['holiday'],
+        lockdown=settings['lockdown'],
         time_step=int(settings['time_step']))
 
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
@@ -84,16 +85,19 @@ if __name__ == '__main__':
     def logp(par):
         p = param
         p['beta1'] = par[0]
-        p['gamma'] = par[1]
-        p['I0'] = par[2]
-        p['r'] = par[3]
+        p['beta3'] = par[1]
+        p['gamma'] = par[2]
+        p['I0'] = par[3]
+        p['r'] = par[4]
         beta_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE), rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
+        beta3_logp = tfd.Gamma(concentration=tf.constant(20., dtype=DTYPE),
+                               rate=tf.constant(20., dtype=DTYPE)).log_prob(p['beta3'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE), rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
         I0_logp = tfd.Gamma(concentration=tf.constant(1.5, dtype=DTYPE), rate=tf.constant(0.05, dtype=DTYPE)).log_prob(p['I0'])
         r_logp = tfd.Gamma(concentration=tf.constant(0.1, dtype=DTYPE), rate=tf.constant(0.1, dtype=DTYPE)).log_prob(p['gamma'])
         t, sim, solve = simulator.simulate(p, state_init)
         y_logp = covid19uk_logp(y_incr, sim, 0.1, p['r'])
-        logp = beta_logp + gamma_logp + I0_logp + r_logp + tf.reduce_sum(y_logp)
+        logp = beta_logp + beta3_logp + gamma_logp + I0_logp + r_logp + tf.reduce_sum(y_logp)
         return logp
 
     def trace_fn(_, pkr):
@@ -104,7 +108,7 @@ if __name__ == '__main__':
 
 
     unconstraining_bijector = [tfb.Exp()]
-    initial_mcmc_state = np.array([0.05, 0.25, 1.0, 50.], dtype=np.float64)  # beta1, gamma, I0
+    initial_mcmc_state = np.array([0.05, 1.0, 0.25, 1.0, 50.], dtype=np.float64)  # beta1, gamma, I0
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
     @tf.function(autograph=False, experimental_compile=True)
@@ -123,7 +127,7 @@ if __name__ == '__main__':
 
     joint_posterior = tf.zeros([0] + list(initial_mcmc_state.shape), dtype=DTYPE)
 
-    scale = np.diag([0.1, 0.1, 0.1, 1.])
+    scale = np.diag([0.1, 0.1, 0.1, 0.1, 1.])
     overall_start = time.perf_counter()
 
     num_covariance_estimation_iterations = 50
@@ -162,5 +166,5 @@ if __name__ == '__main__':
     plt.show()
     print(f"Posterior mean: {np.mean(joint_posterior, axis=0)}")
 
-    with open('pi_beta_2020-03-15.pkl', 'wb') as f:
+    with open('pi_beta_2020-03-29.pkl', 'wb') as f:
         pkl.dump(joint_posterior, f)

@@ -56,7 +56,7 @@ if __name__ == '__main__':
     y = case_reports['CumCases'].to_numpy()
     y_incr = y[1:] - y[-1:]
 
-    with open('pi_beta_2020-03-15.pkl', 'rb') as f:
+    with open('pi_beta_2020-03-29.pkl', 'rb') as f:
         pi_beta = pkl.load(f)
 
     # Predictive distribution of epidemic spread
@@ -71,17 +71,19 @@ if __name__ == '__main__':
                            date_range=[settings['prediction_period'][0],
                                        settings['prediction_period'][1]],
                            holidays=settings['holiday'],
+                           lockdown=settings['lockdown'],
                            time_step=1)
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     @tf.function
-    def prediction(beta, gamma, I0, r_):
+    def prediction(beta, beta3, gamma, I0, r_):
         sims = tf.TensorArray(tf.float64, size=beta.shape[0])
         R0 = tf.TensorArray(tf.float64, size=beta.shape[0])
         for i in tf.range(beta.shape[0]):
             p = param
             p['beta1'] = beta[i]
+            p['beta3'] = beta3[i]
             p['gamma'] = gamma[i]
             p['I0'] = I0[i]
             p['r'] = r_[i]
@@ -93,14 +95,14 @@ if __name__ == '__main__':
 
     draws = pi_beta.numpy()[np.arange(5000, pi_beta.shape[0], 30), :]
     with tf.device('/CPU:0'):
-        sims, R0 = prediction(draws[:, 0], draws[:, 1], draws[:, 2], draws[:, 3])
+        sims, R0 = prediction(draws[:, 0], draws[:, 1], draws[:, 2], draws[:, 3], draws[:, 4])
         sims = tf.stack(sims)  # shape=[n_sims, n_times, n_metapops, n_states]
-        save_sims(simulator.times, sims, la_names, age_groups, 'pred_2020-03-23.h5')
+        save_sims(simulator.times, sims, la_names, age_groups, 'pred_2020-03-29.h5')
         dub_time = [doubling_time(simulator.times, sim, '2020-03-01', '2020-04-01') for sim in sims.numpy()]
 
 
-    plot_prediction(settings['prediction_period'], sims, case_reports)
-    plot_case_incidence(settings['prediction_period'], sims)
+        plot_prediction(settings['prediction_period'], sims, case_reports)
+        plot_case_incidence(settings['prediction_period'], sims.numpy())
 
 
     # R0

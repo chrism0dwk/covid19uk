@@ -11,10 +11,11 @@ data:
 parameter:
   beta1: 0.1    # R0 2.4
   beta2: 0.33   # Contact with commuters 1/3rd of the time
+  beta3: 1.0    # lockdown vs normal
   omega: 1.0    # Non-linearity parameter for commuting volume
   nu: 0.25      # E -> I transition rate
   gamma: 0.25   # I -> R transition rate
-  I0: 0.0       # number of individuals at start of epidemic
+  I0: 1.0       # number of individuals at start of epidemic
   r: 30.0       # Negative binomial overdispersion parameter
 
 settings:
@@ -22,6 +23,9 @@ settings:
     - 2020-02-19
     - 2020-03-30
   holiday:
+    - 2020-03-23
+    - 2020-10-01
+  lockdown:
     - 2020-03-23
     - 2020-10-01
   time_step: 1.
