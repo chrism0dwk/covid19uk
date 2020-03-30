@@ -1,45 +1,64 @@
 """Functions for chain binomial simulation."""
-
+import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 tfd = tfp.distributions
 
 
-def update_state(update, state, stoichiometry):
-    update = tf.expand_dims(update, 1)  # Rx1xN
-    update *= tf.expand_dims(stoichiometry, -1)  # RxSx1
-    update = tf.reduce_sum(update, axis=0)  # SxN
-    return state + update
+def chain_binomial_propagate(h, time_step):
+    """Propagates the state of a population according to discrete time dynamics.
 
+    :param h: a hazard rate function returning the non-row-normalised Markov transition rate matrix
+              This function should return a tensor of dimension [ns, ns, nc] where ns is the number of
+              states, and nc is the number of strata within the population.
+    :param time_step: the time step
+    :returns : a function that propagate `state[t]` -> `state[t+time_step]`
+    """
+    def propagate_fn(t, state):
+        rate_matrix = h(t, state)
+        # Set diagonal to be the negative of the sum of other elements in each row
+        rate_matrix = tf.linalg.set_diag(rate_matrix,
+                                         -tf.reduce_sum(rate_matrix, axis=-1))
+        # Calculate Markov transition probability matrix
+        markov_transition = tf.linalg.expm(rate_matrix*time_step)
+        num_states = markov_transition.shape[-1]
+        prev_probs = tf.zeros_like(markov_transition[..., :, 0])
+        counts = tf.zeros(markov_transition.shape[:-1].as_list() + [0],
+                          dtype=markov_transition.dtype)
+        total_count = state
+        # This for loop is ok because there are (currently) only 4 states (SEIR)
+        # and we're only actually creating work for 3 of them. Even for as many
+        # as a ~10 states it should probably be fine, just increasing the size
+        # of the graph a bit.
+        for i in range(num_states - 1):
+          probs = markov_transition[..., :, i]
+          binom = tfd.Binomial(
+              total_count=total_count,
+              probs=tf.clip_by_value(probs / (1. - prev_probs), 0., 1.))
+          sample = binom.sample()
+          counts = tf.concat([counts, sample[..., tf.newaxis]], axis=-1)
+          total_count -= sample
+          prev_probs += probs
 
-def chain_binomial_propagate(h, time_step, stoichiometry):
-    def propagate_fn(state):
-        state_idx, rates = h(state)
-        probs = 1 - tf.exp(-rates*time_step)  # RxN
-        state_mult = tf.scatter_nd(state_idx[:, None], state,
-                                   shape=[state_idx.shape[0], state.shape[1], state.shape[2]])
-        update = tfd.Binomial(state_mult, probs=probs).sample()  # RxN
-        update = tf.expand_dims(update, 1)  # Rx1xN
-        upd_shape = tf.concat([stoichiometry.shape, tf.fill([tf.rank(state)-1], 1)], axis=0)
-        update *= tf.reshape(stoichiometry, upd_shape)  # RxSx1
-        update = tf.reduce_sum(update, axis=0)
-        state = state + update
-        return state
+        counts = tf.concat([counts, total_count[..., tf.newaxis]], axis=-1)
+        new_state = tf.reduce_sum(counts, axis=-2)
+        return new_state
     return propagate_fn
 
 
-def chain_binomial_simulate(hazard_fn, state, start, end, time_step, stoichiometry):
-
-    propagate = chain_binomial_propagate(hazard_fn, time_step, stoichiometry)
+def chain_binomial_simulate(hazard_fn, state, start, end, time_step):
+    """Simulates from a discrete time Markov state transition model using multinomial sampling
+    across rows of the """
+    propagate = chain_binomial_propagate(hazard_fn, time_step)
     times = tf.range(start, end, time_step)
 
-    output = tf.TensorArray(tf.float64, size=times.shape[0])
+    output = tf.TensorArray(state.dtype, size=times.shape[0])
     output = output.write(0, state)
 
-    for i in tf.range(1, times.shape[0]):
-        state = propagate(state)
-        output = output.write(i, state)
-
-    with tf.device("/CPU:0"):
-        sim = output.gather(tf.range(times.shape[0]))
-    return times, sim
+    cond = lambda i, *_: i < times.shape[0]
+    def body(i, state, output):
+      state = propagate(i, state)
+      output = output.write(i, state)
+      return i + 1, state, output
+    _, state, output = tf.while_loop(cond, body, loop_vars=(0, state, output))
+    return times, output.stack()

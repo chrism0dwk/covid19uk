@@ -10,8 +10,7 @@ tfs = tfp.stats
 
 def sanitise_parameter(par_dict):
     """Sanitises a dictionary of parameters"""
-    par = ['omega', 'beta1', 'beta2', 'nu', 'gamma']
-    d = {key: np.float64(par_dict[key]) for key in par}
+    d = {key: np.float64(val) for key, val in par_dict.items()}
     return d
 
 
@@ -19,7 +18,8 @@ def sanitise_settings(par_dict):
     d = {'inference_period': np.array(par_dict['inference_period'], dtype=np.datetime64),
          'prediction_period': np.array(par_dict['prediction_period'], dtype=np.datetime64),
          'time_step': float(par_dict['time_step']),
-         'holiday': np.array([np.datetime64(date) for date in par_dict['holiday']])}
+         'holiday': np.array([np.datetime64(date) for date in par_dict['holiday']]),
+         'lockdown': np.array([np.datetime64(date) for date in par_dict['lockdown']])}
     return d
 
 
@@ -124,7 +124,7 @@ def extract_locs(in_file: str, out_file: str, loc: list):
     la_names = f['la_names'][:].astype(str)
     la_loc = np.isin(la_names, loc)
 
-    extract = f['prediction'][:, :, :, la_loc]
+    extract = f['prediction'][:, :, la_loc, :]
 
     save_sims(f['date'][:], extract, f['la_names'][la_loc],
               f['age_names'][la_loc], out_file)
