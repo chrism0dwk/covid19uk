@@ -193,10 +193,10 @@ if __name__ == '__main__':
     print(f'Run 1 Complete in {end - start} seconds')
 
     start = time.perf_counter()
-    for i in range(10):
+    for i in range(1):
         t, sim = model.simulate(param, state_init)
     end = time.perf_counter()
-    print(f'Run 2 Complete in {(end - start)/10.} seconds')
+    print(f'Run 2 Complete in {(end - start)/1.} seconds')
 
     # Plotting functions
     fig_attack = plt.figure()

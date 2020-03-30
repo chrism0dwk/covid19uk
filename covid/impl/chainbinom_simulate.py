@@ -9,6 +9,8 @@ def chain_binomial_propagate(h, time_step):
     """Propagates the state of a population according to discrete time dynamics.
 
     :param h: a hazard rate function returning the non-row-normalised Markov transition rate matrix
+              This function should return a tensor of dimension [ns, ns, nc] where ns is the number of
+              states, and nc is the number of strata within the population.
     :param time_step: the time step
     :returns : a function that propagate `state[t]` -> `state[t+time_step]`
     """
@@ -45,6 +47,8 @@ def chain_binomial_propagate(h, time_step):
 
 
 def chain_binomial_simulate(hazard_fn, state, start, end, time_step):
+    """Simulates from a discrete time Markov state transition model using multinomial sampling
+    across rows of the """
     propagate = chain_binomial_propagate(hazard_fn, time_step)
     times = tf.range(start, end, time_step)
 

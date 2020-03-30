@@ -71,18 +71,20 @@ if __name__ == '__main__':
                            date_range=[settings['prediction_period'][0],
                                        settings['prediction_period'][1]],
                            holidays=settings['holiday'],
-                           t_step=1)
+                           time_step=1)
     seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     @tf.function
-    def prediction(beta, gamma):
+    def prediction(beta, gamma, I0, r_):
         sims = tf.TensorArray(tf.float64, size=beta.shape[0])
         R0 = tf.TensorArray(tf.float64, size=beta.shape[0])
         for i in tf.range(beta.shape[0]):
             p = param
             p['beta1'] = beta[i]
             p['gamma'] = gamma[i]
+            p['I0'] = I0[i]
+            p['r'] = r_[i]
             t, sim, solver_results = simulator.simulate(p, state_init)
             r = simulator.eval_R0(p)
             R0 = R0.write(i, r[0])
@@ -91,8 +93,8 @@ if __name__ == '__main__':
 
     draws = pi_beta.numpy()[np.arange(5000, pi_beta.shape[0], 30), :]
     with tf.device('/CPU:0'):
-        sims, R0 = prediction(draws[:, 0], draws[:, 1])
-        sims = tf.stack(sims)  # shape=[n_sims, n_times, n_states, n_metapops]
+        sims, R0 = prediction(draws[:, 0], draws[:, 1], draws[:, 2], draws[:, 3])
+        sims = tf.stack(sims)  # shape=[n_sims, n_times, n_metapops, n_states]
         save_sims(simulator.times, sims, la_names, age_groups, 'pred_2020-03-23.h5')
         dub_time = [doubling_time(simulator.times, sim, '2020-03-01', '2020-04-01') for sim in sims.numpy()]
 

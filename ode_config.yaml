@@ -5,20 +5,22 @@ data:
   age_mixing_matrix_hol: data/polymod_no_school_df.rds
   mobility_matrix: data/movement.rds
   population_size: data/pop.rds
-  commute_volume: data/commute_vol_2020-03-20.csv
-  reported_cases: data/DailyConfirmedCases_2020-03-20.csv
+  commute_volume: data/commute_vol_2020-03-27.csv
+  reported_cases: data/DailyConfirmedCases_2020-03-29.csv
 
 parameter:
-  beta1: 0.1  # R0 2.4
-  beta2: 0.33  # Contact with commuters 1/3rd of the time
-  omega: 1.0
-  nu: 0.25
-  gamma: 0.25
+  beta1: 0.1    # R0 2.4
+  beta2: 0.33   # Contact with commuters 1/3rd of the time
+  omega: 1.0    # Non-linearity parameter for commuting volume
+  nu: 0.25      # E -> I transition rate
+  gamma: 0.25   # I -> R transition rate
+  I0: 0.0       # number of individuals at start of epidemic
+  r: 30.0       # Negative binomial overdispersion parameter
 
 settings:
   inference_period:
     - 2020-02-19
-    - 2020-04-01
+    - 2020-03-30
   holiday:
     - 2020-03-23
     - 2020-10-01

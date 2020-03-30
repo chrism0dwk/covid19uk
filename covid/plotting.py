@@ -9,8 +9,7 @@ tfs = tfp.stats
 
 def plot_prediction(prediction_period, sims, case_reports):
 
-    # Sum over country
-    sims = tf.reduce_sum(sims, axis=3)
+    sims = tf.reduce_sum(sims, axis=-2)  # Sum over all meta-populations
 
     quantiles = [2.5, 50, 97.5]
 
@@ -29,8 +28,9 @@ def plot_prediction(prediction_period, sims, case_reports):
     rem_line = plt.plot(dates, removed[1, :], '-', color='blue', label="Removed")
     ro_line = plt.plot(dates, removed_observed[1, :], '-', color='orange', label='Predicted detections')
 
-    data_range = [case_reports['DateVal'].min(), case_reports['DateVal'].max()]
-    data_dates = np.linspace(data_range[0], data_range[1], np.timedelta64(1, 'D'))
+    data_range = [case_reports['DateVal'].to_numpy().min(), case_reports['DateVal'].to_numpy().max()]
+    one_day = np.timedelta64(1, 'D')
+    data_dates = np.arange(data_range[0], data_range[1]+one_day, one_day)
     marks = plt.plot(data_dates, case_reports['CumCases'].to_numpy(), '+', label='Observed cases')
     plt.legend([ti_line[0], rem_line[0], ro_line[0], filler, marks[0]],
                ["Infected", "Removed", "Predicted detections", "95% credible interval", "Observed counts"])
@@ -44,7 +44,7 @@ def plot_prediction(prediction_period, sims, case_reports):
 def plot_case_incidence(dates, sims):
 
     # Number of new cases per day
-    new_cases = sims[:, :, 3, :].sum(axis=2)
+    new_cases = sims[:, :, :, 3].sum(axis=2)
     new_cases = new_cases[:, 1:] - new_cases[:, :-1]
 
     new_cases = tfs.percentile(new_cases,  q=[2.5, 50, 97.5], axis=0)/10000.

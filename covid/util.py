@@ -10,8 +10,7 @@ tfs = tfp.stats
 
 def sanitise_parameter(par_dict):
     """Sanitises a dictionary of parameters"""
-    par = ['omega', 'beta1', 'beta2', 'nu', 'gamma']
-    d = {key: np.float64(par_dict[key]) for key in par}
+    d = {key: np.float64(val) for key, val in par_dict.items()}
     return d
 
 

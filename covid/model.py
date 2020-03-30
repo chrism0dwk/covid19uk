@@ -124,7 +124,8 @@ class CovidUKODE(CovidUK):
 
         def h_fn(t, state):
 
-            S, E, I, R = tf.unstack(state, axis=-1)
+            state_ = tf.transpose(state)
+            S, E, I, R = tf.unstack(state_, axis=0)
             # Integrator may produce time values outside the range desired, so
             # we clip, implicitly assuming the outside dates have the same
             # holiday status as their nearest neighbors in the desired range.
@@ -135,21 +136,22 @@ class CovidUKODE(CovidUK):
             infec_rate = param['beta1'] * (
                 tf.gather(self.M.matvec(I), m_switch) +
                 param['beta2'] * self.Kbar * commute_volume * self.C.matvec(I / self.N_sum))
-            infec_rate = infec_rate / self.N
+            infec_rate = S * infec_rate / self.N
 
-            SE = infec_rate
-            EI = param['nu']
-            IR = param['gamma']
+            dS = -infec_rate
+            dE = infec_rate - param['nu'] * E
+            dI = param['nu'] * E - param['gamma'] * I
+            dR = param['gamma'] * I
 
-            p = 1 - tf.exp(tf.stack([SE, EI, IR], axis=-1))
-            return p
+            df = tf.stack([dS, dE, dI, dR], axis=-1)
+            return df
 
         return h_fn
 
     def simulate(self, param, state_init, solver_state=None):
         h = self.make_h(param)
         t = np.arange(self.times.shape[0])
-        results = self.solver.solve(ode_fn=h, initial_time=t[0], initial_state=state_init,
+        results = self.solver.solve(ode_fn=h, initial_time=t[0], initial_state=state_init * param['I0'],
                                     solution_times=t, previous_solver_internal_state=solver_state)
         return results.times, results.states, results.solver_internal_state
 
@@ -169,13 +171,15 @@ class CovidUKODE(CovidUK):
         return tf.squeeze(R0), i
 
 
-def covid19uk_logp(y, sim, phi):
+def covid19uk_logp(y, sim, phi, r):
         # Sum daily increments in removed
         r_incr = sim[1:, :, 3] - sim[:-1, :, 3]
         r_incr = tf.reduce_sum(r_incr, axis=-1)
-        y_ = tfp.distributions.Poisson(rate=phi*r_incr)
+        # Poisson(\lambda) = \lim{r\rightarrow \infty} NB(r, \frac{\lambda}{r + \lambda})
+        #y_ = tfp.distributions.Poisson(rate=phi*r_incr)
+        lambda_ = r_incr * phi
+        y_ = tfp.distributions.NegativeBinomial(r, probs=lambda_/(r+lambda_))
         return y_.log_prob(y)
-
 
 
 class CovidUKStochastic(CovidUK):
