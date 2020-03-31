@@ -41,9 +41,10 @@ def plot_prediction(prediction_period, sims, case_reports):
     plt.show()
 
 
-def plot_case_incidence(dates, sims):
+def plot_case_incidence(date_range, sims):
 
     # Number of new cases per day
+    dates = np.arange(date_range[0], date_range[1])
     new_cases = sims[:, :, :, 3].sum(axis=2)
     new_cases = new_cases[:, 1:] - new_cases[:, :-1]
 
