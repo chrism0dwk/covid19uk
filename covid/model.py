@@ -79,14 +79,15 @@ class CovidUK:
                  time_step: np.int64):
         """Represents a CovidUK ODE model
 
-        :param K_tt: a MxM matrix of age group mixing in term time
-        :param K_hh: a MxM matrix of age group mixing in holiday time
+        :param M_tt: a MxM matrix of age group mixing in term time
+        :param M_hh: a MxM matrix of age group mixing in holiday time
         :param W: Commuting volume
-        :param date_range: a time range [start, end)
-        :param holidays: a list of length-2 tuples containing dates of holidays
         :param C: a n_ladsxn_lads matrix of inter-LAD commuting
         :param N: a vector of population sizes in each LAD
-        :param n_lads: the number of LADS
+        :param date_range: a time range [start, end)
+        :param holidays: a list of length-2 tuples containing dates of holidays
+        :param lockdown: a length-2 tuple of start and end of lockdown measures
+        :param time_step: a time step to use in the discrete time simulation
         """
         dtype = dtype_util.common_dtype([M_tt, M_hh, W, C, N], dtype_hint=np.float64)
         self.n_ages = M_tt.shape[0]
