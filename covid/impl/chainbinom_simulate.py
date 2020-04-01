@@ -26,22 +26,14 @@ def chain_binomial_propagate(h, time_step):
         counts = tf.zeros(markov_transition.shape[:-1].as_list() + [0],
                           dtype=markov_transition.dtype)
         total_count = state
-        # This for loop is ok because there are (currently) only 4 states (SEIR)
-        # and we're only actually creating work for 3 of them. Even for as many
-        # as a ~10 states it should probably be fine, just increasing the size
-        # of the graph a bit.
-        for i in range(num_states - 1):
-          probs = markov_transition[..., :, i]
-          binom = tfd.Binomial(
-              total_count=total_count,
-              probs=tf.clip_by_value(probs / (1. - prev_probs), 0., 1.))
-          sample = binom.sample()
-          counts = tf.concat([counts, sample[..., tf.newaxis]], axis=-1)
-          total_count -= sample
-          prev_probs += probs
+        samples = draw_sample_iterated_binomial_tf_while(
+            [],
+            num_classes=markov_transition.shape[-1],
+            probs=markov_transition,
+            num_trials=state,
+            seed=42)
+        new_state = tf.reduce_sum(samples, axis=-2)
 
-        counts = tf.concat([counts, total_count[..., tf.newaxis]], axis=-1)
-        new_state = tf.reduce_sum(counts, axis=-2)
         return new_state
     return propagate_fn
 
@@ -62,3 +54,31 @@ def chain_binomial_simulate(hazard_fn, state, start, end, time_step):
       return i + 1, state, output
     _, state, output = tf.while_loop(cond, body, loop_vars=(0, state, output))
     return times, output.stack()
+
+
+def draw_sample_iterated_binomial_tf_while(
+    sample_shape, num_classes, probs, num_trials, seed):
+  dtype = probs.dtype
+  num_trials = tf.cast(num_trials, dtype)
+  num_trials += tf.zeros_like(probs[..., 0])  # Pre-broadcast
+  def fn(state, accum):
+    i, num_trials, consumed_prob = state
+    probs_here = tf.gather(probs, i, axis=-1)
+    binomial_probs = tf.clip_by_value(probs_here / (1. - consumed_prob), 0, 1)
+    binomial = tfd.Binomial(
+        total_count=num_trials,
+        probs=binomial_probs)
+    sample = binomial.sample(sample_shape)
+    accum = accum.write(i, sample)
+    return (i + 1, num_trials - sample, consumed_prob + probs_here), accum
+
+  i = tf.constant(0)
+  consumed_prob = tf.zeros_like(probs[..., 0])
+  accum = tf.TensorArray(dtype=dtype, size=probs.shape[-1])
+  _, accum = tf.while_loop(cond=lambda state, _: tf.less(state[0], probs.shape[-1]),
+                           body=fn,
+                           loop_vars=((i, num_trials, consumed_prob), accum))
+  stacked = accum.stack()
+  indices = tf.range(tf.rank(stacked))
+  perm = tf.concat([indices[1:], indices[:1]], axis=0)
+  return tf.transpose(accum.stack(), perm=perm)
