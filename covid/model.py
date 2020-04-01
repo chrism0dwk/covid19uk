@@ -4,10 +4,14 @@ import tensorflow_probability as tfp
 from tensorflow_probability.python.internal import dtype_util
 import numpy as np
 
+from covid.rdata import load_mobility_matrix, load_population, load_age_mixing
+from covid.pydata import load_commute_volume
 from covid.impl.chainbinom_simulate import chain_binomial_simulate
 
 tode = tfp.math.ode
 tla = tf.linalg
+
+DTYPE = np.float64
 
 
 def power_iteration(A, tol=1e-3):
@@ -36,6 +40,30 @@ def dense_to_block_diagonal(A, n_blocks):
     eye = tf.linalg.LinearOperatorIdentity(n_blocks, dtype=A.dtype)
     A_block = tf.linalg.LinearOperatorKronecker([eye, A_dense])
     return A_block
+
+
+def load_data(paths, settings, dtype=DTYPE):
+    M_tt, age_groups = load_age_mixing(paths['age_mixing_matrix_term'])
+    M_hh, _ = load_age_mixing(paths['age_mixing_matrix_hol'])
+
+    C, la_names = load_mobility_matrix(paths['mobility_matrix'])
+    np.fill_diagonal(C, 0.)
+
+    w_period = [settings['inference_period'][0], settings['prediction_period'][1]]
+    W = load_commute_volume(paths['commute_volume'], w_period)['percent']
+
+    pop = load_population(paths['population_size'])
+
+    M_tt = M_tt.astype(DTYPE)
+    M_hh = M_hh.astype(DTYPE)
+    C = C.astype(DTYPE)
+    W = W.astype(DTYPE)
+    pop['n'] = pop['n'].astype(DTYPE)
+
+    return {'M_tt': M_tt, 'M_hh': M_hh,
+            'C': C, 'la_names': la_names,
+            'age_groups': age_groups,
+            'W': W, 'pop': pop}
 
 
 class CovidUK:
@@ -103,17 +131,17 @@ class CovidUK:
 
     def create_initial_state(self, init_matrix=None):
         if init_matrix is None:
-            I = np.zeros(self.N.shape, dtype=np.float64)
+            I = np.zeros(self.N.shape, dtype=DTYPE)
             I[149*17+10] = 30.  # Middle-aged in Surrey
         else:
             np.testing.assert_array_equal(init_matrix.shape, [self.n_lads, self.n_ages],
                                           err_msg=f"init_matrix does not have shape [<num lads>,<num ages>] \
                                           ({self.n_lads},{self.n_ages})")
-            I = init_matrix.flatten()
+            I = tf.reshape(init_matrix, [-1])
         S = self.N - I
-        E = np.zeros(self.N.shape, dtype=np.float64)
-        R = np.zeros(self.N.shape, dtype=np.float64)
-        return np.stack([S, E, I, R], axis=-1)
+        E = tf.zeros(self.N.shape, dtype=DTYPE)
+        R = tf.zeros(self.N.shape, dtype=DTYPE)
+        return tf.stack([S, E, I, R], axis=-1)
 
 
 class CovidUKODE(CovidUK):
@@ -127,8 +155,7 @@ class CovidUKODE(CovidUK):
 
         def h_fn(t, state):
 
-            state_ = tf.transpose(state)
-            S, E, I, R = tf.unstack(state_, axis=0)
+            S, E, I, R = tf.unstack(state, axis=-1)
             # Integrator may produce time values outside the range desired, so
             # we clip, implicitly assuming the outside dates have the same
             # holiday status as their nearest neighbors in the desired range.
@@ -156,7 +183,7 @@ class CovidUKODE(CovidUK):
     def simulate(self, param, state_init, solver_state=None):
         h = self.make_h(param)
         t = np.arange(self.times.shape[0])
-        results = self.solver.solve(ode_fn=h, initial_time=t[0], initial_state=state_init * param['I0'],
+        results = self.solver.solve(ode_fn=h, initial_time=t[0], initial_state=state_init,
                                     solution_times=t, previous_solver_internal_state=solver_state)
         return results.times, results.states, results.solver_internal_state
 

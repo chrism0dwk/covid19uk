@@ -1,4 +1,4 @@
-%% LyX 2.2.4 created this file.  For more info, see http://www.lyx.org/.
+% LyX 2.2.4 created this file.  For more info, see http://www.lyx.org/.
 %% Do not edit unless you really know what you are doing.
 \documentclass[english]{article}
 \usepackage[T1]{fontenc}
@@ -94,30 +94,65 @@ number of individual in each age-group-LAD combination at time $t$
 by the vectors $\vec{S}(t),\vec{E}(t),\vec{I}(t),\vec{R}(t)$. We
 therefore have
 \begin{align*}
-\frac{\mathrm{d\vec{S}(t)}}{dt} & =-\beta_{1}\left[M^{\star}\vec{I}(t)+\beta_{2}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}\\
-\frac{\mathrm{d}\vec{E}(t)}{dt} & =\beta_{1}\left[M^{\star}\vec{I}(t)+\beta_{2}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}-\nu\vec{E}(t)\\
+\frac{\mathrm{d\vec{S}(t)}}{dt} & =-\epsilon\frac{\vec{S}(t)}{N}-\beta_{t}\left[M^{\star}\vec{I}(t)+\beta_{2}w_{t}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}\\
+\frac{\mathrm{d}\vec{E}(t)}{dt} & =\epsilon\frac{\vec{S}(t)}{N}+\beta_{t}\left[M^{\star}\vec{I}(t)+\beta_{2}w_{t}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}-\nu\vec{E}(t)\\
 \frac{\mathrm{d}\vec{I}(t)}{dt} & =\nu\vec{E}(t)-\gamma\vec{I}(t)\\
 \frac{\mathrm{d}\vec{R}(t)}{dt} & =\gamma\vec{I}(t)
 \end{align*}
-where $\bar{M}$ is the global mean person-person contact rate. Parameters
-are: baseline infection rate $\beta_{1}$, commuting infection ratio
-$\beta_{2}$, latent period $\frac{1}{\nu}$, and infectious period
-$\frac{1}{\gamma}$. Typically, we assume that contact with commuters
-is $\beta_{2}=\frac{1}{3}$ of that between members of the same age-LAD
-combination assuming an 8 hour working day.
+where $\bar{M}$ is the global mean person-person contact rate, and
+$w_{t}$ is the total rail ticket sales in the UK expressed as a fraction
+of the 2019 mean (a proxy for reduction in travel). Parameters are: 
 
-\subsection{Noise model (under construction)}
+\[
+\epsilon_{t}=\begin{cases}
+\epsilon_{0} & \mbox{if}t<T_{b}\\
+0 & \mbox{otherwise}
+\end{cases}
+\]
+
+with $T_{b}$ a time beyond which imports to the UK are considered
+to cease; 
+\begin{align*}
+\beta_{t} & =\begin{cases}
+\beta_{1} & \mbox{if }t<T_{L}\\
+\beta_{1}\beta_{3} & \mbox{otherwise }
+\end{cases}\\
+\end{align*}
+with $T_{L}$ the date of lock-down restrictions, $\beta_{1}$ a baseline
+transmisison rate, and $\beta_{3}$ giving the ratio of post-lockdown
+to pre-lockdown transmission; commuting infection ratio $\beta_{2}$;
+latent period $\frac{1}{\nu}=4$days; and infectious period $\frac{1}{\gamma}$.
+Typically, we assume that contact with commuters is $\beta_{2}=\frac{1}{3}$
+of that between members of the same age-LAD combination assuming an
+8 hour working day.
+
+\subsection{Noise model}
 
 Currently, and subject to discussion, we assume that all detected
 cases are synonymous with individuals transitioning $I\rightarrow R$.
 We assume the number of new cases in each age-LAD combination are
 given by
 \[
-y_{ik}(t)\sim\mbox{Poisson}\left(R_{ik}(t)-R_{ik}(t-1)\right)
+y_{ik}(t)\sim\mbox{Negative Binomial}\left(r,\phi(R_{ik}(t)-R_{ik}(t-1))\right)
 \]
 
-This could be relaxed to a Negative Binomial distribution to account
-for Poisson overdispersion.
+where $\phi$ is the case reporting fraction (i.e. proportion of infections
+that are eventually detected) and $r$ is an overdispersion parameter.
+
+\subsection{Inference}
+
+We are interested in making inference on $\epsilon_{0},\beta_{1}$,
+and $\gamma$. Priors are currently:
+\begin{align*}
+\epsilon_{0} & \sim\mbox{Gamma}(1,1)\\
+\beta_{1} & \sim\mbox{Gamma}(1,1)\\
+\beta_{3} & \sim\mbox{Gamma}(20,20)\\
+\gamma & \sim\mbox{Gamma}(10,40)\\
+r & \sim\mbox{\mbox{Gamma}(}0.1,0.1)
+\end{align*}
+specified to express relative ignorance about $\epsilon_{0}$ , $\beta_{1}$,
+and $r$, strong information on $\beta_{3}$ and $r$, and a belief
+that the infectious period should be approximately 4 days.
 
 \subsection{Implementation}
 
@@ -127,4 +162,6 @@ class provided by Tensorflow Probability 0.9. Code may be found at
 \url{http://fhm-chicas-code.lancs.ac.uk/jewell/covid19uk}.
 
 The code is a work in progress \textendash{} see README.
+
+\section{Results}
 \end{document}

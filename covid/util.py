@@ -29,7 +29,7 @@ def seed_areas(N, names, age_group=8, num_la=152, num_age=17, n_seed=30.):
              'West Midlands (Met County)',
              'Greater Manchester (Met County)']
 
-    names_matrix = names['Area.name.2'].to_numpy().reshape([num_la, num_age])
+    names_matrix = names.to_numpy().reshape([num_la, num_age])
 
     seed_areas = np.in1d(names_matrix[:, age_group], areas)
     N_matrix = N.reshape([num_la, num_age])  # LA x Age
@@ -110,7 +110,7 @@ def save_sims(dates, sims, la_names, age_groups, filename):
     dset_sim = f.create_dataset('prediction', data=sims, compression='gzip', compression_opts=4)
     la_long = np.repeat(la_names, age_groups.shape[0]).astype(np.string_)
     age_long = np.tile(age_groups, la_names.shape[0]).astype(np.string_)
-    dset_dims = f.create_dataset("dimnames", data=[b'sim_id', b't', b'state', b'la_age'])
+    dset_dims = f.create_dataset("dimnames", data=[b'sim_id', b't', b'la_age', b'state'])
     dset_la = f.create_dataset('la_names', data=la_long)
     dset_age = f.create_dataset('age_names', data=age_long)
     dset_times = f.create_dataset('date', data=dates.astype(np.string_))

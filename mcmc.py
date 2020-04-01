@@ -1,15 +1,13 @@
 import optparse
-import yaml
-import time
 import pickle as pkl
-from tensorflow_probability import distributions as tfd
-from tensorflow_probability import bijectors as tfb
+import time
+
 import matplotlib.pyplot as plt
+import yaml
+from tensorflow_probability import bijectors as tfb
+from tensorflow_probability import distributions as tfd
 
-
-from covid.rdata import load_population, load_age_mixing, load_mobility_matrix
-from covid.pydata import load_commute_volume
-from covid.model import CovidUKODE, covid19uk_logp
+from covid.model import CovidUKODE, covid19uk_logp, load_data
 from covid.util import *
 
 DTYPE = np.float64
@@ -43,23 +41,7 @@ if __name__ == '__main__':
     param = sanitise_parameter(config['parameter'])
     settings = sanitise_settings(config['settings'])
 
-    K_tt, age_groups = load_age_mixing(config['data']['age_mixing_matrix_term'])
-    K_hh, _ = load_age_mixing(config['data']['age_mixing_matrix_hol'])
-
-    T, la_names = load_mobility_matrix(config['data']['mobility_matrix'])
-    np.fill_diagonal(T, 0.)
-
-    W = load_commute_volume(config['data']['commute_volume'], settings['inference_period'])['percent']
-
-    N, n_names = load_population(config['data']['population_size'])
-
-    K_tt = K_tt.astype(DTYPE)
-    K_hh = K_hh.astype(DTYPE)
-    W = W.to_numpy().astype(DTYPE)
-    T = T.astype(DTYPE)
-    N = N.astype(DTYPE)
-
-
+    data = load_data(config['data'], settings)
 
     case_reports = pd.read_csv(config['data']['reported_cases'])
     case_reports['DateVal'] = pd.to_datetime(case_reports['DateVal'])
@@ -68,18 +50,17 @@ if __name__ == '__main__':
     y = case_reports['CumCases'].to_numpy()
     y_incr = np.round((y[1:] - y[:-1]) * 0.8)
 
-    simulator = CovidUKODE(
-        M_tt=K_tt,
-        M_hh=K_hh,
-        C=T,
-        W=W,
-        N=N,
-        date_range=[date_range[0]-np.timedelta64(1,'D'), date_range[1]],
-        holidays=settings['holiday'],
-        lockdown=settings['lockdown'],
-        time_step=int(settings['time_step']))
+    simulator = CovidUKODE(M_tt=data['M_tt'],
+                           M_hh=data['M_hh'],
+                           C=data['C'],
+                           N=data['pop']['n'].to_numpy(),
+                           W=data['W'].to_numpy(),
+                           date_range=[date_range[0] - np.timedelta64(1, 'D'), date_range[1]],
+                           holidays=settings['holiday'],
+                           lockdown=settings['lockdown'],
+                           time_step=int(settings['time_step']))
 
-    seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
+    seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     def logp(par):
@@ -90,11 +71,12 @@ if __name__ == '__main__':
         p['I0'] = par[3]
         p['r'] = par[4]
         beta_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE), rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
-        beta3_logp = tfd.Gamma(concentration=tf.constant(20., dtype=DTYPE),
-                               rate=tf.constant(20., dtype=DTYPE)).log_prob(p['beta3'])
+        beta3_logp = tfd.Gamma(concentration=tf.constant(200., dtype=DTYPE),
+                               rate=tf.constant(200., dtype=DTYPE)).log_prob(p['beta3'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE), rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
         I0_logp = tfd.Gamma(concentration=tf.constant(1.5, dtype=DTYPE), rate=tf.constant(0.05, dtype=DTYPE)).log_prob(p['I0'])
         r_logp = tfd.Gamma(concentration=tf.constant(0.1, dtype=DTYPE), rate=tf.constant(0.1, dtype=DTYPE)).log_prob(p['gamma'])
+        state_init = simulator.create_initial_state(init_matrix=seeding * p['I0'])
         t, sim, solve = simulator.simulate(p, state_init)
         y_logp = covid19uk_logp(y_incr, sim, 0.1, p['r'])
         logp = beta_logp + beta3_logp + gamma_logp + I0_logp + r_logp + tf.reduce_sum(y_logp)

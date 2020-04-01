@@ -38,4 +38,4 @@ def load_population(rds_file: str):
     raw = pyr.read_r(rds_file)
     df = list(raw.values())[0]
     df = df.sort_values(by=['LA.code', 'age'])
-    return df['n'].to_numpy(dtype=np.float32), df[['name', 'Area.name.2']]
+    return df[['LA.code', 'name', 'Area.name.2', 'age', 'n']]

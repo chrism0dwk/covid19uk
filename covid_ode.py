@@ -1,14 +1,14 @@
 import optparse
 import time
-import sys
 
 import h5py
 import matplotlib.pyplot as plt
+import numpy as np
+import tensorflow as tf
 import yaml
 
 from covid.model import CovidUKODE
-from covid.rdata import *
-from covid.pydata import load_commute_volume
+from covid.model import load_data
 from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 
 
@@ -113,8 +113,8 @@ def draw_figs(sim, N):
 
     # TotalUK epidemic curve by age-group
     fig, ax = plt.subplots(1, 2, figsize=[24, 12])
-    plot_by_la(sim, la_names, ax=ax[0])
-    plot_by_age(sim, age_groups, ax=ax[1])
+    plot_by_la(sim, data['la_names'], ax=ax[0])
+    plot_by_age(sim, data['age_groups'], ax=ax[1])
     ax[1].legend()
     plt.xticks(rotation=45, horizontalalignment="right")
     fig.autofmt_xdate()
@@ -123,7 +123,7 @@ def draw_figs(sim, N):
 
     # Plot attack rate
     plt.figure(figsize=[4, 2])
-    plt.plot(age_groups, attack_rate, 'o-')
+    plt.plot(data['age_groups'], attack_rate, 'o-')
     plt.xticks(rotation=90)
     plt.title('Age-specific attack rate')
     plt.savefig('age_attack_rate.pdf')
@@ -144,7 +144,7 @@ def plot_age_attack_rate(ax, sim, N, label):
     Ns = N.reshape([152, 17]).sum(axis=0)
     fs = final_size(sim.numpy())
     attack_rate = fs / Ns
-    ax.plot(age_groups, attack_rate, 'o-', label=label)
+    ax.plot(data['age_groups'], attack_rate, 'o-', label=label)
 
 
 if __name__ == '__main__':
@@ -157,31 +157,38 @@ if __name__ == '__main__':
     with open(options.config, 'r') as ymlfile:
         config = yaml.load(ymlfile)
 
-    K_tt, age_groups = load_age_mixing(config['data']['age_mixing_matrix_term'])
-    K_hh, _ = load_age_mixing(config['data']['age_mixing_matrix_hol'])
-
-    T, la_names = load_mobility_matrix(config['data']['mobility_matrix'])
-    np.fill_diagonal(T, 0.)
-
-    N, n_names = load_population(config['data']['population_size'])
-
     param = sanitise_parameter(config['parameter'])
     settings = sanitise_settings(config['settings'])
 
-    model = CovidUKODE(K_tt, K_hh, T, N, settings['start'], settings['end'], settings['holiday'],
-                       settings['bg_max_time'], 1)
+    data = load_data(config['data'], settings)
 
-    seeding = seed_areas(N, n_names)  # Seed 40-44 age group, 30 seeds by popn size
+    model = CovidUKODE(M_tt=data['M_tt'],
+                       M_hh=data['M_hh'],
+                       C=data['C'],
+                       N=data['pop']['n'].to_numpy(),
+                       W=data['W'].to_numpy(),
+                       date_range=settings['prediction_period'],
+                       holidays=settings['holiday'],
+                       lockdown=settings['lockdown'],
+                       time_step=1)
+
+    seeding = seed_areas(data['pop']['n'].to_numpy(),
+                         data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
     state_init = model.create_initial_state(init_matrix=seeding)
 
     print('R0_term=', model.eval_R0(param))
 
+    @tf.function(autograph=False, experimental_compile=True)
+    def compiled_sim():
+        return model.simulate(param, state_init)
+
     start = time.perf_counter()
-    t, sim, _ = model.simulate(param, state_init)
+    t, sim, _ = compiled_sim()
     end = time.perf_counter()
     print(f'Complete in {end - start} seconds')
 
-    dates = settings['start'] + t.numpy().astype(np.timedelta64)
+    dates = np.arange(settings['prediction_period'][0], settings['prediction_period'][1],
+                      np.timedelta64(1, 'D'))
     dt = doubling_time(dates, sim.numpy(), '2020-03-01', '2020-03-31')
     print(f"Doubling time: {dt}")
 
@@ -189,7 +196,7 @@ if __name__ == '__main__':
     fig_attack = plt.figure()
     fig_uk = plt.figure()
 
-    plot_age_attack_rate(fig_attack.gca(), sim, N, "Attack Rate")
+    plot_age_attack_rate(fig_attack.gca(), sim, data['pop']['n'].to_numpy(), "Attack Rate")
     fig_attack.suptitle("Attack Rate")
     plot_infec_curve(fig_uk.gca(), sim.numpy(), "Infections")
     fig_uk.suptitle("UK Infections")
