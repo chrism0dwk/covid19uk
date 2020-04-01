@@ -35,8 +35,9 @@ if __name__ == '__main__':
     parser.add_option("--config", "-c", dest="config", default="ode_config.yaml",
                       help="configuration file")
     options, args = parser.parse_args()
+    
     with open(options.config, 'r') as ymlfile:
-        config = yaml.load(ymlfile)
+        config = yaml.safe_load(ymlfile)
 
     param = sanitise_parameter(config['parameter'])
     settings = sanitise_settings(config['settings'])
@@ -133,6 +134,7 @@ if __name__ == '__main__':
     step_start = time.perf_counter()
     samples, results = sample(num_final_samples,
                               init_state=joint_posterior[-1, :], scale=scale,)
+    
     joint_posterior = tf.concat([joint_posterior, samples], axis=0)
     step_end = time.perf_counter()
     print(f'Sampling step time {step_end - step_start}')
@@ -147,6 +149,7 @@ if __name__ == '__main__':
 
     plt.show()
     print(f"Posterior mean: {np.mean(joint_posterior, axis=0)}")
+    print(f"ESS: {tfp.mcmc.effective_sample_size(samples)}")
 
     with open('pi_beta_2020-03-29.pkl', 'wb') as f:
         pkl.dump(joint_posterior, f)
