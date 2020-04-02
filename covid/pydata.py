@@ -1,8 +1,12 @@
 """Python-based data munging"""
 
+import os
+from warnings import warn
+
+import geopandas as gp
 import numpy as np
 import pandas as pd
-import geopandas as gp
+import pyreadr as pyr
 
 
 def load_commute_volume(filename, date_range):
@@ -80,22 +84,111 @@ def phe_death_hosp_to_death(filename, date_range=['2020-02-02', '2020-03-21']):
     return data.dropna(axis=0)
 
 
-def phe_linelist_timeseries(filename, date_range):
+def phe_linelist_timeseries(filename, spec_date='specimen_date', utla='UTLA_code', age='Age',
+                            date_range=None):
 
-    linelist = pd.read_excel(filename)
-    linelist['age_group'] = (linelist['Age_in_Years'] // 5)  # id of 5-year age group
-    cols = ['patienttable_Specimen_Date', 'UTLA Code', 'age_group']
-    missing = linelist[cols].apply(lambda x: np.sum(x.isna()), axis=0)
-    missingness = {k: v for k, v in zip(cols, missing)}
-    grouped = linelist.groupby(cols)
-    case_counts = grouped.size()
-    print("Missing:", missingness)
+    linelist = pd.read_csv(filename)
+    linelist = linelist[[spec_date, utla, age]]
+
+    # 1. clip dates
+    one_day = np.timedelta64(1, 'D')
+    linelist[spec_date] = pd.to_datetime(linelist[spec_date])
+    date_range = date_range or [linelist[spec_date].min(), linelist[spec_date].max()]
+    linelist = linelist[(date_range[0] <= linelist[spec_date]) & (linelist[spec_date] <= date_range[1])]
+    raw_len = linelist.shape[0]
+
+    # 2. Remove NA rows
+    linelist = linelist.dropna(axis=0)  # remove na's
+    warn(f"Removed {raw_len - linelist.shape[0]} rows of {raw_len} due to missing data \
+({100. * (raw_len - linelist.shape[0])/raw_len}%)")
+
+    # 3. Create age groups
+    linelist['age_group'] = np.clip(linelist[age] // 5, a_min=0, a_max=80).astype(np.int64)  # id of 5-year age group
+
+    # 4. Group by UTLA/age
+    case_counts = linelist.groupby([spec_date, utla, 'age_group']).size()
+    case_counts.sort_index(axis=0, inplace=True)
+
     return case_counts
 
 
-def spatial_report(cases, utla_geom):
-    pass
+def collapse_commute_data(flow_file):
+    """Collapses LTLA-based commuting data in England to UTLA areas.
 
+    Merges commuting data at LTLA areal basis onto modified UTLA Dec 2019 area.
+
+    Modifications:
+    E06000052, E06000053 combined
+    E09000001, E09000033 combined
+    """
+    filedir = os.path.dirname(os.path.abspath(__file__))
+    commuting = list(pyr.read_r(flow_file).values())[0]
+    lt_map = pd.read_csv(filedir + '/../data/Lower_Tier_Local_Authority_to_Upper_Tier_Local_Authority_April_2019_Lookup_in_England_and_Wales.csv')
+    lt_map = lt_map[['LTLA19CD', 'UTLA19CD']]
+
+    # 1. Extract England
+    commuting = commuting[commuting['From'].str.startswith('E') & commuting['To'].str.startswith('E')]
+
+    # 1. Merge in lt_map on 'From' field
+    def merge(left, right, left_on, right_on, new_cols):
+        merged = left.merge(right, how='left', left_on=left_on, right_on=right_on)
+        colnames = merged.columns.to_numpy()
+        colnames[-len(new_cols):] = new_cols
+        merged.columns = pd.Index(colnames)
+        return merged
+
+    commuting = merge(commuting, lt_map, 'From', 'LTLA19CD', ['from_ltla', 'from_utla'])
+    commuting = merge(commuting, lt_map, 'To', 'LTLA19CD', ['to_ltla', 'to_utla'])
+
+    # 2. Fix up collapsed UTLAs
+    commuting.loc[commuting['From'].str.contains(','), 'from_utla'] = commuting.loc[
+        commuting['From'].str.contains(','), 'From']
+    commuting.loc[commuting['To'].str.contains(','), 'to_utla'] = commuting.loc[
+        commuting['To'].str.contains(','), 'To']
+
+    # 3. Collapse data
+    collapsed = commuting.groupby(['from_utla', 'to_utla']).agg({'Flow': sum})
+    collapsed.sort_index(inplace=True)
+    collapsed.reset_index(inplace=True)
+
+    # 4. Pivot to return a matrix
+    commute_matrix = collapsed.pivot(index='to_utla', columns='from_utla', values='Flow')
+    commute_matrix[commute_matrix.isna()] = 0.0
+
+    return commute_matrix
+
+
+def collapse_pop(pop_file):
+    """Aggregates LTLA2019 population data to UTLA2019 and 5-year age groups to 80+"""
+    filedir = os.path.dirname(os.path.abspath(__file__))
+    pop = pd.read_csv(pop_file)
+    pop = pop[pop['lad19cd'].str.startswith('E')]
+
+    lt_map = pd.read_csv(filedir + '/../data/Lower_Tier_Local_Authority_to_Upper_Tier_Local_Authority_April_2019_Lookup_in_England_and_Wales.csv')
+
+    # 1. Merge LADs
+    pop = pop.merge(lt_map['UTLA19CD'], how='left', left_on='lad19cd', right_on=lt_map['LTLA19CD'])
+
+    # 2. Fill in merged utla codes
+    pop.loc[pop['lad19cd'].str.contains(','), 'UTLA19CD'] = pop.loc[pop['lad19cd'].str.contains(','), 'lad19cd']
+    pop.index = pd.MultiIndex.from_frame(pop[['UTLA19CD', 'lad19cd']])
+    pop.drop(columns=['lad19cd', 'UTLA19CD'], inplace=True)
+    pop.columns = np.arange(pop.shape[1]) * 5  # 5 year age groups
+    pop.sort_index(inplace=True)
+
+    # 3. Aggregate by UTLA19CD
+    pop = pop.sum(level=0)
+    pop.iloc[:, -3] = pop.iloc[:, -3:].sum(axis=1)
+    pop = pop.iloc[:, :-2]
+
+    # 4. Long format
+    pop = pop.reset_index().melt(id_vars=['UTLA19CD'], value_name='n', var_name='age_group')
+    pop.index = pd.MultiIndex.from_frame(pop[['UTLA19CD', 'age_group']])
+    pop.drop(columns=['UTLA19CD', 'age_group'], inplace=True)
+    pop.sort_index(level=0, inplace=True)
+
+    return pop
 
 if __name__=='__main__':
-    pass
+
+    commuting = collapse_commute_data()
