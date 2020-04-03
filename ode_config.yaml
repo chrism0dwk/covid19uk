@@ -3,13 +3,14 @@
 data:
   age_mixing_matrix_term: data/polymod_normal_df.rds
   age_mixing_matrix_hol: data/polymod_no_school_df.rds
-  mobility_matrix: data/movement.rds
-  population_size: data/pop.rds
+  mobility_matrix: data/mergedflows.rds
+  population_size: data/c2019modagepop.csv
   commute_volume: data/commute_vol_2020-03-27.csv
-  reported_cases: data/DailyConfirmedCases_2020-03-29.csv
+  #reported_cases: data/DailyConfirmedCases_2020-04-01.csv
+  reported_cases: /home/jewellcp/Insync/jewellcp@lancaster.ac.uk/OneDrive Biz - Shared/covid19/data/PHE_2020-04-01/Anonymised Line List 20200401.csv
 
 parameter:
-  beta1: 0.1    # R0 2.4
+  beta1: 0.05    # R0 2.4
   beta2: 0.33   # Contact with commuters 1/3rd of the time
   beta3: 1.0    # lockdown vs normal
   omega: 1.0    # Non-linearity parameter for commuting volume
@@ -21,7 +22,7 @@ parameter:
 settings:
   inference_period:
     - 2020-02-19
-    - 2020-03-30
+    - 2020-04-02
   holiday:
     - 2020-03-23
     - 2020-10-01

@@ -23,23 +23,32 @@ def sanitise_settings(par_dict):
     return d
 
 
-def seed_areas(N, names, age_group=8, num_la=152, num_age=17, n_seed=30.):
-    areas = ['Inner London',
-             'Outer London',
-             'West Midlands (Met County)',
-             'Greater Manchester (Met County)']
+def seed_areas(N, age_group=40, n_seed=30.):
+    areas = ['E09000001,E09000033', # City of London, City of Westminster
+             'E09000007', # Camden
+             'E09000012', # Hackney
+             'E09000013', # Hammersmith and Fulham
+             'E09000019', # Islington
+             'E09000020', # Kensignton and Chelsea
+             'E09000022', # Lambeth
+             'E09000023', # Lewisham
+             'E09000028', # Southwark
+             'E09000030', # Tower Hamlets
+             'E09000032', # Wandsworth
+             'E08000025', # Birmingham
+             'E08000026', # Coventry
+             'E08000029', # Solihull
+             'E08000028', # Sandwell
+             'E08000030', # Walsall
+             'E08000027', # Dudley
+             'E08000003'] # Manchester
+    weight = np.array([3.7]*11 + [1.]*7)
+    seed = weight * N.loc[areas, age_group]
+    seed = np.round(seed / seed.sum() * n_seed)
 
-    names_matrix = names.to_numpy().reshape([num_la, num_age])
-
-    seed_areas = np.in1d(names_matrix[:, age_group], areas)
-    N_matrix = N.reshape([num_la, num_age])  # LA x Age
-
-    pop_size_sub = N_matrix[seed_areas, age_group]  # Gather
-    n = np.round(n_seed * pop_size_sub / pop_size_sub.sum())
-
-    seeding = np.zeros_like(N_matrix)
-    seeding[seed_areas, age_group] = n  # Scatter
-    return seeding
+    seeding = pd.Series(np.zeros_like(N), index=N.index)
+    seeding.loc[areas, age_group] = seed  # Scatter
+    return seeding.to_numpy()
 
 
 def sum_total_removals(sim):

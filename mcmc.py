@@ -8,6 +8,7 @@ from tensorflow_probability import bijectors as tfb
 from tensorflow_probability import distributions as tfd
 
 from covid.model import CovidUKODE, covid19uk_logp, load_data
+from covid.pydata import zero_cases, phe_linelist_timeseries
 from covid.util import *
 
 DTYPE = np.float64
@@ -43,12 +44,10 @@ if __name__ == '__main__':
 
     data = load_data(config['data'], settings)
 
-    case_reports = pd.read_csv(config['data']['reported_cases'])
-    case_reports['DateVal'] = pd.to_datetime(case_reports['DateVal'])
-    case_reports = case_reports[case_reports['DateVal'] >= '2020-02-19']
-    date_range = [case_reports['DateVal'].min(), case_reports['DateVal'].max()]
-    y = case_reports['CumCases'].to_numpy()
-    y_incr = np.round((y[1:] - y[:-1]) * 0.8)
+    case_timeseries = phe_linelist_timeseries(config['data']['reported_cases'])
+    y = zero_cases(case_timeseries, data['pop'])
+
+    date_range = [y.index.levels[0].min(), y.index.levels[0].max()]
 
     simulator = CovidUKODE(M_tt=data['M_tt'],
                            M_hh=data['M_hh'],
@@ -60,7 +59,7 @@ if __name__ == '__main__':
                            lockdown=settings['lockdown'],
                            time_step=int(settings['time_step']))
 
-    seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
+    seeding = seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     def logp(par):
@@ -78,8 +77,8 @@ if __name__ == '__main__':
         r_logp = tfd.Gamma(concentration=tf.constant(0.1, dtype=DTYPE), rate=tf.constant(0.1, dtype=DTYPE)).log_prob(p['gamma'])
         state_init = simulator.create_initial_state(init_matrix=seeding * p['I0'])
         t, sim, solve = simulator.simulate(p, state_init)
-        y_logp = covid19uk_logp(y_incr, sim, 0.1, p['r'])
-        logp = beta_logp + beta3_logp + gamma_logp + I0_logp + r_logp + tf.reduce_sum(y_logp)
+        y_logp = covid19uk_logp(y, sim, 0.1, p['r'])
+        logp = beta_logp + beta3_logp + gamma_logp + I0_logp + r_logp + y_logp
         return logp
 
     def trace_fn(_, pkr):
@@ -112,9 +111,9 @@ if __name__ == '__main__':
     scale = np.diag([0.1, 0.1, 0.1, 0.1, 1.])
     overall_start = time.perf_counter()
 
-    num_covariance_estimation_iterations = 50
+    num_covariance_estimation_iterations = 20
     num_covariance_estimation_samples = 50
-    num_final_samples = 10000
+    num_final_samples = 20000
     start = time.perf_counter()
     for i in range(num_covariance_estimation_iterations):
         step_start = time.perf_counter()

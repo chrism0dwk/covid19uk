@@ -94,8 +94,8 @@ number of individual in each age-group-LAD combination at time $t$
 by the vectors $\vec{S}(t),\vec{E}(t),\vec{I}(t),\vec{R}(t)$. We
 therefore have
 \begin{align*}
-\frac{\mathrm{d\vec{S}(t)}}{dt} & =-\epsilon\frac{\vec{S}(t)}{N}-\beta_{t}\left[M^{\star}\vec{I}(t)+\beta_{2}w_{t}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}\\
-\frac{\mathrm{d}\vec{E}(t)}{dt} & =\epsilon\frac{\vec{S}(t)}{N}+\beta_{t}\left[M^{\star}\vec{I}(t)+\beta_{2}w_{t}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}-\nu\vec{E}(t)\\
+\frac{\mathrm{d\vec{S}(t)}}{dt} & =-\beta_{t}\left[M^{\star}\vec{I}(t)+\beta_{2}w_{t}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}\\
+\frac{\mathrm{d}\vec{E}(t)}{dt} & =\beta_{t}\left[M^{\star}\vec{I}(t)+\beta_{2}w_{t}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}-\nu\vec{E}(t)\\
 \frac{\mathrm{d}\vec{I}(t)}{dt} & =\nu\vec{E}(t)-\gamma\vec{I}(t)\\
 \frac{\mathrm{d}\vec{R}(t)}{dt} & =\gamma\vec{I}(t)
 \end{align*}
@@ -103,15 +103,6 @@ where $\bar{M}$ is the global mean person-person contact rate, and
 $w_{t}$ is the total rail ticket sales in the UK expressed as a fraction
 of the 2019 mean (a proxy for reduction in travel). Parameters are: 
 
-\[
-\epsilon_{t}=\begin{cases}
-\epsilon_{0} & \mbox{if}t<T_{b}\\
-0 & \mbox{otherwise}
-\end{cases}
-\]
-
-with $T_{b}$ a time beyond which imports to the UK are considered
-to cease; 
 \begin{align*}
 \beta_{t} & =\begin{cases}
 \beta_{1} & \mbox{if }t<T_{L}\\

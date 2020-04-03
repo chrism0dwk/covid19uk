@@ -58,7 +58,7 @@ if __name__ == '__main__':
                            holidays=settings['holiday'],
                            lockdown=settings['lockdown'],
                            time_step=1)
-    seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
+    seeding = seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     @tf.function
@@ -79,7 +79,7 @@ if __name__ == '__main__':
             sims = sims.write(i, sim)
         return sims.gather(range(beta.shape[0])), R0.gather(range(beta.shape[0]))
 
-    draws = pi_beta.numpy()[np.arange(5000, pi_beta.shape[0], 30), :]
+    draws = pi_beta.numpy()[np.arange(5000, pi_beta.shape[0], 60), :]
     with tf.device('/CPU:0'):
         sims, R0 = prediction(draws[:, 0], draws[:, 1], draws[:, 2], draws[:, 3], draws[:, 4])
         sims = tf.stack(sims)  # shape=[n_sims, n_times, n_metapops, n_states]

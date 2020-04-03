@@ -102,14 +102,36 @@ def phe_linelist_timeseries(filename, spec_date='specimen_date', utla='UTLA_code
     warn(f"Removed {raw_len - linelist.shape[0]} rows of {raw_len} due to missing data \
 ({100. * (raw_len - linelist.shape[0])/raw_len}%)")
 
+    # 2a. Aggregate London/Westminster and Cornwall/Scilly
+    london = ['E09000001', 'E09000033']
+    corn_scilly = ['E06000052', 'E06000053']
+    linelist.loc[linelist[utla].isin(london), utla] = ','.join(london)
+    linelist.loc[linelist[utla].isin(corn_scilly), utla] = ','.join(corn_scilly)
+
     # 3. Create age groups
-    linelist['age_group'] = np.clip(linelist[age] // 5, a_min=0, a_max=80).astype(np.int64)  # id of 5-year age group
+    linelist['age_group'] = np.clip(linelist[age] // 5, a_min=0, a_max=16).astype(np.int64) * 5  # id of 5-year age group
 
     # 4. Group by UTLA/age
     case_counts = linelist.groupby([spec_date, utla, 'age_group']).size()
     case_counts.sort_index(axis=0, inplace=True)
 
     return case_counts
+
+
+def zero_cases(case_timeseries, population):
+    """Creates a full case matrix, filling in dates, lads, and age groups not represented
+    in the main dataset.  It is explicitly assumed that missing date/lad/age combos in the
+    case_timeseries are true 0s.
+    :param case_timeseries: an indexed [date, UTLA_code, age_group] pd.Series containing case counts
+    :param population: a dataset indexed with all UTLA_codes and age_groups
+    """
+    dates = np.arange(case_timeseries.index.levels[0].min(),
+                      case_timeseries.index.levels[0].max() + np.timedelta64(1, 'D'), # inclusive interval
+                      np.timedelta64(1, 'D'))
+    fullidx = pd.MultiIndex.from_product([dates, *population.index.levels])
+    y = case_timeseries.reindex(fullidx)
+    y[y.isna()] = 0. # Big assumption that a missing value is a true 0!
+    return y
 
 
 def collapse_commute_data(flow_file):
@@ -191,4 +213,5 @@ def collapse_pop(pop_file):
 
 if __name__=='__main__':
 
-    commuting = collapse_commute_data()
+    ts = phe_linelist_timeseries('/home/jewellcp/Insync/jewellcp@lancaster.ac.uk/OneDrive Biz - Shared/covid19/data/PHE_2020-04-01/Anonymised Line List 20200401.csv')
+    print(ts)

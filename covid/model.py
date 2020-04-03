@@ -5,7 +5,7 @@ from tensorflow_probability.python.internal import dtype_util
 import numpy as np
 
 from covid.rdata import load_mobility_matrix, load_population, load_age_mixing
-from covid.pydata import load_commute_volume
+from covid.pydata import load_commute_volume, collapse_commute_data, collapse_pop
 from covid.impl.chainbinom_simulate import chain_binomial_simulate
 
 tode = tfp.math.ode
@@ -46,13 +46,15 @@ def load_data(paths, settings, dtype=DTYPE):
     M_tt, age_groups = load_age_mixing(paths['age_mixing_matrix_term'])
     M_hh, _ = load_age_mixing(paths['age_mixing_matrix_hol'])
 
-    C, la_names = load_mobility_matrix(paths['mobility_matrix'])
+    C = collapse_commute_data(paths['mobility_matrix'])
+    la_names = C.index.to_numpy()
+    C = C.to_numpy()
     np.fill_diagonal(C, 0.)
 
     w_period = [settings['inference_period'][0], settings['prediction_period'][1]]
     W = load_commute_volume(paths['commute_volume'], w_period)['percent']
 
-    pop = load_population(paths['population_size'])
+    pop = collapse_pop(paths['population_size'])
 
     M_tt = M_tt.astype(DTYPE)
     M_hh = M_hh.astype(DTYPE)
@@ -122,7 +124,8 @@ class CovidUK:
         self.N_sum = tf.reshape(N_sum, [-1])
 
         self.time_step = time_step
-        self.times = np.arange(date_range[0], date_range[1], np.timedelta64(int(time_step), 'D'))
+        one_step = np.timedelta64(int(time_step), 'D')
+        self.times = np.arange(date_range[0], date_range[1] + one_step, one_step)
 
         self.m_select = np.int64((self.times >= holidays[0]) &
                                  (self.times < holidays[1]))
@@ -135,10 +138,7 @@ class CovidUK:
             I = np.zeros(self.N.shape, dtype=DTYPE)
             I[149*17+10] = 30.  # Middle-aged in Surrey
         else:
-            np.testing.assert_array_equal(init_matrix.shape, [self.n_lads, self.n_ages],
-                                          err_msg=f"init_matrix does not have shape [<num lads>,<num ages>] \
-                                          ({self.n_lads},{self.n_ages})")
-            I = tf.reshape(init_matrix, [-1])
+            I = tf.convert_to_tensor(init_matrix, dtype=DTYPE)
         S = self.N - I
         E = tf.zeros(self.N.shape, dtype=DTYPE)
         R = tf.zeros(self.N.shape, dtype=DTYPE)
@@ -203,16 +203,18 @@ class CovidUKODE(CovidUK):
         R0 = rayleigh_quotient(ngm, dom_eigen_vec)
         return tf.squeeze(R0), i
 
-
 def covid19uk_logp(y, sim, phi, r):
-        # Sum daily increments in removed
-        r_incr = sim[1:, :, 3] - sim[:-1, :, 3]
-        r_incr = tf.reduce_sum(r_incr, axis=-1)
-        # Poisson(\lambda) = \lim{r\rightarrow \infty} NB(r, \frac{\lambda}{r + \lambda})
-        #y_ = tfp.distributions.Poisson(rate=phi*r_incr)
-        lambda_ = r_incr * phi
-        y_ = tfp.distributions.NegativeBinomial(r, probs=lambda_/(r+lambda_))
-        return y_.log_prob(y)
+    """log_probability function for case data
+    :param y: a full time/lad/age dataset of case data
+    :param sim: a simulation
+    :param phi: the case detection rate
+    :param r: negative binomial overdispersion parameter
+    """
+    # Sum daily increments in removed
+    r_incr = sim[1:, :, 3] - sim[:-1, :, 3]
+    lambda_ = tf.reshape(r_incr, [-1]) * phi
+    y_ = tfp.distributions.NegativeBinomial(r, probs=lambda_/(r+lambda_))
+    return tf.reduce_sum(y_.log_prob(y))
 
 
 class CovidUKStochastic(CovidUK):

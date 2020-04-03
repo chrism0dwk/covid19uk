@@ -11,6 +11,7 @@ from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 
 DTYPE = np.float64
 
+
 def sum_age_groups(sim):
     infec = sim[:, 2, :]
     infec = infec.reshape([infec.shape[0], 152, 17])

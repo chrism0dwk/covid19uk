@@ -21,7 +21,7 @@ def sum_age_groups(sim):
 
 def sum_la(sim):
     infec = sim[:, :, 2]
-    infec = infec.reshape([infec.shape[0], 152, 17])
+    infec = infec.reshape([infec.shape[0], 149, 17])
     infec_uk = infec.sum(axis=1)
     return infec_uk
 
@@ -33,7 +33,7 @@ def sum_total_removals(sim):
 
 def final_size(sim):
     remove = sim[:, :, 3]
-    remove = remove.reshape([remove.shape[0], 152, 17])
+    remove = remove.reshape([remove.shape[0], 149, 17])
     fs = remove[-1, :, :].sum(axis=0)
     return fs
 
@@ -141,7 +141,8 @@ def doubling_time(t, sim, t1, t2):
 
 
 def plot_age_attack_rate(ax, sim, N, label):
-    Ns = N.reshape([152, 17]).sum(axis=0)
+
+    Ns = N.sum(level=1)  # Sum over ages
     fs = final_size(sim.numpy())
     attack_rate = fs / Ns
     ax.plot(data['age_groups'], attack_rate, 'o-', label=label)
@@ -172,8 +173,7 @@ if __name__ == '__main__':
                        lockdown=settings['lockdown'],
                        time_step=1)
 
-    seeding = seed_areas(data['pop']['n'].to_numpy(),
-                         data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
+    seeding = seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
     state_init = model.create_initial_state(init_matrix=seeding)
 
     print('R0_term=', model.eval_R0(param))
@@ -196,7 +196,7 @@ if __name__ == '__main__':
     fig_attack = plt.figure()
     fig_uk = plt.figure()
 
-    plot_age_attack_rate(fig_attack.gca(), sim, data['pop']['n'].to_numpy(), "Attack Rate")
+    plot_age_attack_rate(fig_attack.gca(), sim, data['pop']['n'], "Attack Rate")
     fig_attack.suptitle("Attack Rate")
     plot_infec_curve(fig_uk.gca(), sim.numpy(), "Infections")
     fig_uk.suptitle("UK Infections")
