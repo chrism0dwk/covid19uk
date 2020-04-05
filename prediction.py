@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import h5py
 
 from covid.model import CovidUKODE, load_data
+from covid.pydata import collapse_pop, phe_linelist_timeseries, zero_cases
 from covid.util import sanitise_settings, sanitise_parameter, seed_areas, doubling_time, save_sims
 from covid.plotting import plot_prediction, plot_case_incidence
 
@@ -33,12 +34,18 @@ if __name__ == '__main__':
 
     data = load_data(config['data'], settings)
 
-    case_reports = pd.read_csv(config['data']['reported_cases'])
-    case_reports['DateVal'] = pd.to_datetime(case_reports['DateVal'])
-    case_reports = case_reports[case_reports['DateVal'] >= settings['inference_period'][0]]
-    date_range = [case_reports['DateVal'].min(), case_reports['DateVal'].max()]
-    y = case_reports['CumCases'].to_numpy()
-    y_incr = y[1:] - y[-1:]
+    # case_reports = pd.read_csv(config['data']['reported_cases'])
+    # case_reports['DateVal'] = pd.to_datetime(case_reports['DateVal'])
+    # case_reports = case_reports[case_reports['DateVal'] >= settings['inference_period'][0]]
+    # date_range = [case_reports['DateVal'].min(), case_reports['DateVal'].max()]
+    # y = case_reports['CMODateCount'].to_numpy()[1:]
+    # #y_incr = y[1:] - y[-1:]
+
+    case_timeseries = phe_linelist_timeseries(config['data']['reported_cases'])
+    y = zero_cases(case_timeseries, data['pop'])
+
+
+    date_range = [y.index.levels[0].min(), y.index.levels[0].max()]
 
     with open('pi_beta_2020-03-29.pkl', 'rb') as f:
         pi_beta = pkl.load(f)
@@ -54,11 +61,11 @@ if __name__ == '__main__':
                            N=data['pop']['n'].to_numpy(),
                            W=data['W'].to_numpy(),
                            date_range=[settings['prediction_period'][0],
-                                       settings['prediction_period'][1]],
+                                       settings['prediction_period'][1]-np.timedelta64(1, 'D')],
                            holidays=settings['holiday'],
                            lockdown=settings['lockdown'],
                            time_step=1)
-    seeding = seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
+    seeding = y[:'2020-03-09'].sum(level=[1 , 2]).to_numpy()# seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     @tf.function
@@ -86,7 +93,7 @@ if __name__ == '__main__':
         save_sims(simulator.times, sims, data['la_names'], data['age_groups'], 'pred_2020-03-29.h5')
         dub_time = [doubling_time(simulator.times, sim, '2020-03-01', '2020-04-01') for sim in sims.numpy()]
 
-        plot_prediction(settings['prediction_period'], sims, case_reports)
+        plot_prediction(settings['prediction_period'], sims, y.sum(level=0))
         plot_case_incidence(settings['prediction_period'], sims.numpy())
 
     # R0

@@ -28,10 +28,10 @@ def plot_prediction(prediction_period, sims, case_reports):
     rem_line = plt.plot(dates, removed[1, :], '-', color='blue', label="Removed")
     ro_line = plt.plot(dates, removed_observed[1, :], '-', color='orange', label='Predicted detections')
 
-    data_range = [case_reports['DateVal'].to_numpy().min(), case_reports['DateVal'].to_numpy().max()]
+    data_range = [case_reports.index.min(), case_reports.index.max()]
     one_day = np.timedelta64(1, 'D')
     data_dates = np.arange(data_range[0], data_range[1]+one_day, one_day)
-    marks = plt.plot(data_dates, case_reports['CumCases'].to_numpy(), '+', label='Observed cases')
+    marks = plt.plot(data_dates, np.cumsum(case_reports), '+', label='Observed cases')
     plt.legend([ti_line[0], rem_line[0], ro_line[0], filler, marks[0]],
                ["Infected", "Removed", "Predicted detections", "95% credible interval", "Observed counts"])
     plt.grid(color='lightgray', linestyle='dotted')

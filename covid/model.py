@@ -210,9 +210,13 @@ def covid19uk_logp(y, sim, phi, r):
     :param phi: the case detection rate
     :param r: negative binomial overdispersion parameter
     """
-    # Sum daily increments in removed
+    # Daily increments in removed
     r_incr = sim[1:, :, 3] - sim[:-1, :, 3]
+    # Sum
+    #r_incr = tf.reshape(r_incr, [r_incr.shape[0]] + [149, 17])
+    r_incr = tf.reduce_sum(r_incr, axis=1)
     lambda_ = tf.reshape(r_incr, [-1]) * phi
+    y = y.sum(level=0)
     y_ = tfp.distributions.NegativeBinomial(r, probs=lambda_/(r+lambda_))
     return tf.reduce_sum(y_.log_prob(y))
 

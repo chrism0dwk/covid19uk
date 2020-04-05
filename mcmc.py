@@ -60,7 +60,8 @@ if __name__ == '__main__':
                            time_step=int(settings['time_step']))
 
     seeding = seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
-    state_init = simulator.create_initial_state(init_matrix=seeding)
+    #seeding = y[:'2020-03-09'].sum(level=[1, 2]).to_numpy()
+    state_init = simulator.create_initial_state(init_matrix=seeding * param['I0'])
 
     def logp(par):
         p = param
@@ -70,11 +71,11 @@ if __name__ == '__main__':
         p['I0'] = par[3]
         p['r'] = par[4]
         beta_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE), rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
-        beta3_logp = tfd.Gamma(concentration=tf.constant(200., dtype=DTYPE),
-                               rate=tf.constant(200., dtype=DTYPE)).log_prob(p['beta3'])
+        beta3_logp = tfd.Gamma(concentration=tf.constant(20., dtype=DTYPE),
+                               rate=tf.constant(20., dtype=DTYPE)).log_prob(p['beta3'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE), rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
         I0_logp = tfd.Gamma(concentration=tf.constant(1.5, dtype=DTYPE), rate=tf.constant(0.05, dtype=DTYPE)).log_prob(p['I0'])
-        r_logp = tfd.Gamma(concentration=tf.constant(0.1, dtype=DTYPE), rate=tf.constant(0.1, dtype=DTYPE)).log_prob(p['gamma'])
+        r_logp = tfd.Gamma(concentration=tf.constant(10., dtype=DTYPE), rate=tf.constant(10., dtype=DTYPE)).log_prob(p['gamma'])
         state_init = simulator.create_initial_state(init_matrix=seeding * p['I0'])
         t, sim, solve = simulator.simulate(p, state_init)
         y_logp = covid19uk_logp(y, sim, 0.1, p['r'])
@@ -89,7 +90,7 @@ if __name__ == '__main__':
 
 
     unconstraining_bijector = [tfb.Exp()]
-    initial_mcmc_state = np.array([0.05, 1.0, 0.25, 1.0, 50.], dtype=np.float64)  # beta1, gamma, I0
+    initial_mcmc_state = np.array([0.05, 1.0, 0.25, 1.0, 50.0], dtype=np.float64)  # beta1, gamma, I0
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
     @tf.function(autograph=False, experimental_compile=True)
@@ -108,12 +109,12 @@ if __name__ == '__main__':
 
     joint_posterior = tf.zeros([0] + list(initial_mcmc_state.shape), dtype=DTYPE)
 
-    scale = np.diag([0.1, 0.1, 0.1, 0.1, 1.])
+    scale = np.diag([0.1, 0.1, 0.1, 0.1, 0.1])
     overall_start = time.perf_counter()
 
     num_covariance_estimation_iterations = 20
     num_covariance_estimation_samples = 50
-    num_final_samples = 20000
+    num_final_samples = 10000
     start = time.perf_counter()
     for i in range(num_covariance_estimation_iterations):
         step_start = time.perf_counter()

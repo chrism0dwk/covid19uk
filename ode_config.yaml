@@ -17,7 +17,7 @@ parameter:
   nu: 0.25      # E -> I transition rate
   gamma: 0.25   # I -> R transition rate
   I0: 1.0       # number of individuals at start of epidemic
-  r: 30.0       # Negative binomial overdispersion parameter
+  r: 10.0       # Negative binomial overdispersion parameter
 
 settings:
   inference_period:
