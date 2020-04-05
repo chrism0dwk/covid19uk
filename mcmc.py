@@ -71,8 +71,8 @@ if __name__ == '__main__':
         p['I0'] = par[3]
         p['r'] = par[4]
         beta_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE), rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
-        beta3_logp = tfd.Gamma(concentration=tf.constant(200., dtype=DTYPE),
-                               rate=tf.constant(200., dtype=DTYPE)).log_prob(p['beta3'])
+        beta3_logp = tfd.Gamma(concentration=tf.constant(20., dtype=DTYPE),
+                               rate=tf.constant(20., dtype=DTYPE)).log_prob(p['beta3'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE), rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
         I0_logp = tfd.Gamma(concentration=tf.constant(1.5, dtype=DTYPE), rate=tf.constant(0.05, dtype=DTYPE)).log_prob(p['I0'])
         r_logp = tfd.Gamma(concentration=tf.constant(0.1, dtype=DTYPE), rate=tf.constant(0.1, dtype=DTYPE)).log_prob(p['gamma'])
