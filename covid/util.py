@@ -75,12 +75,12 @@ def seed_areas(N, age_group=40, n_seed=30.):
                           'E08000010']  # Wigan
     areas = inner_london + outer_london + west_midlands + greater_manchester
     weight = np.array([3.7]*len(inner_london+outer_london) + [1.]*len(west_midlands+greater_manchester))
-    pop_size = N.loc[areas].to_numpy().reshape([len(areas), N.index.levels[1].shape[0]])
-    seed = weight[:, np.newaxis] * pop_size
-    seed = np.round(seed / seed.sum(axis=1, keepdims=True) * n_seed)
+
+    pop_size = N.loc[areas, age_group]
+    seed = np.round(n_seed * pop_size / pop_size.sum())
 
     seeding = pd.Series(np.zeros_like(N), index=N.index)
-    seeding.loc[areas] = seed.flatten()  # Scatter
+    seeding.loc[areas, age_group] = seed  # Scatter
     return seeding.to_numpy()
 
 

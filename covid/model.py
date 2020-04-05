@@ -48,8 +48,6 @@ def load_data(paths, settings, dtype=DTYPE):
 
     C = collapse_commute_data(paths['mobility_matrix'])
     la_names = C.index.to_numpy()
-    C = C.to_numpy()
-    np.fill_diagonal(C, 0.)
 
     w_period = [settings['inference_period'][0], settings['prediction_period'][1]]
     W = load_commute_volume(paths['commute_volume'], w_period)['percent']
@@ -58,7 +56,8 @@ def load_data(paths, settings, dtype=DTYPE):
 
     M_tt = M_tt.astype(DTYPE)
     M_hh = M_hh.astype(DTYPE)
-    C = C.astype(DTYPE)
+    C = C.to_numpy().astype(DTYPE)
+    np.fill_diagonal(C, 0.)
     W = W.astype(DTYPE)
     pop['n'] = pop['n'].astype(DTYPE)
 
@@ -216,7 +215,7 @@ def covid19uk_logp(y, sim, phi, r):
     #r_incr = tf.reshape(r_incr, [r_incr.shape[0]] + [149, 17])
     r_incr = tf.reduce_sum(r_incr, axis=1)
     lambda_ = tf.reshape(r_incr, [-1]) * phi
-    y = y.sum(level=0)
+    y = y.sum(level=0).to_numpy()
     y_ = tfp.distributions.NegativeBinomial(r, probs=lambda_/(r+lambda_))
     return tf.reduce_sum(y_.log_prob(y[1:]))
 
