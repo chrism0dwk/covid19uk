@@ -217,7 +217,7 @@ def covid19uk_logp(y, sim, phi, r):
     lambda_ = tf.reshape(r_incr, [-1]) * phi
     y = y.sum(level=0).to_numpy()
     y_ = tfp.distributions.NegativeBinomial(r, probs=lambda_/(r+lambda_))
-    return tf.reduce_sum(y_.log_prob(y[1:]))
+    return tf.reduce_sum(y_.log_prob(y))
 
 
 class CovidUKStochastic(CovidUK):

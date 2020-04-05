@@ -56,14 +56,14 @@ if __name__ == '__main__':
                            C=data['C'],
                            N=data['pop']['n'].to_numpy(),
                            W=data['W'].to_numpy(),
-                           date_range=[date_range[0], date_range[1]],
+                           date_range=[date_range[0] - np.timedelta64(1, 'D'), date_range[1]],
                            holidays=settings['holiday'],
                            lockdown=settings['lockdown'],
                            time_step=int(settings['time_step']))
 
     seeding = seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
     #seeding = y[:'2020-03-09'].sum(level=[1, 2]).to_numpy()
-    state_init = simulator.create_initial_state(init_matrix=seeding * param['I0'])
+    state_init = simulator.create_initial_state(init_matrix=seeding)
 
     def logp(par):
         p = param
@@ -90,7 +90,6 @@ if __name__ == '__main__':
           pkr.inner_results.accepted_results.target_log_prob,
           pkr.inner_results.accepted_results.step_size)
 
-
     unconstraining_bijector = [tfb.Exp()]
     initial_mcmc_state = np.array([0.05, 1.0, 0.25, 1.0, 50.0], dtype=np.float64)  # beta1, gamma, I0
     print("Initial log likelihood:", logp(initial_mcmc_state))
@@ -111,11 +110,11 @@ if __name__ == '__main__':
 
     joint_posterior = tf.zeros([0] + list(initial_mcmc_state.shape), dtype=DTYPE)
 
-    scale = np.diag([0.1, 0.1, 0.1, 0.1, 0.1])
+    scale = np.diag([0.1, 0.1, 0.1, 0.1, 1.0])
     overall_start = time.perf_counter()
 
     num_covariance_estimation_iterations = 20
-    num_covariance_estimation_samples = 50
+    num_covariance_estimation_samples = 100
     num_final_samples = 10000
     start = time.perf_counter()
     for i in range(num_covariance_estimation_iterations):
@@ -125,6 +124,7 @@ if __name__ == '__main__':
                                   scale)
         step_end = time.perf_counter()
         print(f'{i} time {step_end - step_start}')
+        print(samples[-1, :])
         print("Acceptance: ", results.numpy().mean())
         joint_posterior = tf.concat([joint_posterior, samples], axis=0)
         cov = tfp.stats.covariance(tf.math.log(joint_posterior))
