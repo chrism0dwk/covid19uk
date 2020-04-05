@@ -4,6 +4,7 @@ import time
 
 import matplotlib.pyplot as plt
 import yaml
+import tensorflow as tf
 from tensorflow_probability import bijectors as tfb
 from tensorflow_probability import distributions as tfd
 
