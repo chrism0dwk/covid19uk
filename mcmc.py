@@ -46,15 +46,16 @@ if __name__ == '__main__':
 
     case_timeseries = phe_linelist_timeseries(config['data']['reported_cases'])
     y = zero_cases(case_timeseries, data['pop'])
+    y = y[settings['inference_period'][0]:settings['inference_period'][1]]
 
-    date_range = [y.index.levels[0].min(), y.index.levels[0].max()]
+    date_range = settings['inference_period'] #'[y.index.levels[0].min(), y.index.levels[0].max()]
 
     simulator = CovidUKODE(M_tt=data['M_tt'],
                            M_hh=data['M_hh'],
                            C=data['C'],
                            N=data['pop']['n'].to_numpy(),
                            W=data['W'].to_numpy(),
-                           date_range=[date_range[0] - np.timedelta64(1, 'D'), date_range[1]],
+                           date_range=[date_range[0], date_range[1]],
                            holidays=settings['holiday'],
                            lockdown=settings['lockdown'],
                            time_step=int(settings['time_step']))
@@ -71,11 +72,11 @@ if __name__ == '__main__':
         p['I0'] = par[3]
         p['r'] = par[4]
         beta_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE), rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
-        beta3_logp = tfd.Gamma(concentration=tf.constant(20., dtype=DTYPE),
-                               rate=tf.constant(20., dtype=DTYPE)).log_prob(p['beta3'])
+        beta3_logp = tfd.Gamma(concentration=tf.constant(200., dtype=DTYPE),
+                               rate=tf.constant(200., dtype=DTYPE)).log_prob(p['beta3'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE), rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
         I0_logp = tfd.Gamma(concentration=tf.constant(1.5, dtype=DTYPE), rate=tf.constant(0.05, dtype=DTYPE)).log_prob(p['I0'])
-        r_logp = tfd.Gamma(concentration=tf.constant(10., dtype=DTYPE), rate=tf.constant(10., dtype=DTYPE)).log_prob(p['gamma'])
+        r_logp = tfd.Gamma(concentration=tf.constant(0.1, dtype=DTYPE), rate=tf.constant(0.1, dtype=DTYPE)).log_prob(p['gamma'])
         state_init = simulator.create_initial_state(init_matrix=seeding * p['I0'])
         t, sim, solve = simulator.simulate(p, state_init)
         y_logp = covid19uk_logp(y, sim, 0.1, p['r'])
