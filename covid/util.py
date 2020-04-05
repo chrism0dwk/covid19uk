@@ -1,10 +1,9 @@
 "Covid analysis utility functions"
 
+import h5py
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 import tensorflow_probability as tfp
-import h5py
 
 tfs = tfp.stats
 
@@ -24,30 +23,64 @@ def sanitise_settings(par_dict):
 
 
 def seed_areas(N, age_group=40, n_seed=30.):
-    areas = ['E09000001,E09000033', # City of London, City of Westminster
-             'E09000007', # Camden
-             'E09000012', # Hackney
-             'E09000013', # Hammersmith and Fulham
-             'E09000019', # Islington
-             'E09000020', # Kensignton and Chelsea
-             'E09000022', # Lambeth
-             'E09000023', # Lewisham
-             'E09000028', # Southwark
-             'E09000030', # Tower Hamlets
-             'E09000032', # Wandsworth
-             'E08000025', # Birmingham
-             'E08000026', # Coventry
-             'E08000029', # Solihull
-             'E08000028', # Sandwell
-             'E08000030', # Walsall
-             'E08000027', # Dudley
-             'E08000003'] # Manchester
-    weight = np.array([3.7]*11 + [1.]*7)
-    seed = weight * N.loc[areas, age_group]
-    seed = np.round(seed / seed.sum() * n_seed)
+    inner_london = ['E09000001,E09000033',  # City of London, City of Westminster
+                    'E09000007',  # Camden
+                    'E09000012',  # Hackney
+                    'E09000013',  # Hammersmith and Fulham
+                    'E09000014',  # Haringay
+                    'E09000019',  # Islington
+                    'E09000020',  # Kensignton and Chelsea
+                    'E09000022',  # Lambeth
+                    'E09000023',  # Lewisham
+                    'E09000025',  # Newham
+                    'E09000028',  # Southwark
+                    'E09000030',  # Tower Hamlets
+                    'E09000032']  # Wandsworth
+    outer_london = ['E09000002',  # Barking and Dagenham
+                    'E09000003',  # Barnet
+                    'E09000004',  # Bexley
+                    'E09000005',  # Brent
+                    'E09000006',  # Bromley
+                    'E09000008',  # Croydon
+                    'E09000009',  # Ealing
+                    'E09000010',  # Enfield
+                    'E09000011',  # Greenwich
+                    'E09000015',  # Harrow
+                    'E09000016',  # Havering
+                    'E09000017',  # Hillingdon
+                    'E09000018',  # Hounslow
+                    'E09000021',  # Kingston upon Thames
+                    'E09000024',  # Merton
+                    'E09000026',  # Redbridge
+                    'E09000027',  # Richmond upon Thames
+                    'E09000029',  # Sutton
+                    'E09000031']  # Waltham Forest
+
+    west_midlands = ['E08000025',  # Birmingham
+                     'E08000026',  # Coventry
+                     'E08000029',  # Solihull
+                     'E08000028',  # Sandwell
+                     'E08000030',  # Walsall
+                     'E08000027',  # Dudley
+                     'E08000031']  # Wolverhampton
+    greater_manchester = ['E08000001',  # Bolton
+                          'E08000002',  # Bury
+                          'E08000003',  # Manchester
+                          'E08000004',  # Oldham
+                          'E08000005',  # Rochdale
+                          'E08000006',  # Salford
+                          'E08000007',  # Stockport
+                          'E08000008',  # Tameside
+                          'E08000009',  # Trafford
+                          'E08000010']  # Wigan
+    areas = inner_london + outer_london + west_midlands + greater_manchester
+    weight = np.array([3.7]*len(inner_london+outer_london) + [1.]*len(west_midlands+greater_manchester))
+    pop_size = N.loc[areas].to_numpy().reshape([len(areas), N.index.levels[1].shape[0]])
+    seed = weight[:, np.newaxis] * pop_size
+    seed = np.round(seed / seed.sum(axis=1, keepdims=True) * n_seed)
 
     seeding = pd.Series(np.zeros_like(N), index=N.index)
-    seeding.loc[areas, age_group] = seed  # Scatter
+    seeding.loc[areas] = seed.flatten()  # Scatter
     return seeding.to_numpy()
 
 
