@@ -65,13 +65,15 @@ if __name__ == '__main__':
                            holidays=settings['holiday'],
                            lockdown=settings['lockdown'],
                            time_step=1)
-    seeding = y[:'2020-03-09'].sum(level=[1 , 2]).to_numpy()# seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
+
+    seeding = seed_areas(data['pop']['n'])
+    #seeding = y[:'2020-03-09'].sum(level=[1 , 2]).to_numpy()# seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
     state_init = simulator.create_initial_state(init_matrix=seeding)
 
     @tf.function
     def prediction(beta, beta3, gamma, I0, r_):
         sims = tf.TensorArray(tf.float64, size=beta.shape[0])
-        R0 = tf.TensorArray(tf.float64, size=beta.shape[0])
+        Rt = tf.TensorArray(tf.float64, size=beta.shape[0])
         for i in tf.range(beta.shape[0]):
             p = param
             p['beta1'] = beta[i]
@@ -81,13 +83,14 @@ if __name__ == '__main__':
             p['r'] = r_[i]
             state_init = simulator.create_initial_state(seeding * p['I0'])
             t, sim, solver_results = simulator.simulate(p, state_init)
-            r = simulator.eval_R0(p)
-            R0 = R0.write(i, r[0])
+            r = simulator.eval_Rt(p, t[:10], sim[:10, :, 0])  # Todo: Reduce memory usage in batching,
+                                                              #   currently limited to first 10 timesteps.
+            Rt = Rt.write(i, r)
             sims = sims.write(i, sim)
-        return sims.gather(range(beta.shape[0])), R0.gather(range(beta.shape[0]))
+        return sims.gather(range(beta.shape[0])), Rt.gather(range(beta.shape[0]))
 
     draws = pi_beta.numpy()[np.arange(5000, pi_beta.shape[0], 60), :]
-    with tf.device('/CPU:0'):
+    with tf.device('/CPU:0'):  # Todo: Using CPU because GPU goes OOM
         sims, R0 = prediction(draws[:, 0], draws[:, 1], draws[:, 2], draws[:, 3], draws[:, 4])
         sims = tf.stack(sims)  # shape=[n_sims, n_times, n_metapops, n_states]
         save_sims(simulator.times, sims, data['la_names'], data['age_groups'], 'pred_2020-03-29.h5')
@@ -96,13 +99,13 @@ if __name__ == '__main__':
         plot_prediction(settings['prediction_period'], sims, y.sum(level=0))
         plot_case_incidence(settings['prediction_period'], sims.numpy())
 
-    # R0
-    R0_ci = tfs.percentile(R0, q=[2.5, 50, 97.5])
-    print("R0:", R0_ci)
-    fig = plt.figure()
-    seaborn.kdeplot(R0.numpy(), ax=fig.gca())
-    plt.title("R0")
-    plt.show()
+
+    # R0_ci = tfs.percentile(R0, q=[2.5, 50, 97.5])
+    # print("R0:", R0_ci)
+    # fig = plt.figure()
+    # seaborn.kdeplot(R0.numpy(), ax=fig.gca())
+    # plt.title("R0")
+    # plt.show()
 
 
     # Doubling time

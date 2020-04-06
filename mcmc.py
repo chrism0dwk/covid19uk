@@ -73,8 +73,8 @@ if __name__ == '__main__':
         p['I0'] = par[3]
         p['r'] = par[4]
         beta_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE), rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
-        beta3_logp = tfd.Gamma(concentration=tf.constant(200., dtype=DTYPE),
-                               rate=tf.constant(200., dtype=DTYPE)).log_prob(p['beta3'])
+        beta3_logp = tfd.Gamma(concentration=tf.constant(20., dtype=DTYPE),
+                               rate=tf.constant(20., dtype=DTYPE)).log_prob(p['beta3'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE), rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
         I0_logp = tfd.Gamma(concentration=tf.constant(1.5, dtype=DTYPE), rate=tf.constant(0.05, dtype=DTYPE)).log_prob(p['I0'])
         r_logp = tfd.Gamma(concentration=tf.constant(0.1, dtype=DTYPE), rate=tf.constant(0.1, dtype=DTYPE)).log_prob(p['gamma'])
@@ -83,12 +83,6 @@ if __name__ == '__main__':
         y_logp = covid19uk_logp(y, sim, 0.1, p['r'])
         logp = beta_logp + beta3_logp + gamma_logp + I0_logp + r_logp + y_logp
         return logp
-
-    def trace_fn(_, pkr):
-      return (
-          pkr.inner_results.log_accept_ratio,
-          pkr.inner_results.accepted_results.target_log_prob,
-          pkr.inner_results.accepted_results.step_size)
 
     unconstraining_bijector = [tfb.Exp()]
     initial_mcmc_state = np.array([0.05, 1.0, 0.25, 1.0, 50.0], dtype=np.float64)  # beta1, gamma, I0

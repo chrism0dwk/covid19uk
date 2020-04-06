@@ -15,7 +15,7 @@ DTYPE = np.float64
 
 
 def power_iteration(A, tol=1e-3):
-    b_k = tf.random.normal([A.shape[1], 1], dtype=A.dtype)
+    b_k = tf.random.normal([A.shape[0], A.shape[1], 1], dtype=A.dtype)
     epsilon = tf.constant(1., dtype=A.dtype)
     i = 0
     while tf.greater(epsilon, tol):
@@ -29,9 +29,11 @@ def power_iteration(A, tol=1e-3):
 
 
 def rayleigh_quotient(A, b):
-    b = tf.reshape(b, [b.shape[0], 1])
-    numerator = tf.matmul(tf.transpose(b), tf.matmul(A, b))
-    denominator = tf.matmul(tf.transpose(b), b)
+    #b = tf.expand_dims(b, -1)  #tf.reshape(b, [b.shape[0], 1])
+    print('b shape', b.shape)
+    print('A shape', A.shape)
+    numerator = tf.matmul(b, tf.matmul(A, b), transpose_a=True)
+    denominator = tf.matmul(b, b, transpose_a=True)
     return numerator / denominator
 
 
@@ -187,20 +189,26 @@ class CovidUKODE(CovidUK):
                                     solution_times=t, previous_solver_internal_state=solver_state)
         return results.times, results.states, results.solver_internal_state
 
-    def ngm(self, param):
-        infec_rate = param['beta1'] * (
-            self.M.to_dense()[0, ...] +
-            (param['beta2'] * self.Kbar * self.C.to_dense() /
-             self.N_sum[np.newaxis, :]))
-        ngm = infec_rate / param['gamma']
+    def ngm(self, param, t, S):  # Todo: DRY! Would be better integrated with h_fn above.
+        t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
+        m_switch = tf.gather(self.m_select, t_idx)
+        commute_volume = tf.pow(tf.gather(self.W, t_idx), param['omega'])
+        lockdown = tf.gather(self.lockdown_select, t_idx)
+        beta = tf.where(lockdown == 0, param['beta1'], param['beta1'] * param['beta3'])
+
+        C = self.C.to_dense() / self.N_sum[None, :]  # Todo: Is there any way to scalar multiply a LinearOperator without materialising the matrix?
+        commute = param['beta2'] * self.Kbar * commute_volume[:, None, None] * C[None, ...]
+        ngm = beta[:, None, None] * (
+                tf.gather(self.M.to_dense(), m_switch) + commute)
+        ngm = tf.expand_dims(S / self.N, axis=-1) * ngm / param['gamma']
         return ngm
 
-    def eval_R0(self, param, tol=1e-8):
-        ngm = self.ngm(param)
-        # Dominant eigen value by power iteration
-        dom_eigen_vec, i = power_iteration(ngm, tol=tf.cast(tol, tf.float64))
-        R0 = rayleigh_quotient(ngm, dom_eigen_vec)
-        return tf.squeeze(R0), i
+    def eval_Rt(self, param, t, S):
+        ngm = self.ngm(param, t, S)
+        dom_eigen_vec, i = power_iteration(ngm, tol=tf.cast(1e-8, tf.float64))
+        Rt = rayleigh_quotient(ngm, dom_eigen_vec)
+        return Rt
+
 
 def covid19uk_logp(y, sim, phi, r):
     """log_probability function for case data
@@ -211,8 +219,6 @@ def covid19uk_logp(y, sim, phi, r):
     """
     # Daily increments in removed
     r_incr = sim[1:, :, 3] - sim[:-1, :, 3]
-    # Sum
-    #r_incr = tf.reshape(r_incr, [r_incr.shape[0]] + [149, 17])
     r_incr = tf.reduce_sum(r_incr, axis=1)
     lambda_ = tf.reshape(r_incr, [-1]) * phi
     y = y.sum(level=0).to_numpy()

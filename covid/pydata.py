@@ -92,7 +92,7 @@ def phe_linelist_timeseries(filename, spec_date='specimen_date', utla='UTLA_code
 
     # 1. clip dates
     one_day = np.timedelta64(1, 'D')
-    linelist[spec_date] = pd.to_datetime(linelist[spec_date])
+    linelist[spec_date] = pd.to_datetime(linelist[spec_date], format="%d/%m/%Y")
     date_range = date_range or [linelist[spec_date].min(), linelist[spec_date].max()]
     linelist = linelist[(date_range[0] <= linelist[spec_date]) & (linelist[spec_date] <= date_range[1])]
     raw_len = linelist.shape[0]
