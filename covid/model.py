@@ -228,10 +228,10 @@ class CovidUKStochastic(CovidUK):
         def h(t, state):
             """Computes a transition rate matrix
 
-            :param state: a tensor of shape [ns, nc] for ns states and nc population strata. States
+            :param state: a tensor of shape [nc, ns] for ns states and nc population strata. States
               are S, E, I, R.  We arrange the state like this because the state vectors are then arranged
               contiguously in memory for fast calculation below.
-            :return a tensor of shape [ns, ns, nc] containing transition matric for each i=0,...,(c-1)
+            :return a tensor of shape [nc, ns, ns] containing transition matric for each i=0,...,(c-1)
             """
             t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
             m_switch = tf.gather(self.m_select, t_idx)
@@ -240,10 +240,10 @@ class CovidUKStochastic(CovidUK):
             infec_rate = param['beta1'] * (
                 tf.gather(self.M.matvec(state[:, 2]), m_switch) +
                 param['beta2'] * self.Kbar * commute_volume * self.C.matvec(state[:, 2] / self.N_sum))
-            infec_rate = infec_rate / self.N
+            infec_rate = infec_rate / self.N  # Vector of length nc
 
-            ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])
-            ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])
+            ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])  # Vector of length nc
+            ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])  # Vector of length nc
 
             # Scatter rates into a [ns, ns, nc] tensor
             n = state.shape[0]
@@ -256,7 +256,7 @@ class CovidUKStochastic(CovidUK):
                                         updates=tf.stack([infec_rate, ei, ir], axis=-1),
                                         shape=[state.shape[0],
                                                state.shape[1],
-                                               state.shape[1]])
+                                               state.shape[1]])  # Tensor of dim [nc, ns, ns]
             return rate_matrix
         return h
 
