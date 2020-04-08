@@ -1,7 +1,7 @@
 import unittest
 
 import tensorflow as tf
-from covid.impl.chainbinom_simulate import chain_binomial_propagate
+from covid.impl.discrete_markov import chain_binomial_propagate
 
 
 class TestPropagate(unittest.TestCase):

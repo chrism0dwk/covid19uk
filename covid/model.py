@@ -6,7 +6,7 @@ import numpy as np
 
 from covid.rdata import load_mobility_matrix, load_population, load_age_mixing
 from covid.pydata import load_commute_volume
-from covid.impl.chainbinom_simulate import chain_binomial_simulate
+from covid.impl.discrete_markov import discrete_markov_simulation
 
 tode = tfp.math.ode
 tla = tf.linalg
@@ -228,10 +228,10 @@ class CovidUKStochastic(CovidUK):
         def h(t, state):
             """Computes a transition rate matrix
 
-            :param state: a tensor of shape [ns, nc] for ns states and nc population strata. States
+            :param state: a tensor of shape [nc, ns] for ns states and nc population strata. States
               are S, E, I, R.  We arrange the state like this because the state vectors are then arranged
               contiguously in memory for fast calculation below.
-            :return a tensor of shape [ns, ns, nc] containing transition matric for each i=0,...,(c-1)
+            :return a tensor of shape [nc, ns, ns] containing transition matric for each i=0,...,(c-1)
             """
             t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
             m_switch = tf.gather(self.m_select, t_idx)
@@ -245,7 +245,7 @@ class CovidUKStochastic(CovidUK):
             ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])
             ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])
 
-            # Scatter rates into a [ns, ns, nc] tensor
+            # Scatter rates into a [nc, ns, ns] tensor
             n = state.shape[0]
             b = tf.stack([tf.range(n),
                           tf.zeros(n, dtype=tf.int32),
@@ -270,6 +270,6 @@ class CovidUKStochastic(CovidUK):
         """
         param = {k: tf.constant(v, dtype=tf.float64) for k, v in param.items()}
         hazard = self.make_h(param)
-        t, sim = chain_binomial_simulate(hazard, state_init, np.float64(0.),
-                                         np.float64(self.times.shape[0]), self.time_step)
+        t, sim = discrete_markov_simulation(hazard, state_init, np.float64(0.),
+                                            np.float64(self.times.shape[0]), self.time_step)
         return t, sim

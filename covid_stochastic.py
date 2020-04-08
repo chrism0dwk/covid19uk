@@ -179,13 +179,14 @@ if __name__ == '__main__':
 
     start = time.perf_counter()
     for i in range(1):
-        t, sim = model.simulate(param, state_init)
+        t, upd = model.simulate(param, state_init)
     end = time.perf_counter()
     print(f'Run 2 Complete in {(end - start)/1.} seconds')
 
     # Plotting functions
     fig_attack = plt.figure()
     fig_uk = plt.figure()
+    sim = tf.reduce_sum(upd, axis=-2)
 
     plot_age_attack_rate(fig_attack.gca(), sim, data['pop']['n'].to_numpy(), "Attack Rate")
     fig_attack.suptitle("Attack Rate")
