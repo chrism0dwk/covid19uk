@@ -240,10 +240,10 @@ class CovidUKStochastic(CovidUK):
             infec_rate = param['beta1'] * (
                 tf.gather(self.M.matvec(state[:, 2]), m_switch) +
                 param['beta2'] * self.Kbar * commute_volume * self.C.matvec(state[:, 2] / self.N_sum))
-            infec_rate = infec_rate / self.N
+            infec_rate = infec_rate / self.N  # Vector of length nc
 
-            ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])
-            ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])
+            ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])  # Vector of length nc
+            ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])  # Vector of length nc
 
             # Scatter rates into a [nc, ns, ns] tensor
             n = state.shape[0]
@@ -256,7 +256,7 @@ class CovidUKStochastic(CovidUK):
                                         updates=tf.stack([infec_rate, ei, ir], axis=-1),
                                         shape=[state.shape[0],
                                                state.shape[1],
-                                               state.shape[1]])
+                                               state.shape[1]])  # Tensor of dim [nc, ns, ns]
             return rate_matrix
         return h
 
