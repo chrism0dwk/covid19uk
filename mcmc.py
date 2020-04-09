@@ -95,7 +95,7 @@ if __name__ == '__main__':
     initial_mcmc_state = np.array([0.05, 0.5, 0.25], dtype=np.float64)  # beta1, gamma, I0
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
-    @tf.function(autograph=False, experimental_compile=True, )
+    @tf.function #(autograph=False, experimental_compile=True)
     def sample(n_samples, init_state, scale, num_burnin_steps=0):
         return tfp.mcmc.sample_chain(
             num_results=n_samples,
@@ -114,9 +114,9 @@ if __name__ == '__main__':
     scale = np.diag([0.1, 0.1, 0.1])
     overall_start = time.perf_counter()
 
-    num_covariance_estimation_iterations = 50
+    num_covariance_estimation_iterations = 1
     num_covariance_estimation_samples = 50
-    num_final_samples = 10000
+    num_final_samples = 100
     start = time.perf_counter()
     for i in range(num_covariance_estimation_iterations):
         step_start = time.perf_counter()
@@ -133,8 +133,13 @@ if __name__ == '__main__':
         initial_mcmc_state = joint_posterior[-1, :]
 
     step_start = time.perf_counter()
+    writer = tf.summary.create_file_writer('mcmc_profdir')
+    tf.summary.trace_on(graph=True, profiler=True)
     samples, results = sample(num_final_samples,
                               init_state=joint_posterior[-1, :], scale=scale,)
+    with writer.as_default():
+        tf.summary.trace_export('profile', 0, 'mcmc_profdir')
+    writer.close()
     joint_posterior = tf.concat([joint_posterior, samples], axis=0)
     step_end = time.perf_counter()
     print(f'Sampling step time {step_end - step_start}')
