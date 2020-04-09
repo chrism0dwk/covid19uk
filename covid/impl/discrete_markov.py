@@ -86,4 +86,5 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step):
         logp = tfd.Multinomial(state, probs=markov_transition).log_prob(event)
         return a + tf.reduce_sum(logp)
 
+    # Todo This fold tries to avoid batching issues in the rate calculations.  Maybe a bottleneck.
     return tf.foldl(log_prob_t, (t, events, states), initializer=tf.constant(0., events.dtype))
