@@ -77,11 +77,13 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step):
     states = tf.concat([[init_state], tf.reduce_sum(events, axis=-2)], axis=-3)[:-1]
     t = tf.range(states.shape[-3])
 
-    rate_matrix = hazard_fn(t, states)
-    rate_matrix = tf.linalg.set_diag(rate_matrix,
-                                     -tf.reduce_sum(rate_matrix, axis=-1))
-    markov_transition = tf.linalg.expm(rate_matrix*time_step)
-    log_mt = tf.math.log(markov_transition)
-    idx = events > 0.  # Todo: probably should check for x>0 when p==0.
-    logp = tf.reduce_sum(events[idx] * log_mt[idx])
-    return logp
+    def log_prob_t(a, elems):
+        t, event, state = elems
+        rate_matrix = hazard_fn(t, state)
+        rate_matrix = tf.linalg.set_diag(rate_matrix,
+                                         -tf.reduce_sum(rate_matrix, axis=-1))
+        markov_transition = tf.linalg.expm(rate_matrix*time_step)
+        logp = tfd.Multinomial(state, probs=markov_transition).log_prob(event)
+        return a + tf.reduce_sum(logp)
+
+    return tf.foldl(log_prob_t, (t, events, states), initializer=tf.constant(0., events.dtype))

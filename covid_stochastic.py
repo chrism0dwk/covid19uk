@@ -1,7 +1,12 @@
 import optparse
 import time
+import pickle as pkl
 
 import tensorflow as tf
+import tensorflow_probability as tfp
+tfd = tfp.distributions
+tfb = tfp.bijectors
+
 import numpy as np
 import matplotlib.pyplot as plt
 import yaml
@@ -10,6 +15,21 @@ from covid.model import CovidUKStochastic, load_data
 from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 
 DTYPE = np.float64
+
+def random_walk_mvnorm_fn(covariance, name=None):
+    """Returns callable that adds Multivariate Normal noise to the input"""
+    covariance = covariance + tf.eye(covariance.shape[0], dtype=tf.float64) * 1.e-9
+    scale_tril = tf.linalg.cholesky(covariance)
+    rv = tfp.distributions.MultivariateNormalTriL(loc=tf.zeros(covariance.shape[0], dtype=tf.float64),
+                                                  scale_tril=scale_tril)
+
+    def _fn(state_parts, seed):
+        with tf.name_scope(name or 'random_walk_mvnorm_fn'):
+            new_state_parts = [rv.sample() + state_part for state_part in state_parts]
+            return new_state_parts
+
+    return _fn
+
 
 def sum_age_groups(sim):
     infec = sim[:, 2, :]
@@ -199,3 +219,5 @@ if __name__ == '__main__':
     fig_uk.gca().grid(True)
     plt.show()
 
+    with open('stochastic_sim.pkl', 'wb') as f:
+        pkl.dump({'events': upd, 'state_init': state_init}, f)

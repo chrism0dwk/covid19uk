@@ -1,17 +1,22 @@
-import optparse
-import pickle as pkl
-import time
+"""Inference on stochastic models"""
 
+import optparse
+import time
+import pickle as pkl
+
+import tensorflow as tf
+import tensorflow_probability as tfp
+tfd = tfp.distributions
+tfb = tfp.bijectors
+
+import numpy as np
 import matplotlib.pyplot as plt
 import yaml
-from tensorflow_probability import bijectors as tfb
-from tensorflow_probability import distributions as tfd
 
-from covid.model import CovidUKODE, covid19uk_logp, load_data
-from covid.util import *
+from covid.model import CovidUKStochastic, load_data
+from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 
 DTYPE = np.float64
-
 
 def random_walk_mvnorm_fn(covariance, name=None):
     """Returns callable that adds Multivariate Normal noise to the input"""
@@ -28,8 +33,18 @@ def random_walk_mvnorm_fn(covariance, name=None):
     return _fn
 
 
-
 if __name__ == '__main__':
+
+    parser = optparse.OptionParser()
+    parser.add_option("--config", "-c", dest="config", default="ode_config.yaml",
+                      help="configuration file")
+    options, args = parser.parse_args()
+
+    with open(options.config, 'r') as ymlfile:
+        config = yaml.load(ymlfile)
+
+    param = sanitise_parameter(config['parameter'])
+    settings = sanitise_settings(config['settings'])
 
     parser = optparse.OptionParser()
     parser.add_option("--config", "-c", dest="config", default="ode_config.yaml",
@@ -41,59 +56,44 @@ if __name__ == '__main__':
     param = sanitise_parameter(config['parameter'])
     settings = sanitise_settings(config['settings'])
 
-    data = load_data(config['data'], settings)
+    data = load_data(config['data'], settings, DTYPE)
 
-    case_reports = pd.read_csv(config['data']['reported_cases'])
-    case_reports['DateVal'] = pd.to_datetime(case_reports['DateVal'])
-    case_reports = case_reports[case_reports['DateVal'] >= '2020-02-19']
-    date_range = [case_reports['DateVal'].min(), case_reports['DateVal'].max()]
-    y = case_reports['CumCases'].to_numpy()
-    y_incr = np.round((y[1:] - y[:-1]) * 0.8)
+    model = CovidUKStochastic(M_tt=data['M_tt'],
+                              M_hh=data['M_hh'],
+                              C=data['C'],
+                              N=data['pop']['n'].to_numpy(),
+                              W=data['W'],
+                              date_range=settings['inference_period'],
+                              holidays=settings['holiday'],
+                              lockdown=settings['lockdown'],
+                              time_step=1.)
 
-    simulator = CovidUKODE(M_tt=data['M_tt'],
-                           M_hh=data['M_hh'],
-                           C=data['C'],
-                           N=data['pop']['n'].to_numpy(),
-                           W=data['W'].to_numpy(),
-                           date_range=[date_range[0] - np.timedelta64(1, 'D'), date_range[1]],
-                           holidays=settings['holiday'],
-                           lockdown=settings['lockdown'],
-                           time_step=int(settings['time_step']))
+    with open('stochastic_sim.pkl', 'rb') as f:
+        sim = pkl.load(f)
 
-    seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
-    state_init = simulator.create_initial_state(init_matrix=seeding)
+    events = sim['events']
+    state_init = sim['state_init']
 
     def logp(par):
         p = param
         p['beta1'] = par[0]
         p['beta3'] = par[1]
         p['gamma'] = par[2]
-        p['I0'] = par[3]
-        p['r'] = par[4]
-        beta_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE), rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
+        beta_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
+                              rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
         beta3_logp = tfd.Gamma(concentration=tf.constant(200., dtype=DTYPE),
                                rate=tf.constant(200., dtype=DTYPE)).log_prob(p['beta3'])
-        gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE), rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
-        I0_logp = tfd.Gamma(concentration=tf.constant(1.5, dtype=DTYPE), rate=tf.constant(0.05, dtype=DTYPE)).log_prob(p['I0'])
-        r_logp = tfd.Gamma(concentration=tf.constant(0.1, dtype=DTYPE), rate=tf.constant(0.1, dtype=DTYPE)).log_prob(p['gamma'])
-        state_init = simulator.create_initial_state(init_matrix=seeding * p['I0'])
-        t, sim, solve = simulator.simulate(p, state_init)
-        y_logp = covid19uk_logp(y_incr, sim, 0.1, p['r'])
-        logp = beta_logp + beta3_logp + gamma_logp + I0_logp + r_logp + tf.reduce_sum(y_logp)
+        gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE),
+                               rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
+        y_logp = model.log_prob(events, p, state_init)
+        logp = beta_logp + beta3_logp + gamma_logp + y_logp
         return logp
 
-    def trace_fn(_, pkr):
-      return (
-          pkr.inner_results.log_accept_ratio,
-          pkr.inner_results.accepted_results.target_log_prob,
-          pkr.inner_results.accepted_results.step_size)
-
-
     unconstraining_bijector = [tfb.Exp()]
-    initial_mcmc_state = np.array([0.05, 1.0, 0.25, 1.0, 50.], dtype=np.float64)  # beta1, gamma, I0
+    initial_mcmc_state = np.array([0.05, 0.5, 0.25], dtype=np.float64)  # beta1, gamma, I0
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
-    @tf.function(autograph=False, experimental_compile=True)
+    @tf.function #(experimental_compile=True)
     def sample(n_samples, init_state, scale, num_burnin_steps=0):
         return tfp.mcmc.sample_chain(
             num_results=n_samples,
@@ -109,7 +109,7 @@ if __name__ == '__main__':
 
     joint_posterior = tf.zeros([0] + list(initial_mcmc_state.shape), dtype=DTYPE)
 
-    scale = np.diag([0.1, 0.1, 0.1, 0.1, 1.])
+    scale = np.diag([0.1, 0.1, 0.1])
     overall_start = time.perf_counter()
 
     num_covariance_estimation_iterations = 50
@@ -148,5 +148,5 @@ if __name__ == '__main__':
     plt.show()
     print(f"Posterior mean: {np.mean(joint_posterior, axis=0)}")
 
-    with open('pi_beta_2020-03-29.pkl', 'wb') as f:
+    with open('stochastic_posterior.pkl', 'wb') as f:
         pkl.dump(joint_posterior, f)
