@@ -77,6 +77,7 @@ if __name__ == '__main__':
     param = {k: tf.constant(v, dtype=DTYPE) for k, v in param.items()}
 
     def logp(par):
+        print("Tracing logp")
         p = param
         p['beta1'] = par[0]
         p['beta3'] = par[1]
@@ -114,9 +115,9 @@ if __name__ == '__main__':
     scale = np.diag([0.1, 0.1, 0.1])
     overall_start = time.perf_counter()
 
-    num_covariance_estimation_iterations = 1
+    num_covariance_estimation_iterations = 20
     num_covariance_estimation_samples = 50
-    num_final_samples = 100
+    num_final_samples = 10000
     start = time.perf_counter()
     for i in range(num_covariance_estimation_iterations):
         step_start = time.perf_counter()
@@ -133,13 +134,8 @@ if __name__ == '__main__':
         initial_mcmc_state = joint_posterior[-1, :]
 
     step_start = time.perf_counter()
-    writer = tf.summary.create_file_writer('mcmc_profdir')
-    tf.summary.trace_on(graph=True, profiler=True)
     samples, results = sample(num_final_samples,
                               init_state=joint_posterior[-1, :], scale=scale,)
-    with writer.as_default():
-        tf.summary.trace_export('profile', 0, 'mcmc_profdir')
-    writer.close()
     joint_posterior = tf.concat([joint_posterior, samples], axis=0)
     step_end = time.perf_counter()
     print(f'Sampling step time {step_end - step_start}')
