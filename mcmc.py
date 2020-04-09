@@ -74,6 +74,8 @@ if __name__ == '__main__':
     events = sim['events']
     state_init = sim['state_init']
 
+    param = {k: tf.constant(v, dtype=DTYPE) for k, v in param.items()}
+
     def logp(par):
         p = param
         p['beta1'] = par[0]
@@ -93,7 +95,7 @@ if __name__ == '__main__':
     initial_mcmc_state = np.array([0.05, 0.5, 0.25], dtype=np.float64)  # beta1, gamma, I0
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
-    @tf.function #(experimental_compile=True)
+    @tf.function(autograph=False, experimental_compile=True, )
     def sample(n_samples, init_state, scale, num_burnin_steps=0):
         return tfp.mcmc.sample_chain(
             num_results=n_samples,

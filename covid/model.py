@@ -245,8 +245,8 @@ class CovidUKStochastic(CovidUK):
                 param['beta2'] * self.Kbar * commute_volume * self.C.matvec(state[..., 2] / self.N_sum))
             infec_rate = infec_rate / self.N  # Vector of length nc
 
-            ei = tf.broadcast_to([tf.convert_to_tensor(param['nu'])], shape=[state.shape[0]])  # Vector of length nc
-            ir = tf.broadcast_to([tf.convert_to_tensor(param['gamma'])], shape=[state.shape[0]])  # Vector of length nc
+            ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])  # Vector of length nc
+            ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])  # Vector of length nc
 
             rate_matrix = make_transition_rate_matrix([infec_rate, ei, ir], [[0, 1], [1, 2], [2, 3]], state)
             return rate_matrix
