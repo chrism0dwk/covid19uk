@@ -1,4 +1,4 @@
-% LyX 2.2.4 created this file.  For more info, see http://www.lyx.org/.
+%% LyX 2.2.4 created this file.  For more info, see http://www.lyx.org/.
 %% Do not edit unless you really know what you are doing.
 \documentclass[english]{article}
 \usepackage[T1]{fontenc}
@@ -10,15 +10,17 @@
 \usepackage{url}
 \usepackage{bm}
 \usepackage{amsmath}
+\usepackage[authoryear]{natbib}
 \usepackage{babel}
 \begin{document}
 
-\title{UK Age and Space structured Covid-19 model}
+\title{UK Age and Space structured Covid-19 model\\
+Technical Description}
 
 \author{Chris Jewell, Barry Rowlingson, Jon Read}
 \maketitle
 
-\section{Concept}
+\section{Model Concept}
 
 We wish to develop a model that will enable us to assess spatial spread
 of Covid-19 across the UK, respecting the availability of human mobility
@@ -32,8 +34,9 @@ or died).
 
 We model the infection rate (rate of S$\rightarrow$E transition)
 as a function of known age-structured contact from Polymod, known
-human mobility between MSOAs (Middle Super Output Area), and Census-derived
-age structured population density in regions across the UK.
+human mobility between MSOAs (Middle Super Output Area) aggegated
+to Upper Tier Local Authority (UTLA) regions, and Census 2011-derived
+age structured population density in UTLA regions across the UK.
 
 Currently, this model is populated with data for England only, though
 we are in the process of extending this to Scotland, Wales, and Northern
@@ -52,11 +55,12 @@ extracted of dimension $n_{m}\times n_{m}$ where $n_{m}=17$.
 
 2011 Census data from ONS on daily mean numbers of commuters moving
 from each Residential MSOA to Workplace MSOA. MSOAs are aggregated
-to Local Authority Districts (LADs) for which we have age-structured
-population density. The resulting matrix $C$ is of dimension $n_{c}\times n_{c}$
-where $n_{c}=152$. Since this matrix is for Residence to Workplace
-movement only, we assume that the mean number of journeys between
-each LAD is given by
+to UTLA regions\footnote{City of Westminster and City of London are aggregated, as are Cornwall
+and Scilly to allow mapping onto MSOAs.} for which we have age-structured population density. The resulting
+matrix $C$ is of dimension $n_{c}\times n_{c}$ where $n_{c}=149$.
+Since this matrix is for Residence to Workplace movement only, we
+assume that the mean number of journeys between each UTLA is given
+by
 \[
 T=C+C^{T}
 \]
@@ -64,10 +68,9 @@ with 0 diagonal.
 
 \subsection{Population size}
 
-Age-structured population size within each LAD is taken from publicly
-available 2019 Local Authority data giving a vector $N$ of length
-$n_{m}n_{c}=2584$, i.e. population for each of $n_{m}$ age groups
-and $n_{c}$ LADs.
+Age-structured population size within each UTLA is taken from publicly
+available 2019 UTLA data giving a vector $N$ of length $n_{m}n_{c}=2533$,
+i.e. population for each of $n_{m}$ age groups and $n_{c}$ UTLAs.
 
 \section{Model}
 
@@ -83,9 +86,9 @@ M^{\star}=I_{n_{c}}\bigotimes M
 C^{\star}=C\bigotimes\bm{1}_{n_{m}\times n_{c}}
 \]
 giving two matrices of dimension $n_{m}n_{c}\times n_{m}n_{c}$. $M^{\star}$
-is block diagonal with Polymod mixing matrices. $C^{\star}$ expands
-the mobility matrix $C$ such that a block structure of connectivity
-between LADs results.
+is block diagonal with Polymod mixing matrices, performed for both
+$M_{tt}$ and $M_{hh}$. $C^{\star}$ expands the mobility matrix
+$C$ such that a block structure of connectivity between UTLAs results.
 
 \subsection{Disease progression model}
 
@@ -94,7 +97,7 @@ number of individual in each age-group-LAD combination at time $t$
 by the vectors $\vec{S}(t),\vec{E}(t),\vec{I}(t),\vec{R}(t)$. We
 therefore have
 \begin{align*}
-\frac{\mathrm{d\vec{S}(t)}}{dt} & =-\beta_{t}\left[M^{\star}\vec{I}(t)+\beta_{2}w_{t}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}\\
+\frac{\mathrm{d\vec{S}(t)}}{dt} & =\beta_{t}\left[M^{\star}\vec{I}(t)+\beta_{2}w_{t}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}\\
 \frac{\mathrm{d}\vec{E}(t)}{dt} & =\beta_{t}\left[M^{\star}\vec{I}(t)+\beta_{2}w_{t}\bar{M}C^{\star}\frac{{\vec{I}(t)}}{N}\right]\frac{\vec{S}(t)}{N}-\nu\vec{E}(t)\\
 \frac{\mathrm{d}\vec{I}(t)}{dt} & =\nu\vec{E}(t)-\gamma\vec{I}(t)\\
 \frac{\mathrm{d}\vec{R}(t)}{dt} & =\gamma\vec{I}(t)
@@ -107,15 +110,15 @@ of the 2019 mean (a proxy for reduction in travel). Parameters are:
 \beta_{t} & =\begin{cases}
 \beta_{1} & \mbox{if }t<T_{L}\\
 \beta_{1}\beta_{3} & \mbox{otherwise }
-\end{cases}\\
+\end{cases}
 \end{align*}
 with $T_{L}$ the date of lock-down restrictions, $\beta_{1}$ a baseline
 transmisison rate, and $\beta_{3}$ giving the ratio of post-lockdown
 to pre-lockdown transmission; commuting infection ratio $\beta_{2}$;
 latent period $\frac{1}{\nu}=4$days; and infectious period $\frac{1}{\gamma}$.
-Typically, we assume that contact with commuters is $\beta_{2}=\frac{1}{3}$
-of that between members of the same age-LAD combination assuming an
-8 hour working day.
+We assume that contact with commuters is $\beta_{2}=\frac{1}{3}$
+of that between members of the same age-UTLA combination assuming
+an 8 hour working day.
 
 \subsection{Noise model}
 
@@ -132,27 +135,36 @@ that are eventually detected) and $r$ is an overdispersion parameter.
 
 \subsection{Inference}
 
-We are interested in making inference on $\epsilon_{0},\beta_{1}$,
-and $\gamma$. Priors are currently:
+We are interested in making inference on $\beta_{1},\beta_{3},\gamma,I_{0}$,
+and $r$. Prior distributions are chosen to be
 \begin{align*}
-\epsilon_{0} & \sim\mbox{Gamma}(1,1)\\
 \beta_{1} & \sim\mbox{Gamma}(1,1)\\
 \beta_{3} & \sim\mbox{Gamma}(20,20)\\
-\gamma & \sim\mbox{Gamma}(10,40)\\
+\gamma & \sim\mbox{Gamma}(100,400)\\
+I_{0} & \sim\mbox{Gamma}(1.5,0.05)\\
 r & \sim\mbox{\mbox{Gamma}(}0.1,0.1)
 \end{align*}
-specified to express relative ignorance about $\epsilon_{0}$ , $\beta_{1}$,
-and $r$, strong information on $\beta_{3}$ and $r$, and a belief
-that the infectious period should be approximately 4 days.
+specified to express \emph{a priori }relative ignorance about $\beta_{1}$
+and $r$, stronger information on $\beta_{3}$ (post-lockdown transmission
+is the same as pre-lockdown transmission but could be either greater
+or smaller), and $I_{0}$ (initial number of individuals infected)
+and strong information about $\gamma$ with the\emph{ }belief that
+the infectious period is approximately 4 days. 
+
+Bayesian inference is performed by MCMC to estimate the joint posterior
+distribution of the parameters conditional on the observed data up
+to the analysis time.
 
 \subsection{Implementation}
 
-The model is currently implemented in Python3, using Tensorflow 2.1
-with the RK5 differential equation solver implemented in the \texttt{DormandPrince}
-class provided by Tensorflow Probability 0.9. Code may be found at
-\url{http://fhm-chicas-code.lancs.ac.uk/jewell/covid19uk}.
+The model is currently implemented in Python3, using Tensorflow 2.2.0
+with the RK45 differential equation solver implemented in the \texttt{DormandPrince}
+class provided by Tensorflow Probability 0.9. The MCMC is implemented
+using Tensorflow Probability's Metropolis-Hastings framework with
+additional adaptation steps according to \citet{HaarEtAl01}. The
+code implementation may be found at \url{http://github.com/chrism0dwk/covid19uk/tree/space_age_fitting}.
 
-The code is a work in progress \textendash{} see README.
+\bibliographystyle{plain}
+\bibliography{bibliography}
 
-\section{Results}
 \end{document}

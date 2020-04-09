@@ -142,7 +142,11 @@ if __name__ == '__main__':
         ax[i].plot(joint_posterior[:, i])
 
     plt.show()
-    print(f"Posterior mean: {np.mean(joint_posterior, axis=0)}")
+    pi_mean = np.mean(joint_posterior, axis=0)
+    q = np.percentile(joint_posterior, q=[2.5, 97.5], axis=0)
+    results = pd.DataFrame({'mean': pi_mean, '2.5%': q[0], '97.5%': q[1]})
+    results.index = pd.Index(['beta1','beta3','gamma','I0','r'])
+    print(results)
 
-    with open('pi_beta_2020-03-29.pkl', 'wb') as f:
+    with open('pi_beta_2020-04-04.pkl', 'wb') as f:
         pkl.dump(joint_posterior, f)
