@@ -7,6 +7,17 @@ tfd = tfp.distributions
 from covid.impl.util import make_transition_rate_matrix
 
 
+def approx_expm(rates):
+    """Approximates a full Markov transition matrix
+    :param rates: un-normalised rate matrix (i.e. diagonal zero)
+    :returns: approximation to Markov transition matrix
+    """
+    total_rates = tf.reduce_sum(rates, axis=-1, keepdims=True)
+    prob = 1. - tf.math.exp(-tf.reduce_sum(rates, axis=-1, keepdims=True))
+    mt1 = tf.math.multiply_no_nan(rates / total_rates, prob)
+    return tf.linalg.set_diag(mt1, 1. - tf.reduce_sum(mt1, axis=-1))
+
+
 def chain_binomial_propagate(h, time_step, seed=None):
     """Propagates the state of a population according to discrete time dynamics.
 
@@ -19,10 +30,11 @@ def chain_binomial_propagate(h, time_step, seed=None):
     def propagate_fn(t, state):
         rate_matrix = h(t, state)
         # Set diagonal to be the negative of the sum of other elements in each row
-        rate_matrix = tf.linalg.set_diag(rate_matrix,
-                                         -tf.reduce_sum(rate_matrix, axis=-1))
+        #rate_matrix = tf.linalg.set_diag(rate_matrix,
+        #                                 -tf.reduce_sum(rate_matrix, axis=-1))
         # Calculate Markov transition probability matrix
-        markov_transition = tf.linalg.expm(rate_matrix*time_step)
+        #markov_transition = tf.linalg.expm(rate_matrix*time_step)
+        markov_transition = approx_expm(rate_matrix*time_step)
         num_states = markov_transition.shape[-1]
         prev_probs = tf.zeros_like(markov_transition[..., :, 0])
         counts = tf.zeros(markov_transition.shape[:-1].as_list() + [0],
@@ -77,14 +89,18 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step):
     states = tf.concat([[init_state], tf.reduce_sum(events, axis=-2)], axis=-3)[:-1]
     t = tf.range(states.shape[-3])
 
-    def log_prob_t(a, elems):
-        t, event, state = elems
-        rate_matrix = hazard_fn(t, state)
-        rate_matrix = tf.linalg.set_diag(rate_matrix,
-                                         -tf.reduce_sum(rate_matrix, axis=-1))
-        markov_transition = tf.linalg.expm(rate_matrix*time_step)
-        logp = tfd.Multinomial(state, probs=markov_transition).log_prob(event)
-        return a + tf.reduce_sum(logp)
+    logp_parts = tf.TensorArray(dtype=events.dtype, size=t.shape[0])
 
-    # Todo This fold tries to avoid batching issues in the rate calculations.  Maybe a bottleneck.
-    return tf.foldl(log_prob_t, (t, events, states), initializer=tf.constant(0., events.dtype))
+    def log_prob_t(i, accum):
+        rate_matrix = hazard_fn(i, states[i])
+        #rate_matrix = tf.linalg.set_diag(rate_matrix,
+        #                                 -tf.reduce_sum(rate_matrix, axis=-1))
+        #markov_transition = tf.linalg.expm(rate_matrix*time_step)
+        markov_transition = approx_expm(rate_matrix*time_step)
+        logp = tfd.Multinomial(states[i], probs=markov_transition).log_prob(events[i])
+        return i+1, accum.write(i, tf.reduce_sum(logp))
+
+    # Todo This loop tries to avoid batching issues in the rate calculations.  Maybe a bottleneck if
+    #   the computations within the rates themselves are trivial.
+    _, logp_parts = tf.while_loop(lambda i, _: i < t.shape[0], log_prob_t, (0, logp_parts))
+    return tf.reduce_sum(logp_parts.stack())

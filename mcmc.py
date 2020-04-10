@@ -71,8 +71,8 @@ if __name__ == '__main__':
     with open('stochastic_sim.pkl', 'rb') as f:
         sim = pkl.load(f)
 
-    events = sim['events']
-    state_init = sim['state_init']
+    events = tf.convert_to_tensor(sim['events'], dtype=DTYPE)
+    state_init = tf.convert_to_tensor(sim['state_init'], dtype=DTYPE)
 
     param = {k: tf.constant(v, dtype=DTYPE) for k, v in param.items()}
 
@@ -84,8 +84,8 @@ if __name__ == '__main__':
         p['gamma'] = par[2]
         beta_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
                               rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
-        beta3_logp = tfd.Gamma(concentration=tf.constant(200., dtype=DTYPE),
-                               rate=tf.constant(200., dtype=DTYPE)).log_prob(p['beta3'])
+        beta3_logp = tfd.Gamma(concentration=tf.constant(20., dtype=DTYPE),
+                               rate=tf.constant(20., dtype=DTYPE)).log_prob(p['beta3'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE),
                                rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
         y_logp = model.log_prob(events, p, state_init)
@@ -96,7 +96,7 @@ if __name__ == '__main__':
     initial_mcmc_state = tf.constant([0.05, 0.5, 0.25], dtype=tf.float64)  # beta1, gamma, I0
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
-    @tf.function #(autograph=False, experimental_compile=True)
+    @tf.function(experimental_compile=True)
     def sample(n_samples, init_state, scale, num_burnin_steps=0):
         return tfp.mcmc.sample_chain(
             num_results=n_samples,
@@ -134,8 +134,10 @@ if __name__ == '__main__':
         initial_mcmc_state = joint_posterior[-1, :]
 
     step_start = time.perf_counter()
+    #tf.profiler.experimental.start('mcmc_logdir')
     samples, results = sample(num_final_samples,
                               init_state=joint_posterior[-1, :], scale=scale,)
+    #tf.profiler.experimental.stop()
     joint_posterior = tf.concat([joint_posterior, samples], axis=0)
     step_end = time.perf_counter()
     print(f'Sampling step time {step_end - step_start}')

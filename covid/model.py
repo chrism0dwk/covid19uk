@@ -127,8 +127,8 @@ class CovidUK:
 
         self.m_select = np.int64((self.times >= holidays[0]) &
                                  (self.times < holidays[1]))
-        self.lockdown_select = np.int64((self.times >= lockdown[0]) &
-                                        (self.times < lockdown[1]))
+        self.lockdown_select = np.float64((self.times >= lockdown[0]) &
+                                          (self.times < lockdown[1]))
         self.max_t = self.m_select.shape[0] - 1
 
     def create_initial_state(self, init_matrix=None):
@@ -238,7 +238,8 @@ class CovidUKStochastic(CovidUK):
             m_switch = tf.gather(self.m_select, t_idx)
             commute_volume = tf.pow(tf.gather(self.W, t_idx), param['omega'])
             lockdown = tf.gather(self.lockdown_select, t_idx)
-            beta = tf.where(lockdown == 0, param['beta1'], param['beta1'] * param['beta3'])
+            beta = param['beta1'] * tf.pow(param['beta3'], lockdown)
+            #beta = tf.where(lockdown == 0, param['beta1'], param['beta1'] * param['beta3'])
 
             infec_rate = beta * (
                 tf.gather(self.M.matvec(state[..., 2]), m_switch) +
@@ -273,5 +274,6 @@ class CovidUKStochastic(CovidUK):
         :param param: a list of parameters
         :returns: a scalar giving the log probability of the epidemic
         """
-        hazard = self.make_h(param)
-        return discrete_markov_log_prob(y, state_init, hazard, self.time_step)
+        with tf.name_scope('CovidUKStochastic.log_prob'):
+            hazard = self.make_h(param)
+            return discrete_markov_log_prob(y, state_init, hazard, self.time_step)

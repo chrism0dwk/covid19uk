@@ -220,4 +220,4 @@ if __name__ == '__main__':
     plt.show()
 
     with open('stochastic_sim.pkl', 'wb') as f:
-        pkl.dump({'events': upd, 'state_init': state_init}, f)
+        pkl.dump({'events': upd.numpy(), 'state_init': state_init.numpy()}, f)
