@@ -75,6 +75,5 @@ class TestChainBinomialLogp(unittest.TestCase):
         print("Percentiles:", q.numpy())
 
 
-
 if __name__ == '__main__':
     unittest.main()

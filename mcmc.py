@@ -46,15 +46,6 @@ if __name__ == '__main__':
     param = sanitise_parameter(config['parameter'])
     settings = sanitise_settings(config['settings'])
 
-    parser = optparse.OptionParser()
-    parser.add_option("--config", "-c", dest="config", default="ode_config.yaml",
-                      help="configuration file")
-    options, args = parser.parse_args()
-    with open(options.config, 'r') as ymlfile:
-        config = yaml.load(ymlfile)
-
-    param = sanitise_parameter(config['parameter'])
-    settings = sanitise_settings(config['settings'])
 
     data = load_data(config['data'], settings, DTYPE)
 

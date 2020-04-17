@@ -103,4 +103,21 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step):
     # Todo This loop tries to avoid batching issues in the rate calculations.  Maybe a bottleneck if
     #   the computations within the rates themselves are trivial.
     _, logp_parts = tf.while_loop(lambda i, _: i < t.shape[0], log_prob_t, (0, logp_parts))
-    return tf.reduce_sum(logp_parts.stack())
+    return logp_parts.stack()
+
+
+def events_to_full_transitions(events, initial_state):
+    """Creates a state tensor given matrices of transition events
+    and the initial state
+    :param events: a tensor of shape [t, c, s, s] for t timepoints, c metapopulations
+                   and s states.
+    :param initial_state: the initial state matrix of shape [c, s]
+    """
+    def f(state, events):
+        survived = tf.reduce_sum(state, axis=-2) - tf.reduce_sum(events, axis=-1)
+        new_state = tf.linalg.set_diag(events, survived)
+        return new_state
+
+    return tf.scan(fn=f, elems=events, initializer=tf.linalg.diag(initial_state))
+
+

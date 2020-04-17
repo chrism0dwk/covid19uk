@@ -6,7 +6,7 @@ import numpy as np
 
 from covid.impl.util import make_transition_rate_matrix
 from covid.rdata import load_mobility_matrix, load_population, load_age_mixing
-from covid.pydata import load_commute_volume
+from covid.pydata import load_commute_volume, collapse_commute_data, collapse_pop
 from covid.impl.discrete_markov import discrete_markov_simulation, discrete_markov_log_prob
 
 tode = tfp.math.ode
@@ -47,17 +47,18 @@ def load_data(paths, settings, dtype=DTYPE):
     M_tt, age_groups = load_age_mixing(paths['age_mixing_matrix_term'])
     M_hh, _ = load_age_mixing(paths['age_mixing_matrix_hol'])
 
-    C, la_names = load_mobility_matrix(paths['mobility_matrix'])
-    np.fill_diagonal(C, 0.)
+    C = collapse_commute_data(paths['mobility_matrix'])
+    la_names = C.index.to_numpy()
 
     w_period = [settings['inference_period'][0], settings['prediction_period'][1]]
     W = load_commute_volume(paths['commute_volume'], w_period)['percent']
 
-    pop = load_population(paths['population_size'])
+    pop = collapse_pop(paths['population_size'])
 
     M_tt = M_tt.astype(DTYPE)
     M_hh = M_hh.astype(DTYPE)
-    C = C.astype(DTYPE)
+    C = C.to_numpy().astype(DTYPE)
+    np.fill_diagonal(C, 0.)
     W = W.astype(DTYPE)
     pop['n'] = pop['n'].astype(DTYPE)
 
@@ -136,10 +137,7 @@ class CovidUK:
             I = np.zeros(self.N.shape, dtype=DTYPE)
             I[149*17+10] = 30.  # Middle-aged in Surrey
         else:
-            np.testing.assert_array_equal(init_matrix.shape, [self.n_lads, self.n_ages],
-                                          err_msg=f"init_matrix does not have shape [<num lads>,<num ages>] \
-                                          ({self.n_lads},{self.n_ages})")
-            I = tf.reshape(init_matrix, [-1])
+            I = tf.convert_to_tensor(init_matrix, dtype=DTYPE)
         S = self.N - I
         E = tf.zeros(self.N.shape, dtype=DTYPE)
         R = tf.zeros(self.N.shape, dtype=DTYPE)
@@ -239,12 +237,11 @@ class CovidUKStochastic(CovidUK):
             commute_volume = tf.pow(tf.gather(self.W, t_idx), param['omega'])
             lockdown = tf.gather(self.lockdown_select, t_idx)
             beta = param['beta1'] * tf.pow(param['beta3'], lockdown)
-            #beta = tf.where(lockdown == 0, param['beta1'], param['beta1'] * param['beta3'])
 
             infec_rate = beta * (
                 tf.gather(self.M.matvec(state[..., 2]), m_switch) +
                 param['beta2'] * self.Kbar * commute_volume * self.C.matvec(state[..., 2] / self.N_sum))
-            infec_rate = infec_rate / self.N  # Vector of length nc
+            infec_rate = infec_rate / self.N + 1.0e-12 # Vector of length nc
 
             ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])  # Vector of length nc
             ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])  # Vector of length nc

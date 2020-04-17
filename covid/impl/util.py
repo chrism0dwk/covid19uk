@@ -11,10 +11,8 @@ def _gen_index(state, trm_coords):
     state = tf.convert_to_tensor(state)
     trm_coords = tf.convert_to_tensor(trm_coords)
 
-    output_shape = state.shape.as_list() + [state.shape[-1]]
     i_shp = state.shape[:-1].as_list() + [trm_coords.shape[0]] + \
             [len(state.shape) + 1]
-    num_updates = tf.reduce_prod(i_shp[:-1], axis=0)
 
     b_idx = np.array(list(np.ndindex(*i_shp[:-1])))[:, :-1]
     m_idx = tf.tile(trm_coords, [tf.reduce_prod(i_shp[:-2]), 1])
