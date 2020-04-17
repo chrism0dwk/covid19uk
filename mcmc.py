@@ -15,16 +15,23 @@ from covid.util import *
 DTYPE = np.float64
 
 
-def random_walk_mvnorm_fn(covariance, name=None):
+def random_walk_mvnorm_fn(covariance, p_u=0.95, name=None):
     """Returns callable that adds Multivariate Normal noise to the input"""
     covariance = covariance + tf.eye(covariance.shape[0], dtype=tf.float64) * 1.e-9
     scale_tril = tf.linalg.cholesky(covariance)
-    rv = tfp.distributions.MultivariateNormalTriL(loc=tf.zeros(covariance.shape[0], dtype=tf.float64),
-                                                  scale_tril=scale_tril)
+    rv_adapt = tfp.distributions.MultivariateNormalTriL(loc=tf.zeros(covariance.shape[0], dtype=tf.float64),
+                                                        scale_tril=scale_tril)
+    rv_fix = tfp.distributions.Normal(loc=tf.zeros(covariance.shape[0], dtype=tf.float64),
+                                      scale=0.01/covariance.shape[0],)
+    u = tfp.distributions.Bernoulli(probs=p_u)
 
     def _fn(state_parts, seed):
         with tf.name_scope(name or 'random_walk_mvnorm_fn'):
-            new_state_parts = [rv.sample() + state_part for state_part in state_parts]
+            def proposal():
+                rv = tf.stack([rv_fix.sample(), rv_adapt.sample()])
+                uv = u.sample()
+                return tf.gather(rv, uv)
+            new_state_parts = [proposal() + state_part for state_part in state_parts]
             return new_state_parts
 
     return _fn
@@ -89,7 +96,7 @@ if __name__ == '__main__':
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
     @tf.function(autograph=False, experimental_compile=True)
-    def sample(n_samples, init_state, scale, num_burnin_steps=0):
+    def sample(n_samples, init_state, scale, num_burnin_steps=0, bounded_convergence=0.95):
         return tfp.mcmc.sample_chain(
             num_results=n_samples,
             num_burnin_steps=num_burnin_steps,
@@ -97,7 +104,7 @@ if __name__ == '__main__':
             kernel=tfp.mcmc.TransformedTransitionKernel(
                     inner_kernel=tfp.mcmc.RandomWalkMetropolis(
                         target_log_prob_fn=logp,
-                        new_state_fn=random_walk_mvnorm_fn(scale)
+                        new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence)
                     ),
                     bijector=unconstraining_bijector),
             trace_fn=lambda _, pkr: pkr.inner_results.is_accepted)
@@ -128,7 +135,7 @@ if __name__ == '__main__':
 
     step_start = time.perf_counter()
     samples, results = sample(num_final_samples,
-                              init_state=joint_posterior[-1, :], scale=scale,)
+                              init_state=joint_posterior[-1, :], scale=scale, bounded_convergence=1.0)
     joint_posterior = tf.concat([joint_posterior, samples], axis=0)
     step_end = time.perf_counter()
     print(f'Sampling step time {step_end - step_start}')
