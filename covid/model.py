@@ -134,15 +134,11 @@ class CovidUK:
                                         (self.times < lockdown[1]))
         self.max_t = self.m_select.shape[0] - 1
 
-    def create_initial_state(self, init_matrix=None):
-        if init_matrix is None:
-            I = np.zeros(self.N.shape, dtype=DTYPE)
-            I[149*17+10] = 30.  # Middle-aged in Surrey
-        else:
-            I = tf.convert_to_tensor(init_matrix, dtype=DTYPE)
-        S = self.N - I
-        E = tf.zeros(self.N.shape, dtype=DTYPE)
-        R = tf.zeros(self.N.shape, dtype=DTYPE)
+    def create_initial_state(self, init_E, init_I, init_R):
+        E = tf.convert_to_tensor(init_E, dtype=DTYPE)
+        I = tf.convert_to_tensor(init_I, dtype=DTYPE)
+        R = tf.convert_to_tensor(init_R, dtype=DTYPE)
+        S = self.N - E - I - R
         return tf.stack([S, E, I, R], axis=-1)
 
 

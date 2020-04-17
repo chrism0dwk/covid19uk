@@ -54,7 +54,7 @@ if __name__ == '__main__':
 
     case_timeseries = phe_linelist_timeseries(config['data']['reported_cases'])
     y = zero_cases(case_timeseries, data['pop'])
-    y = y[settings['inference_period'][0]:settings['inference_period'][1]]
+    y = y[:settings['inference_period'][1]]
 
     date_range = settings['inference_period'] #'[y.index.levels[0].min(), y.index.levels[0].max()]
 
@@ -68,31 +68,29 @@ if __name__ == '__main__':
                            lockdown=settings['lockdown'],
                            time_step=int(settings['time_step']))
 
-    seeding = seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
-    #seeding = y[:'2020-03-09'].sum(level=[1, 2]).to_numpy()
-    state_init = simulator.create_initial_state(init_matrix=seeding)
+    state_init = simulator.create_initial_state(init_E=y['2020-03-09'].to_numpy(),
+                                                init_I=y['2020-03-04'].to_numpy(),
+                                                init_R=y[date_range[0]:'2020-03-01'].sum(level=[1,2]).to_numpy())
 
     def logp(par):
         p = param
         p['beta1'] = par[0]
         p['beta3'] = par[1]
         p['gamma'] = par[2]
-        p['I0'] = par[3]
-        p['r'] = par[4]
+        p['r'] = par[3]
         beta_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE), rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
         beta3_logp = tfd.Gamma(concentration=tf.constant(20., dtype=DTYPE),
                                rate=tf.constant(20., dtype=DTYPE)).log_prob(p['beta3'])
         gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE), rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
         I0_logp = tfd.Gamma(concentration=tf.constant(1.5, dtype=DTYPE), rate=tf.constant(0.05, dtype=DTYPE)).log_prob(p['I0'])
         r_logp = tfd.Gamma(concentration=tf.constant(0.1, dtype=DTYPE), rate=tf.constant(0.1, dtype=DTYPE)).log_prob(p['gamma'])
-        state_init = simulator.create_initial_state(init_matrix=seeding * p['I0'])
         t, sim, solve = simulator.simulate(p, state_init)
-        y_logp = covid19uk_logp(y, sim, 0.1, p['r'])
+        y_logp = covid19uk_logp(y['2020-03-01':date_range[1]], sim, 0.1, p['r'])
         logp = beta_logp + beta3_logp + gamma_logp + I0_logp + r_logp + y_logp
         return logp
 
     unconstraining_bijector = [tfb.Exp()]
-    initial_mcmc_state = np.array([0.05, 1.0, 0.25, 1.0, 50.0], dtype=np.float64)  # beta1, gamma, I0
+    initial_mcmc_state = np.array([0.05, 1.0, 0.25, 50.0], dtype=np.float64)  # beta1, gamma, I0
     print("Initial log likelihood:", logp(initial_mcmc_state))
 
     @tf.function(autograph=False, experimental_compile=True)
@@ -111,7 +109,7 @@ if __name__ == '__main__':
 
     joint_posterior = tf.zeros([0] + list(initial_mcmc_state.shape), dtype=DTYPE)
 
-    scale = np.diag([0.1, 0.1, 0.1, 0.1, 1.0])
+    scale = np.diag([0.1, 0.1, 0.1, 1.0])
     overall_start = time.perf_counter()
 
     num_covariance_estimation_iterations = 20
