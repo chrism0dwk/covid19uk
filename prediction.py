@@ -43,7 +43,7 @@ if __name__ == '__main__':
 
     case_timeseries = phe_linelist_timeseries(config['data']['reported_cases'])
     y = zero_cases(case_timeseries, data['pop'])
-    y = y[settings['inference_period'][0]:settings['inference_period'][1]]
+    y = y[:settings['inference_period'][1]]
 
     date_range = [y.index.levels[0].min(), y.index.levels[0].max()]
 
@@ -66,9 +66,9 @@ if __name__ == '__main__':
                            lockdown=settings['lockdown'],
                            time_step=1)
 
-    seeding = seed_areas(data['pop']['n'])
-    #seeding = y[:'2020-03-09'].sum(level=[1 , 2]).to_numpy()# seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
-    state_init = simulator.create_initial_state(init_matrix=seeding)
+    state_init = [y['2020-03-09'].to_numpy(),
+                  y['2020-03-04'].to_numpy(),
+                  y[date_range[0]:'2020-03-01'].sum(level=[1, 2]).to_numpy()]
 
     @tf.function
     def prediction(beta, beta3, gamma, I0, r_):
@@ -81,12 +81,13 @@ if __name__ == '__main__':
             p['gamma'] = gamma[i]
             p['I0'] = I0[i]
             p['r'] = r_[i]
-            state_init = simulator.create_initial_state(seeding * p['I0'])
-            t, sim, solver_results = simulator.simulate(p, state_init)
+            state_init_ = simulator.create_initial_state(state_init[0]*p['I0'], state_init[1]*p['I0'],
+                                                         state_init[2])
+            t, sim, solver_results = simulator.simulate(p, state_init_)
             r0 = simulator.eval_Rt(p, [t[0]], sim[0, :, 0])  # Todo: Reduce memory usage in batching,
                                                               #   currently limited to first 10 timesteps.
-            r1 = simulator.eval_Rt(p, [t[29]], sim[29, :, 0])
-            r2 = simulator.eval_Rt(p, [t[42]], sim[42, :, 0])
+            r1 = simulator.eval_Rt(p, [t[32]], sim[32, :, 0])
+            r2 = simulator.eval_Rt(p, [t[62]], sim[62, :, 0])
             Rt = Rt.write(i, [r0, r1, r2])
             sims = sims.write(i, sim)
         return sims.gather(range(beta.shape[0])), Rt.gather(range(beta.shape[0]))
@@ -112,7 +113,7 @@ if __name__ == '__main__':
     R0_ci = np.percentile(r0, q=[2.5, 50, 97.5], axis=0)
     print("Rt:", R0_ci)
     fig, ax = plt.subplots(1, 3)
-    rt_dates = ['2020-02-19', '2020-03-19', '2020-04-01']
+    rt_dates = ['2020-02-19', '2020-04-01', '2020-05-01']
     for i, date in enumerate(rt_dates):
         seaborn.kdeplot(r0[:, i], ax=ax[i])
         ax[i].set_xlabel(f"Rt({date})")
