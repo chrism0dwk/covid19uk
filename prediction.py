@@ -47,7 +47,7 @@ if __name__ == '__main__':
 
     date_range = [y.index.levels[0].min(), y.index.levels[0].max()]
 
-    with open('pi_beta_2020-04-04.pkl', 'rb') as f:
+    with open(config['output']['posterior'], 'rb') as f:
         pi_beta = pkl.load(f)
 
     # Predictive distribution of epidemic spread
@@ -96,7 +96,7 @@ if __name__ == '__main__':
     with tf.device('/CPU:0'):  # Todo: Using CPU because GPU goes OOM
         sims, r0 = prediction(draws[:, 0], draws[:, 1], draws[:, 2], draws[:, 3], draws[:, 4])
         sims = tf.stack(sims)  # shape=[n_sims, n_times, n_metapops, n_states]
-        save_sims(simulator.times, sims, data['la_names'], data['age_groups'], 'pred_2020-04-04.h5')
+        save_sims(simulator.times, sims, data['la_names'], data['age_groups'], config['output']['prediction'])
         dub_time = [doubling_time(simulator.times, sim, '2020-03-01', '2020-04-01') for sim in sims.numpy()]
 
         fig, ax = plot_prediction(settings['prediction_period'], sims, y.sum(level=0))
@@ -119,7 +119,7 @@ if __name__ == '__main__':
         ax[i].set_xlabel(f"Rt({date})")
     plt.title("R0")
     plt.show()
-    np.savetxt("rt_2020-04-04.csv", r0, header='.'.join(rt_dates))
+    np.savetxt(config['output']['rt_prediction'], r0, header='.'.join(rt_dates))
 
     # Doubling time
     dub_ci = tfs.percentile(dub_time, q=[2.5, 50, 97.5])

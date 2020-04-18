@@ -34,4 +34,6 @@ settings:
     - 2020-06-01
 
 output:
-  simulation: covid_ode.hd5
+  posterior: posterior.pkl
+  prediction: prediction.hd5
+  rt: rt_prediction.csv
