@@ -36,4 +36,4 @@ settings:
 output:
   posterior: posterior.pkl
   prediction: prediction.hd5
-  rt: rt_prediction.csv
+  rt_prediction: rt_prediction.csv
