@@ -85,7 +85,7 @@ def phe_death_hosp_to_death(filename, date_range=['2020-02-02', '2020-03-21']):
     return data.dropna(axis=0)
 
 
-def phe_linelist_timeseries(filename, spec_date='specimen_date', utla='UTLA_code', age='Age',
+def phe_linelist_timeseries(filename, spec_date='specimen_date', utla='UTLA_code', age='age',
                             date_range=None):
 
     linelist = pd.read_csv(filename)
