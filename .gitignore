@@ -9,3 +9,7 @@ prediction_results_files/
 pred_plot.csv
 prediction_results.Rmd
 prediction_results.pdf
+figs/
+posterior.pkl
+rt_prediction.csv
+prediction.hd5
