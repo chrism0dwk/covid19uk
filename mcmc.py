@@ -155,5 +155,5 @@ if __name__ == '__main__':
     results.index = pd.Index(['beta1','beta3','gamma','I0','r'])
     print(results)
 
-    with open('pi_beta_2020-04-04.pkl', 'wb') as f:
+    with open(config['output']['posterior'], 'wb') as f:
         pkl.dump(joint_posterior, f)
