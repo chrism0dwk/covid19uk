@@ -148,7 +148,6 @@ if __name__ == '__main__':
     for i in range(joint_posterior.shape[1]):
         ax[i].plot(joint_posterior[:, i])
 
-    fig.savefig("figs/traceplot.pdf")
     plt.show()
     pi_mean = np.mean(joint_posterior, axis=0)
     q = np.percentile(joint_posterior, q=[2.5, 97.5], axis=0)
