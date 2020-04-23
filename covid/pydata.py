@@ -116,6 +116,7 @@ def phe_linelist_timeseries(filename, spec_date='specimen_date', utla='UTLA_code
     case_counts = linelist.groupby(['date', utla, 'age_group']).size()
     case_counts.sort_index(axis=0, inplace=True)
 
+    case_counts.index.names = ['date','UTLA19CD','age_group']
     return case_counts
 
 
@@ -129,7 +130,8 @@ def zero_cases(case_timeseries, population):
     dates = np.arange(case_timeseries.index.levels[0].min(),
                       case_timeseries.index.levels[0].max() + np.timedelta64(1, 'D'), # inclusive interval
                       np.timedelta64(1, 'D'))
-    fullidx = pd.MultiIndex.from_product([dates, *population.index.levels])
+    fullidx = pd.MultiIndex.from_product([dates, *population.index.levels],
+                                         names=['date', *population.index.names])
     y = case_timeseries.reindex(fullidx)
     y[y.isna()] = 0. # Big assumption that a missing value is a true 0!
     return y

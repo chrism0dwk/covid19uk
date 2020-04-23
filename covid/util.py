@@ -213,8 +213,8 @@ def generate_case_numbers(n, rate):
 
 
 def initialise_previous_events_one_time(events, rate):
-
     past_events = generate_case_numbers(events.to_numpy(), rate)
+
     time_index = events.index.get_level_values(0)[0] - pd.to_timedelta(np.arange(past_events.shape[0])+1, 'D')
     new_index = pd.MultiIndex.from_product([time_index,
                                             events.index.get_level_values(1).unique(),
@@ -222,6 +222,7 @@ def initialise_previous_events_one_time(events, rate):
     past_events = pd.Series(past_events.numpy().flatten(),
                             index=new_index,
                             name='n')
+    print(".", flush=True, end='')
     return past_events
 
 
@@ -231,6 +232,7 @@ def initialise_previous_events(events, rate):
     :param events: a pandas timeseries with index [date, space, age]
     :param rate: a Markov transition rate.
     """
+    print("<generate_case_numbers>", flush=True, end='')
     events = events.groupby(level=0, axis=0).apply(
             lambda cases: initialise_previous_events_one_time(cases, 0.5))
     events = events.sum(level=list(range(1, 4)))

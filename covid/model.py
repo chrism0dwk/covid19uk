@@ -4,6 +4,7 @@ import tensorflow_probability as tfp
 from tensorflow_probability.python.internal import dtype_util
 import numpy as np
 
+from covid import config
 from covid.impl.util import make_transition_rate_matrix
 from covid.rdata import load_mobility_matrix, load_population, load_age_mixing
 from covid.pydata import load_commute_volume, collapse_commute_data, collapse_pop
@@ -12,7 +13,7 @@ from covid.impl.discrete_markov import discrete_markov_simulation, discrete_mark
 tode = tfp.math.ode
 tla = tf.linalg
 
-DTYPE = np.float64
+DTYPE = config.floatX
 
 
 def power_iteration(A, tol=1e-3):
@@ -91,11 +92,11 @@ class CovidUK:
         :param lockdown: a length-2 tuple of start and end of lockdown measures
         :param time_step: a time step to use in the discrete time simulation
         """
-        dtype = dtype_util.common_dtype([M_tt, M_hh, W, C, N], dtype_hint=np.float64)
+        dtype = dtype_util.common_dtype([M_tt, M_hh, W, C, N], dtype_hint=DTYPE)
         self.n_ages = M_tt.shape[0]
         self.n_lads = C.shape[0]
-        self.M_tt = tf.convert_to_tensor(M_tt, dtype=tf.float64)
-        self.M_hh = tf.convert_to_tensor(M_hh, dtype=tf.float64)
+        self.M_tt = tf.convert_to_tensor(M_tt, dtype=DTYPE)
+        self.M_hh = tf.convert_to_tensor(M_hh, dtype=DTYPE)
 
         # Create one linear operator comprising both the term and holiday
         # matrices. This is nice because
@@ -128,7 +129,7 @@ class CovidUK:
 
         self.m_select = np.int64((self.times >= holidays[0]) &
                                  (self.times < holidays[1]))
-        self.lockdown_select = np.float64((self.times >= lockdown[0]) &
+        self.lockdown_select = DTYPE((self.times >= lockdown[0]) &
                                           (self.times < lockdown[1]))
         self.max_t = self.m_select.shape[0] - 1
 
@@ -241,7 +242,7 @@ class CovidUKStochastic(CovidUK):
             infec_rate = beta * (
                 tf.gather(self.M.matvec(state[..., 2]), m_switch) +
                 param['beta2'] * self.Kbar * commute_volume * self.C.matvec(state[..., 2] / self.N_sum))
-            infec_rate = infec_rate / self.N + 1.0e-12 # Vector of length nc
+            infec_rate = infec_rate / self.N + 1.0e-12  # Vector of length nc
 
             ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])  # Vector of length nc
             ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])  # Vector of length nc
@@ -260,7 +261,7 @@ class CovidUKStochastic(CovidUK):
         """
         param = {k: tf.constant(v, dtype=tf.float64) for k, v in param.items()}
         hazard = self.make_h(param)
-        t, sim = discrete_markov_simulation(hazard, state_init, np.float64(0.),
+        t, sim = discrete_markov_simulation(hazard, state_init, DTYPE(0.),
                                             np.float64(self.times.shape[0]), self.time_step)
         return t, sim
 

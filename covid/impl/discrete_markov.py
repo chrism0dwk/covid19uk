@@ -30,10 +30,6 @@ def chain_binomial_propagate(h, time_step, seed=None):
     def propagate_fn(t, state):
         rate_matrix = h(t, state)
         # Set diagonal to be the negative of the sum of other elements in each row
-        #rate_matrix = tf.linalg.set_diag(rate_matrix,
-        #                                 -tf.reduce_sum(rate_matrix, axis=-1))
-        # Calculate Markov transition probability matrix
-        #markov_transition = tf.linalg.expm(rate_matrix*time_step)
         markov_transition = approx_expm(rate_matrix*time_step)
         num_states = markov_transition.shape[-1]
         prev_probs = tf.zeros_like(markov_transition[..., :, 0])
@@ -86,20 +82,26 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step):
                        and c metapopulations
     :param hazard_fn: a function that takes a state and returns a matrix of transition rates
     """
-    states = tf.concat([[init_state], tf.reduce_sum(events, axis=-2)], axis=-3)[:-1]
-    t = tf.range(states.shape[-3])
+    t = tf.range(events.shape[-4])
 
     logp_parts = tf.TensorArray(dtype=events.dtype, size=t.shape[0])
 
-    def log_prob_t(i, accum):
-        rate_matrix = hazard_fn(i, states[i])
+    def log_prob_t(i, state, accum):
+        # Calculate transition rate matrix
+        rate_matrix = hazard_fn(i, state)  # Todo ideally this should be batched, not iterated
         markov_transition = approx_expm(rate_matrix*time_step)
-        logp = tfd.Multinomial(states[i], probs=markov_transition).log_prob(events[i])
-        return i+1, accum.write(i, tf.reduce_sum(logp))
+        # Calculate event matrix
+        event_matrix = tf.linalg.set_diag(events[i], state - tf.reduce_sum(events[i], axis=-1))
+        logp = tfd.Multinomial(state, probs=markov_transition).log_prob(event_matrix)
+        new_state = tf.reduce_sum(event_matrix, axis=-2)
+        return i+1, new_state, accum.write(i, logp)
+
+    def cond(i, _1, _2):
+        return i < t.shape[0]
 
     # Todo This loop tries to avoid batching issues in the rate calculations.  Maybe a bottleneck if
     #   the computations within the rates themselves are trivial.
-    _, logp_parts = tf.while_loop(lambda i, _: i < t.shape[0], log_prob_t, (0, logp_parts))
+    _, _, logp_parts = tf.while_loop(cond, log_prob_t, (0, init_state, logp_parts))
     return logp_parts.stack()
 
 
