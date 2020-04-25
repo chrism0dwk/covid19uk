@@ -38,7 +38,7 @@ if __name__ == '__main__':
     y = zero_cases(case_timeseries, data['pop'])
     y = y[settings['inference_period'][0]:settings['inference_period'][1]]
 
-    date_range = [y.index.levels[0].min(), y.index.levels[0].max()]
+    date_range = settings['inference_period']
 
     with open(config['output']['posterior'], 'rb') as f:
         pi_beta = pkl.load(f)
