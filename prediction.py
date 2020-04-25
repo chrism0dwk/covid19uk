@@ -43,11 +43,6 @@ if __name__ == '__main__':
     with open(config['output']['posterior'], 'rb') as f:
         pi_beta = pkl.load(f)
 
-    # Predictive distribution of epidemic spread
-    data_dates = np.arange(date_range[0],
-                           date_range[1]+np.timedelta64(1,'D'),
-                           np.timedelta64(1, 'D'))
-
     simulator = CovidUKODE(M_tt=data['M_tt'],
                            M_hh=data['M_hh'],
                            C=data['C'],
