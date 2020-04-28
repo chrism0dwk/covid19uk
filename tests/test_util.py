@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 import tensorflow as tf
 
-from covid.impl.util import make_transition_rate_matrix
+from covid.impl.util import make_transition_matrix
 
 state2b3c3s = [[[[0., 0.3996, 0.  ],
                  [0., 0.,     0.14],
@@ -29,7 +29,7 @@ class TestRateUtils(unittest.TestCase):
              tf.reduce_sum(state, axis=-1)  # S->I rate
         ir = 0.14 * state[..., 1]  # I->R rate
 
-        trm = make_transition_rate_matrix([si, ir], [[0, 1], [1, 2]], state)
+        trm = make_transition_matrix([si, ir], [[0, 1], [1, 2]], state)
         np.testing.assert_array_almost_equal(trm.numpy(), state2b3c3s, decimal=5)
 
 

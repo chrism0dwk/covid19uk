@@ -6,7 +6,7 @@ tfd = tfp.distributions
 tfb = tfp.bijectors
 
 from covid.impl.discrete_markov import discrete_markov_simulation, discrete_markov_log_prob
-from covid.impl.util import make_transition_rate_matrix
+from covid.impl.util import make_transition_matrix
 
 
 class TestChainBinomialLogp(unittest.TestCase):
@@ -30,7 +30,7 @@ class TestChainBinomialLogp(unittest.TestCase):
             si = beta * state[..., S] * state[..., I] / tf.reduce_sum(state, axis=-1)
             ir = gamma * state[..., I]
 
-            rate_matrix = make_transition_rate_matrix([si, ir], [[S, I], [I, R]], state)
+            rate_matrix = make_transition_matrix([si, ir], [[S, I], [I, R]], state)
             return rate_matrix
         return fn
 

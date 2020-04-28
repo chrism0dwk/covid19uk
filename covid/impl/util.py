@@ -21,7 +21,7 @@ def _gen_index(state, trm_coords):
     return tf.reshape(idx, i_shp)
 
 
-def make_transition_rate_matrix(rates, rate_coords, state):
+def make_transition_matrix(rates, rate_coords, state):
     """Create a transition rate matrix
     :param rates: batched transition rate tensors
     :param rate_coords: coordinates of rates in resulting transition matrix

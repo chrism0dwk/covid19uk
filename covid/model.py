@@ -5,7 +5,7 @@ from tensorflow_probability.python.internal import dtype_util
 import numpy as np
 
 from covid import config
-from covid.impl.util import make_transition_rate_matrix
+from covid.impl.util import make_transition_matrix
 from covid.rdata import load_mobility_matrix, load_population, load_age_mixing
 from covid.pydata import load_commute_volume, collapse_commute_data, collapse_pop
 from covid.impl.discrete_markov import discrete_markov_simulation, discrete_markov_log_prob
@@ -247,7 +247,7 @@ class CovidUKStochastic(CovidUK):
             ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])  # Vector of length nc
             ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])  # Vector of length nc
 
-            rate_matrix = make_transition_rate_matrix([infec_rate, ei, ir], [[0, 1], [1, 2], [2, 3]], state)
+            rate_matrix = make_transition_matrix([infec_rate, ei, ir], [[0, 1], [1, 2], [2, 3]], state)
             return rate_matrix
         return h
 

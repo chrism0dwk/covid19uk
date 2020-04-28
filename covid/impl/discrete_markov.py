@@ -4,7 +4,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 tfd = tfp.distributions
 
-from covid.impl.util import make_transition_rate_matrix
+from covid.impl.util import make_transition_matrix
 
 
 def approx_expm(rates):
