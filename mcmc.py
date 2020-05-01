@@ -86,6 +86,7 @@ model = CovidUKStochastic(M_tt=data['M_tt'],
 seeding = seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
 state_init = model.create_initial_state(init_matrix=seeding)
 
+
 def logp(par, se, ei):
     p = param
     p['beta1'] = tf.convert_to_tensor(par[0], dtype=DTYPE)
@@ -129,9 +130,8 @@ def random_walk_mvnorm_fn(covariance, p_u=0.95, name=None):
 
     return _fn
 
-unconstraining_bijector = [tfb.Exp()]
-#initial_mcmc_state = event_tensor  # tf.constant([0.09, 0.5], dtype=DTYPE)  # beta1, gamma, I0
-print("Initial log likelihood:", logp([0.05, 0.24], se_events, ei_events))
+unconstraining_bijector = [tfb.Identity()]
+print("Initial logpi:", logp([0.05, 0.24], se_events, ei_events))
 
 
 def trace_fn(state, prev_results):
@@ -170,7 +170,7 @@ def is_accepted(result):
         return is_accepted(result.inner_results)
 
 
-@tf.function  # (autograph=False, experimental_compile=True)
+@tf.function  #(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
@@ -201,9 +201,9 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__=='__main__':
 
-    num_loop_iterations = 20
+    num_loop_iterations = 100
     num_loop_samples = 50
-    current_state = [np.array([0.05, 0.24], dtype=DTYPE),
+    current_state = [np.array([0.108, 0.668], dtype=DTYPE),
                      se_events, ei_events]
 
     posterior = h5py.File('posterior.h5','w')
@@ -215,7 +215,7 @@ if __name__=='__main__':
     se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples,), dtype=np.bool)
     ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples,), dtype=np.bool)
 
-    par_scale = tf.convert_to_tensor([0.001, 0.001], dtype=DTYPE)
+    par_scale = tf.convert_to_tensor(np.diag([0.1, 0.1]), dtype=DTYPE)
 
     # We loop over successive calls to sample because we have to dump results
     #   to disc, or else end OOM (even on a 32GB system).
@@ -224,6 +224,8 @@ if __name__=='__main__':
         current_state = [s[-1] for s in samples]
         s = slice(i*num_loop_samples, i*num_loop_samples+num_loop_samples)
         par_samples[s, ...] = samples[0].numpy()
+        cov = np.cov(np.log(par_samples[:(i*num_loop_samples+num_loop_samples), ...]), rowvar=False)
+        par_scale = 2.38**2 * cov / 2.
         se_samples[s, ...] = samples[1].numpy()
         ei_samples[s, ...] = samples[2].numpy()
         par_results[s, ...] = results[0].numpy()

@@ -226,10 +226,8 @@ class MH_within_Gibbs(tfp.mcmc.TransitionKernel):
                 return self._target_log_prob_fn(*state)
 
             kernel = make_kernel_fn(_target_log_prob_fn_part)
-            # results = advance_target_log_prob(step_results[i],
-            #                                   step_results[prev_step[i]]) or kernel.bootstrap_results(
-            #     state[i])
-            results = kernel.bootstrap_results(state[i])
+            results = advance_target_log_prob(step_results[i],
+                                              step_results[prev_step[i]]) or kernel.bootstrap_results(state[i])
             state[i], step_results[i] = kernel.one_step(state[i], results)
         return state, step_results
 
@@ -241,5 +239,11 @@ class MH_within_Gibbs(tfp.mcmc.TransitionKernel):
                 return self._target_log_prob_fn(*state)
 
             kernel = make_kernel_fn(_target_log_prob_fn_part)
-            results.append(kernel.bootstrap_results(state[i]))
+            # If a kernel is transformed, we need to make sure that the state is fed into
+            # the logp on the logp scale!
+            if isinstance(kernel, tfp.mcmc.TransformedTransitionKernel):
+                results.append(kernel.bootstrap_results(transformed_init_state=state[i]))
+            else:
+                results.append(kernel.bootstrap_results(init_state=state[i]))
+
         return results
