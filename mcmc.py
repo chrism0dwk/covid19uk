@@ -14,7 +14,8 @@ from covid import config
 from covid.model import load_data, CovidUKStochastic
 from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 from covid.impl.util import make_transition_matrix
-from covid.impl.mcmc import UncalibratedEventTimesUpdate, MH_within_Gibbs, get_accepted_results
+from covid.impl.mcmc import UncalibratedEventTimesUpdate, UncalibratedLogRandomWalk, MH_within_Gibbs, \
+    random_walk_mvnorm_fn
 from covid.pydata import phe_linelist_timeseries, zero_cases, collapse_pop
 
 DTYPE = config.floatX
@@ -102,35 +103,6 @@ def logp(par, se, ei):
     logp = beta_logp + gamma_logp + y_logp
     return logp
 
-
-def random_walk_mvnorm_fn(covariance, p_u=0.95, name=None):
-    """Returns callable that adds Multivariate Normal noise to the input
-    :param covariance: the covariance matrix of the mvnorm proposal
-    :param p_u: the bounded convergence parameter.  If equal to 1, then all proposals are drawn from the
-                MVN(0, covariance) distribution, if less than 1, proposals are drawn from MVN(0, covariance)
-                with probabilit p_u, and MVN(0, 0.1^2I_d/d) otherwise.
-    :returns: a function implementing the proposal.
-    """
-    covariance = covariance + tf.eye(covariance.shape[0], dtype=DTYPE) * 1.e-9
-    scale_tril = tf.linalg.cholesky(covariance)
-    rv_adapt = tfp.distributions.MultivariateNormalTriL(loc=tf.zeros(covariance.shape[0], dtype=DTYPE),
-                                                        scale_tril=scale_tril)
-    rv_fix = tfp.distributions.Normal(loc=tf.zeros(covariance.shape[0], dtype=DTYPE),
-                                      scale=0.01/covariance.shape[0],)
-    u = tfp.distributions.Bernoulli(probs=p_u)
-
-    def _fn(state_parts, seed):
-        with tf.name_scope(name or 'random_walk_mvnorm_fn'):
-            def proposal():
-                rv = tf.stack([rv_fix.sample(), rv_adapt.sample()])
-                uv = u.sample()
-                return tf.gather(rv, uv)
-            new_state_parts = [proposal() + state_part for state_part in state_parts]
-            return new_state_parts
-
-    return _fn
-
-unconstraining_bijector = [tfb.Identity()]
 print("Initial logpi:", logp([0.05, 0.24], se_events, ei_events))
 
 
@@ -143,12 +115,11 @@ def trace_fn(state, prev_results):
 # kernel factory functions.
 def make_parameter_kernel(scale, bounded_convergence):
     def kernel_func(logp):
-        return tfp.mcmc.TransformedTransitionKernel(
-                inner_kernel=tfp.mcmc.RandomWalkMetropolis(
+        return tfp.mcmc.MetropolisHastings(
+            inner_kernel=UncalibratedLogRandomWalk(
                     target_log_prob_fn=logp,
                     new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence)
-                ),
-            bijector=unconstraining_bijector)
+                ), name='parameter_update')
     return kernel_func
 
 
@@ -170,7 +141,7 @@ def is_accepted(result):
         return is_accepted(result.inner_results)
 
 
-@tf.function  #(autograph=False, experimental_compile=True)
+@tf.function #(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
