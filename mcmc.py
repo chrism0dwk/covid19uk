@@ -1,3 +1,4 @@
+import os
 import tqdm
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -20,9 +21,12 @@ from covid.pydata import phe_linelist_timeseries, zero_cases, collapse_pop
 
 DTYPE = config.floatX
 
-phe = phe_linelist_timeseries('/home/jewellcp/Insync/jewellcp@lancaster.ac.uk/OneDrive Biz - Shared/covid19/data/PHE_2020-04-08/Anonymised Line List 20200409.csv')
+phe = phe_linelist_timeseries(os.getenv('HOME')+'/Projects/covid19uk/data/Anonymised Line List 20200409.csv')
 pop = collapse_pop('data/c2019modagepop.csv')
 cases = zero_cases(phe, pop)
+
+pop = pop.sum(level=[0, 1]) # Reduce to just space
+cases = cases.sum(level=[0, 1]) # Reduce to just space 
 
 ei = cases.copy()
 se = cases.copy()
@@ -37,21 +41,24 @@ se.index = pd.MultiIndex.from_frame(idx_se)
 
 events = pd.concat([se, ei, cases], axis=1)
 events.columns = ['se','ei','ir']
-events.index.set_names(['date','UTLA_code','Age'], range(3), inplace=True)
+events.index.set_names(['date','UTLA_code'], range(2), inplace=True)
 # # events.to_csv('tmp_events.csv')
 #
 # events = pd.read_csv('tmp_events.csv')
 # events.index = pd.MultiIndex.from_frame(events[['date','UTLA_code','Age']])
 # events = events[['se','ei','ir']]
+print(f"Num metapopulations: {events.index.get_level_values(1).unique().size}")
+num_meta = events.index.get_level_values(1).unique().size
+
 events[events.isna()] = 0.0
 num_times = events.index.get_level_values(0).unique().shape[0]
 
-se_events = events['se'].to_numpy().reshape([num_times,2533])
-ei_events = events['ei'].to_numpy().reshape([num_times,2533])
-ir_events = events['ir'].to_numpy().reshape([num_times,2533])
+se_events = events['se'].to_numpy().reshape([num_times, num_meta])
+ei_events = events['ei'].to_numpy().reshape([num_times, num_meta])
+ir_events = events['ir'].to_numpy().reshape([num_times, num_meta])
 
 event_tensor = make_transition_matrix([se_events, ei_events, ir_events], [[0, 1], [1, 2], [2, 3]],
-                                      tf.zeros([num_times, 2533,4]))
+                                      tf.zeros([num_times, num_meta, 4]))
 event_tensor = tf.cast(event_tensor, dtype=DTYPE)
 # 53, 1342
 
@@ -71,12 +78,10 @@ param = {k: tf.constant(v, dtype=DTYPE) for k, v in param.items()}
 
 settings = sanitise_settings(config['settings'])
 
-
 data = load_data(config['data'], settings, DTYPE)
+data['pop'] = data['pop'].sum(level=0)
 
-model = CovidUKStochastic(M_tt=data['M_tt'],
-                          M_hh=data['M_hh'],
-                          C=data['C'],
+model = CovidUKStochastic(C=data['C'],
                           N=data['pop']['n'].to_numpy(),
                           W=data['W'],
                           date_range=settings['inference_period'],
@@ -84,8 +89,8 @@ model = CovidUKStochastic(M_tt=data['M_tt'],
                           lockdown=settings['lockdown'],
                           time_step=1.)
 
-seeding = seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
-state_init = model.create_initial_state(init_matrix=seeding)
+#seeding = seed_areas(data['pop']['n'])  # Seed 40-44 age group, 30 seeds by popn size
+state_init = model.create_initial_state(init_matrix=tf.zeros([num_meta], dtype=DTYPE))
 
 
 def logp(par, se, ei):
@@ -98,7 +103,7 @@ def logp(par, se, ei):
                            rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
     event_tensor = make_transition_matrix([se, ei, ir_events],  # ir_events global scope
                                           [[0, 1], [1, 2], [2, 3]],
-                                          tf.zeros([num_times, 2533, 4]))  # Todo: remove constant
+                                          tf.zeros([num_times, num_meta, 4]))  # Todo: remove constant
     y_logp = tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
     logp = beta_logp + gamma_logp + y_logp
     return logp
@@ -172,16 +177,16 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__=='__main__':
 
-    num_loop_iterations = 100
-    num_loop_samples = 50
+    num_loop_iterations = 250
+    num_loop_samples = 400
     current_state = [np.array([0.108, 0.668], dtype=DTYPE),
                      se_events, ei_events]
 
-    posterior = h5py.File('posterior.h5','w')
+    posterior = h5py.File(os.getenv('global_scratch')+'/posterior.h5','w')
     event_size = [num_loop_iterations * num_loop_samples] + list(current_state[1].shape)
-    par_samples = posterior.create_dataset('samples/parameter', [num_loop_iterations*num_loop_samples, 2], dtype=np.float64)
-    se_samples = posterior.create_dataset('samples/S->E', event_size, dtype=DTYPE)
-    ei_samples = posterior.create_dataset('samples/E->I', event_size, dtype=DTYPE)
+    par_samples = posterior.create_dataset('samples/parameter', [num_loop_iterations*num_loop_samples, 2], dtype=np.float64, compression='gzip')
+    se_samples = posterior.create_dataset('samples/S->E', event_size, dtype=DTYPE, compression='gzip')
+    ei_samples = posterior.create_dataset('samples/E->I', event_size, dtype=DTYPE, compression='gzip')
     par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples,), dtype=np.bool)
     se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples,), dtype=np.bool)
     ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples,), dtype=np.bool)
