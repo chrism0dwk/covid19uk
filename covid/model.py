@@ -93,17 +93,16 @@ class CovidUK:
 
         C = tf.convert_to_tensor(C, dtype=dtype)
         self.C = C + tf.transpose(C)
+        self.C = tf.linalg.set_diag(self.C, tf.zeros(self.C.shape[0], dtype=dtype))
         self.W = tf.constant(W, dtype=dtype)
         self.N = tf.constant(N, dtype=dtype)
 
         self.time_step = time_step
         self.times = np.arange(date_range[0], date_range[1], np.timedelta64(int(time_step), 'D'))
 
-        self.m_select = np.int64((self.times >= holidays[0]) &
-                                 (self.times < holidays[1]))
         self.lockdown_select = DTYPE((self.times >= lockdown[0]) &
                                           (self.times < lockdown[1]))
-        self.max_t = self.m_select.shape[0] - 1
+        self.max_t = self.lockdown_select.shape[0] - 1
 
     def create_initial_state(self, init_matrix=None):
         I = tf.convert_to_tensor(init_matrix, dtype=DTYPE)
@@ -136,7 +135,7 @@ class CovidUKStochastic(CovidUK):
             lockdown = tf.gather(self.lockdown_select, t_idx)
             beta = param['beta1'] * tf.pow(param['beta3'], lockdown)
 
-            infec_rate = beta * (state[..., 2] +  param['beta2'] * commute_volume * tf.linalg.matvec(self.C, state[..., 2] / self.N))
+            infec_rate = beta * (state[..., 2] + param['beta2'] * commute_volume * tf.linalg.matvec(self.C, state[..., 2] / self.N))
             infec_rate = infec_rate / self.N + 1.0e-12  # Vector of length nc
 
             ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])  # Vector of length nc
@@ -154,7 +153,7 @@ class CovidUKStochastic(CovidUK):
         :param state_init: the initial state
         :returns: a tuple of times and simulated states.
         """
-        param = {k: tf.constant(v, dtype=tf.float64) for k, v in param.items()}
+        param = {k: tf.convert_to_tensor(v, dtype=tf.float64) for k, v in param.items()}
         hazard = self.make_h(param)
         t, sim = discrete_markov_simulation(hazard, state_init, DTYPE(0.),
                                             np.float64(self.times.shape[0]), self.time_step)
@@ -167,6 +166,9 @@ class CovidUKStochastic(CovidUK):
         :param param: a list of parameters
         :returns: a scalar giving the log probability of the epidemic
         """
+        dtype = dtype = dtype_util.common_dtype([y, state_init], dtype_hint=DTYPE)
+        y = tf.convert_to_tensor(y, dtype)
+        state_init = tf.convert_to_tensor(state_init, dtype)
         with tf.name_scope('CovidUKStochastic.log_prob'):
             hazard = self.make_h(param)
             return discrete_markov_log_prob(y, state_init, hazard, self.time_step)

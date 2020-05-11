@@ -40,7 +40,7 @@ def sum_age_groups(sim):
 
 def sum_la(sim):
     infec = sim[:, :, 2]
-    infec = infec.reshape([infec.shape[0], 152, 17])
+    infec = infec.reshape([infec.shape[0], 149])
     infec_uk = infec.sum(axis=1)
     return infec_uk
 
@@ -178,18 +178,18 @@ if __name__ == '__main__':
     settings = sanitise_settings(config['settings'])
 
     data = load_data(config['data'], settings, DTYPE)
+    data['pop'] = data['pop'].sum(level=0)
 
-    model = CovidUKStochastic(M_tt=data['M_tt'],
-                              M_hh=data['M_hh'],
-                              C=data['C'],
+    model = CovidUKStochastic(C=data['C'],
                               N=data['pop']['n'].to_numpy(),
                               W=data['W'],
-                              date_range=settings['inference_period'],
+                              date_range=settings['prediction_period'],
                               holidays=settings['holiday'],
                               lockdown=settings['lockdown'],
                               time_step=1.)
 
-    seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
+    #seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
+    seeding = tf.one_hot(tf.squeeze(tf.where(data['pop'].index=='E09000008')), depth=data['pop'].size, dtype=DTYPE)
     state_init = model.create_initial_state(init_matrix=seeding)
 
     start = time.perf_counter()
@@ -204,18 +204,16 @@ if __name__ == '__main__':
     print(f'Run 2 Complete in {(end - start)/1.} seconds')
 
     # Plotting functions
-    fig_attack = plt.figure()
     fig_uk = plt.figure()
     sim = tf.reduce_sum(upd, axis=-2)
 
-    plot_age_attack_rate(fig_attack.gca(), sim, data['pop']['n'].to_numpy(), "Attack Rate")
-    fig_attack.suptitle("Attack Rate")
-    plot_infec_curve(fig_uk.gca(), sim.numpy(), "Infections")
+    # plot_age_attack_rate(fig_attack.gca(), sim, data['pop']['n'].to_numpy(), "Attack Rate")
+    # fig_attack.suptitle("Attack Rate")
+    #plot_infec_curve(fig_uk.gca(), sim.numpy(), "Infections")
+    fig_uk.gca().plot(sim[:, :, 2])
     fig_uk.suptitle("UK Infections")
 
-    fig_attack.autofmt_xdate()
     fig_uk.autofmt_xdate()
-    fig_attack.gca().grid(True)
     fig_uk.gca().grid(True)
     plt.show()
 

@@ -9,9 +9,9 @@ data:
   reported_cases: data/DailyConfirmedCases_2020-04-18.csv
 
 parameter:
-  beta1: 0.05    # R0 2.4
-  beta2: 0.33   # Contact with commuters 1/3rd of the time
-  beta3: 0.5    # lockdown vs normal
+  beta1: 0.9    # R0 2.4
+  beta2: 0.6   # Contact with commuters 1/3rd of the time
+  beta3: 0.1    # lockdown vs normal
   omega: 1.0    # Non-linearity parameter for commuting volume
   nu: 0.25      # E -> I transition rate
   gamma: 0.25   # I -> R transition rate

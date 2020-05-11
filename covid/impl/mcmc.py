@@ -221,7 +221,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
 
             next_target_log_prob = self.target_log_prob_fn(next_state)
 
-            reverse_n = tf.gather_nd(next_state, indices[1])
+            reverse_n = tf.gather_nd(next_state, coord_to_move_to)
             log_acceptance_correction = tfd.Binomial(reverse_n, probs=self._parameters['p']).log_prob(
                 x_star['n_events'])
             log_acceptance_correction -= proposal.log_prob(x_star)  # move old->new
