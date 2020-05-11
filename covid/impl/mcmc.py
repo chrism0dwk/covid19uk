@@ -89,7 +89,7 @@ def matrix_where(condition):
     return true_coords
 
 
-def make_event_time_move(counts_matrix, q, p, alpha):
+def make_event_time_move(counts_matrix, p, alpha):
     """Returns a proposal to move infection times.
 
     Algorithm:
@@ -105,39 +105,27 @@ def make_event_time_move(counts_matrix, q, p, alpha):
     counts_matrix = tf.convert_to_tensor(counts_matrix, dtype=DTYPE)
     p = tf.convert_to_tensor(p, dtype=DTYPE)
     alpha = tf.convert_to_tensor(alpha, dtype=DTYPE)
-    q = tf.convert_to_tensor(q, dtype=DTYPE)
-
-    nz_idx = tf.where(counts_matrix > 0)
 
     # Choose which elements to move
-    # Todo there's a bug here if no elements are chosen.
-    ix = tfd.Sample(tfd.Bernoulli(probs=q, dtype=tf.bool), [tf.shape(nz_idx)[0]], name='ix')
-
-    def tm(ix):
-        # Return coordinates of elements to move
-        return DeterministicFloatX(tf.boolean_mask(nz_idx, ix, axis=0), name='coords')
-
-    def n_events(tm):
+    def n_events():
         # Choose number of units at each coordinate to move
-        n = tf.gather_nd(counts_matrix, indices=tm)
-        return tfd.Binomial(n, probs=p, name='n_events')
+        return tfd.Binomial(counts_matrix, probs=p, name='n_events')
 
-    def dir(tm):
+    def dir():
         # Sample direction to move in
-        return tfd.Sample(tfd.Bernoulli(probs=tf.constant(0.5, dtype=DTYPE)), [tf.shape(tm)[0]], name='dir')
+        return tfd.Sample(tfd.Bernoulli(probs=tf.constant(0.5, dtype=DTYPE)), counts_matrix.shape, name='dir')
 
-    def d_mag(tm):
+    def d_mag():
         # Sample distance to move each set of units
-        return tfd.Sample(tfd.Geometric(probs=alpha, name='d_mag'), [tf.shape(tm)[0]], name='d_mag')
+        return tfd.Sample(tfd.Geometric(probs=alpha, name='d_mag'), counts_matrix.shape, name='d_mag')
 
     def distance(dir, d_mag):
         # Compute the distance to move as product of direction and distance
-        return DeterministicFloatX(tf.gather(tf.constant([-1., 1.], dtype=DTYPE), dir) * (d_mag + 1),
-                                   name='distance')
+        return tfd.Deterministic(
+            tf.gather(tf.constant([-1, 1], dtype=tf.int64), dir) * tf.cast(d_mag, tf.int64),
+            name='distance')
 
     return tfd.JointDistributionNamed({
-        'ix': ix,
-        'tm': tm,
         'n_events': n_events,
         'dir': dir,
         'd_mag': d_mag,
@@ -147,7 +135,6 @@ def make_event_time_move(counts_matrix, q, p, alpha):
 class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
     def __init__(self,
                  target_log_prob_fn,
-                 q,
                  p,
                  alpha,
                  seed=None,
@@ -164,7 +151,6 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         self._name = name
         self._parameters = dict(
             target_log_prob_fn=target_log_prob_fn,
-            q=q,
             p=p,
             alpha=alpha,
             seed=seed,
@@ -198,34 +184,34 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
     def one_step(self, current_state, previous_kernel_results):
         with tf.name_scope('uncalibrated_event_times_rw/onestep'):
             proposal = make_event_time_move(current_state,
-                                            self._parameters['q'],
                                             self._parameters['p'],
                                             self._parameters['alpha'])
             x_star = proposal.sample(seed=self.seed)  # This is the move to make
-            n_move = tf.shape(x_star['tm'], out_type=x_star['tm'].dtype)[0]  # Number of time/metapop moves
 
             # Calculate the coordinate that we'll move events to
-            coord_dtype = x_star['tm'].dtype
-            indices = tf.stack([tf.range(n_move, dtype=coord_dtype),
-                                tf.zeros(n_move, dtype=coord_dtype)], axis=-1)
-            coord_to_move_to = tf.tensor_scatter_nd_add(tensor=x_star['tm'],
-                                                        indices=indices,
-                                                        updates=tf.cast(x_star['distance'], tf.int64))
+            rows = tf.repeat(tf.range(current_state.shape[0], dtype=tf.int64), current_state.shape[1])
+            rows_to = rows + tf.reshape(x_star['distance'], [-1])
+            coords_to = tf.stack([rows_to, tf.tile(tf.range(current_state.shape[1], dtype=tf.int64),
+                                                   [current_state.shape[0]])], axis=-1)
 
             # Update the state
-            indices = tf.concat([x_star['tm'], coord_to_move_to], axis=0)
-            updates = tf.concat([-x_star['n_events'], x_star['n_events']], axis=0)
-            next_state = tf.tensor_scatter_nd_add(tensor=current_state,
-                                                  indices=indices,
-                                                  updates=updates)  # Update state based on move
+            n_events_star = tf.scatter_nd(indices=coords_to,
+                                          updates=tf.reshape(x_star['n_events'], [-1]),
+                                          shape=current_state.shape)
+            next_state = current_state - x_star['n_events']  # Subtract moved events
+            next_state = current_state + n_events_star
 
             next_target_log_prob = self.target_log_prob_fn(next_state)
 
-            reverse_n = tf.gather_nd(next_state, coord_to_move_to)
-            log_acceptance_correction = tfd.Binomial(reverse_n, probs=self._parameters['p']).log_prob(
+            log_acceptance_correction = tfd.Binomial(next_state, probs=self._parameters['p']).log_prob(
+                n_events_star)
+            log_acceptance_correction -= tfd.Binomial(current_state, probs=self._parameters['p']).log_prob(
                 x_star['n_events'])
-            log_acceptance_correction -= proposal.log_prob(x_star)  # move old->new
             log_acceptance_correction = tf.reduce_sum(log_acceptance_correction)
+
+            # tf.print("Log q:", log_acceptance_correction)
+            # tf.print("Old:", previous_kernel_results.target_log_prob)
+            # tf.print("New:", next_target_log_prob)
 
             return [next_state,
                     tfp.mcmc.random_walk_metropolis.UncalibratedRandomWalkResults(
