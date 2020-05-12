@@ -136,7 +136,7 @@ class CovidUKStochastic(CovidUK):
             beta = param['beta1'] * tf.pow(param['beta3'], lockdown)
 
             infec_rate = beta * (state[..., 2] + param['beta2'] * commute_volume * tf.linalg.matvec(self.C, state[..., 2] / self.N))
-            infec_rate = infec_rate / self.N + 1.0e-12  # Vector of length nc
+            infec_rate = infec_rate / self.N #+ 1.0e-6  # Vector of length nc
 
             ei = tf.broadcast_to([param['nu']], shape=[state.shape[0]])  # Vector of length nc
             ir = tf.broadcast_to([param['gamma']], shape=[state.shape[0]])  # Vector of length nc

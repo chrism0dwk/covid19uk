@@ -180,8 +180,8 @@ if __name__ == '__main__':
     data = load_data(config['data'], settings, DTYPE)
     data['pop'] = data['pop'].sum(level=0)
 
-    model = CovidUKStochastic(C=data['C'],
-                              N=data['pop']['n'].to_numpy(),
+    model = CovidUKStochastic(C=data['C'][:10, :10],
+                              N=[100]*10, #data['pop']['n'].to_numpy()[:10],
                               W=data['W'],
                               date_range=settings['prediction_period'],
                               holidays=settings['holiday'],
@@ -189,7 +189,8 @@ if __name__ == '__main__':
                               time_step=1.)
 
     #seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
-    seeding = tf.one_hot(tf.squeeze(tf.where(data['pop'].index=='E09000008')), depth=data['pop'].size, dtype=DTYPE)
+    #seeding = tf.one_hot(tf.squeeze(tf.where(data['pop'].index=='E09000008')), depth=data['pop'].size, dtype=DTYPE)
+    seeding = tf.one_hot(0, depth=10, dtype=DTYPE)
     state_init = model.create_initial_state(init_matrix=seeding)
 
     start = time.perf_counter()
@@ -217,5 +218,5 @@ if __name__ == '__main__':
     fig_uk.gca().grid(True)
     plt.show()
 
-    with open('stochastic_sim.pkl', 'wb') as f:
+    with open('stochastic_sim_small.pkl', 'wb') as f:
         pkl.dump({'events': upd.numpy(), 'state_init': state_init.numpy()}, f)

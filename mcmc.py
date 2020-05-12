@@ -32,8 +32,8 @@ settings = sanitise_settings(config['settings'])
 data = load_data(config['data'], settings, DTYPE)
 data['pop'] = data['pop'].sum(level=0)
 
-model = CovidUKStochastic(C=data['C'],
-                          N=data['pop']['n'].to_numpy(),
+model = CovidUKStochastic(C=data['C'][:10, :10],
+                          N=[100]*10, #data['pop']['n'].to_numpy(),
                           W=data['W'],
                           date_range=settings['inference_period'],
                           holidays=settings['holiday'],
@@ -41,7 +41,7 @@ model = CovidUKStochastic(C=data['C'],
                           time_step=1.)
 
 # Load data
-with open('stochastic_sim.pkl','rb') as f:
+with open('stochastic_sim_small.pkl', 'rb') as f:
     example_sim = pkl.load(f)
 
 event_tensor = example_sim['events']  # shape [T, M, S, S]
@@ -55,9 +55,9 @@ ir_events = event_tensor[:, :, 2, 3]
 def logp(par, se, ei):
     p = param
     p['beta1'] = tf.convert_to_tensor(par[0], dtype=DTYPE)
-    p['beta2'] = tf.convert_to_tensor(par[1], dtype=DTYPE)
-    p['beta3'] = tf.convert_to_tensor(par[2], dtype=DTYPE)
-    p['gamma'] = tf.convert_to_tensor(par[3], dtype=DTYPE)
+    #p['beta2'] = tf.convert_to_tensor(par[1], dtype=DTYPE)
+    #p['beta3'] = tf.convert_to_tensor(par[2], dtype=DTYPE)
+    p['gamma'] = tf.convert_to_tensor(par[1], dtype=DTYPE)
     beta1_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
                           rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
     beta2_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
@@ -112,8 +112,8 @@ def is_accepted(result):
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
-    kernel_func1 = make_events_step(p=0.01, alpha=0.9)
-    kernel_func2 = make_events_step(p=0.01, alpha=0.9)
+    kernel_func1 = make_events_step(p=0.05, alpha=0.9)
+    kernel_func2 = make_events_step(p=0.05, alpha=0.9)
 
     # Based on Gibbs idea posted by Pavel Sountsov https://github.com/tensorflow/probability/issues/495
     gibbs = MH_within_Gibbs(logp, [par_func, kernel_func1, kernel_func2])
@@ -141,7 +141,7 @@ if __name__=='__main__':
 
     num_loop_iterations = 50
     num_loop_samples = 100
-    current_state = [np.array([0.9, 0.6, 0.1, 0.25], dtype=DTYPE), se_events, ei_events]
+    current_state = [np.array([0.01, 0.25], dtype=DTYPE), se_events, ei_events]
 
     posterior = h5py.File('posterior.h5','w')
     event_size = [num_loop_iterations * num_loop_samples] + list(current_state[1].shape)
