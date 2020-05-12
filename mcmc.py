@@ -52,28 +52,26 @@ se_events = event_tensor[:, :, 0, 1]
 ei_events = event_tensor[:, :, 1, 2]
 ir_events = event_tensor[:, :, 2, 3]
 
-def logp(se, ei):
+def logp(par, se, ei):
     p = param
-    #p['beta1'] = tf.convert_to_tensor(par[0], dtype=DTYPE)
-    #p['beta2'] = tf.convert_to_tensor(par[1], dtype=DTYPE)
-    #p['beta3'] = tf.convert_to_tensor(par[2], dtype=DTYPE)
-    #p['gamma'] = tf.convert_to_tensor(par[3], dtype=DTYPE)
-    #beta1_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
-    #                      rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
-    #beta2_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
-    #                       rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta2'])
-    # beta3_logp = tfd.Gamma(concentration=tf.constant(2., dtype=DTYPE),
-    #                       rate=tf.constant(2., dtype=DTYPE)).log_prob(p['beta3'])
-    # gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE),
-    #                       rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
+    p['beta1'] = tf.convert_to_tensor(par[0], dtype=DTYPE)
+    p['beta2'] = tf.convert_to_tensor(par[1], dtype=DTYPE)
+    p['beta3'] = tf.convert_to_tensor(par[2], dtype=DTYPE)
+    p['gamma'] = tf.convert_to_tensor(par[3], dtype=DTYPE)
+    beta1_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
+                          rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
+    beta2_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
+                           rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta2'])
+    beta3_logp = tfd.Gamma(concentration=tf.constant(2., dtype=DTYPE),
+                           rate=tf.constant(2., dtype=DTYPE)).log_prob(p['beta3'])
+    gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE),
+                           rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
     event_tensor = make_transition_matrix([se, ei, ir_events],  # ir_events global scope
                                           [[0, 1], [1, 2], [2, 3]],
-                                          tf.zeros([num_times, num_meta, 4]))  # Todo: remove constant
-    y_logp = tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
+                                          tf.zeros([num_times, num_meta, 4]))
+    y_logp = beta1_logp + beta2_logp + beta3_logp + gamma_logp + tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
     logp = y_logp
     return logp
-
-print("Initial logpi:", logp(se_events, ei_events))
 
 
 def trace_fn(state, prev_results):
@@ -114,11 +112,11 @@ def is_accepted(result):
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
-    kernel_func1 = make_events_step(p=0.0001, alpha=0.9)
-    kernel_func2 = make_events_step(p=0.0001, alpha=0.9)
+    kernel_func1 = make_events_step(p=0.01, alpha=0.9)
+    kernel_func2 = make_events_step(p=0.01, alpha=0.9)
 
     # Based on Gibbs idea posted by Pavel Sountsov https://github.com/tensorflow/probability/issues/495
-    gibbs = MH_within_Gibbs(logp, [kernel_func1, kernel_func2])
+    gibbs = MH_within_Gibbs(logp, [par_func, kernel_func1, kernel_func2])
     results = gibbs.bootstrap_results(init_state)
 
     samples_arr = [tf.TensorArray(s.dtype, size=n_samples) for s in init_state]
@@ -141,13 +139,9 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__=='__main__':
 
-
-
-
-
     num_loop_iterations = 50
     num_loop_samples = 100
-    current_state = [se_events, ei_events]
+    current_state = [np.array([0.9, 0.6, 0.1, 0.25], dtype=DTYPE), se_events, ei_events]
 
     posterior = h5py.File('posterior.h5','w')
     event_size = [num_loop_iterations * num_loop_samples] + list(current_state[1].shape)
@@ -159,6 +153,7 @@ if __name__=='__main__':
     se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples,), dtype=np.bool)
     ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples,), dtype=np.bool)
 
+    print("Initial logpi:", logp(*current_state))
     par_scale = tf.linalg.diag(tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1)
 
     # We loop over successive calls to sample because we have to dump results
@@ -167,23 +162,23 @@ if __name__=='__main__':
         samples, results = sample(num_loop_samples, init_state=current_state, par_scale=par_scale)
         current_state = [s[-1] for s in samples]
         s = slice(i*num_loop_samples, i*num_loop_samples+num_loop_samples)
-        #par_samples[s, ...] = samples[0].numpy()
+        par_samples[s, ...] = samples[0].numpy()
         cov = np.cov(np.log(par_samples[:(i*num_loop_samples+num_loop_samples), ...]), rowvar=False)
         print(current_state[0].numpy())
         print(cov)
-        # if(np.all(np.isfinite(cov))):
-        #     par_scale = 2.38**2 * cov / 2.
-        se_samples[s, ...] = samples[0].numpy()
-        ei_samples[s, ...] = samples[1].numpy()
-        #par_results[s, ...] = results[0].numpy()
-        se_results[s, ...] = results[0].numpy()
-        ei_results[s, ...] = results[1].numpy()
+        if(np.all(np.isfinite(cov))):
+            par_scale = 2.38**2 * cov / 2.
+        se_samples[s, ...] = samples[1].numpy()
+        ei_samples[s, ...] = samples[2].numpy()
+        par_results[s, ...] = results[0].numpy()
+        se_results[s, ...] = results[1].numpy()
+        ei_results[s, ...] = results[2].numpy()
 
         print("Acceptance0:", tf.reduce_mean(tf.cast(results[0], tf.float32)))
         print("Acceptance1:", tf.reduce_mean(tf.cast(results[1], tf.float32)))
-        #print("Acceptance2:", tf.reduce_mean(tf.cast(results[2], tf.float32)))
+        print("Acceptance2:", tf.reduce_mean(tf.cast(results[2], tf.float32)))
 
-    #print(f'Acceptance param: {par_results[:].mean()}')
+    print(f'Acceptance param: {par_results[:].mean()}')
     print(f'Acceptance S->E: {se_results[:].mean()}')
     print(f'Acceptance E->I: {ei_results[:].mean()}')
 

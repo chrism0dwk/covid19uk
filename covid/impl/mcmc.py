@@ -199,7 +199,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                                           updates=tf.reshape(x_star['n_events'], [-1]),
                                           shape=current_state.shape)
             next_state = current_state - x_star['n_events']  # Subtract moved events
-            next_state = current_state + n_events_star
+            next_state = next_state + n_events_star
 
             next_target_log_prob = self.target_log_prob_fn(next_state)
 
