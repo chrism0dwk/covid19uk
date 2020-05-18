@@ -2,6 +2,7 @@
 
 import numpy as np
 import tensorflow as tf
+from tensorflow_probability.python.mcmc.internal import util as mcmc_util
 
 def _gen_index(state, trm_coords):
     """Returns a tensor of indices indexing
@@ -23,15 +24,17 @@ def _gen_index(state, trm_coords):
 
 def make_transition_matrix(rates, rate_coords, state):
     """Create a transition rate matrix
-    :param rates: batched transition rate tensors
+    :param rates: batched transition rate tensors  [b1, b2, n_rates] or a list of length n_rates of batched
+                  tensors [b1, b2]
     :param rate_coords: coordinates of rates in resulting transition matrix
     :param state: the state tensor with ns states
     :returns: a tensor of shape [..., ns, ns]
     """
     indices = _gen_index(state, rate_coords)
-    updates = tf.stack(rates, axis=-1)
+    if mcmc_util.is_list_like(rates):
+        rates = tf.stack(rates, axis=-1)
     output_shape = state.shape.as_list() + [state.shape[-1]]
     rate_tensor = tf.scatter_nd(indices=indices,
-                                updates=updates,
+                                updates=rates,
                                 shape=output_shape)
     return rate_tensor

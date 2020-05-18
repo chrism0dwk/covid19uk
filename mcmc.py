@@ -52,7 +52,7 @@ se_events = event_tensor[:, :, 0, 1]
 ei_events = event_tensor[:, :, 1, 2]
 ir_events = event_tensor[:, :, 2, 3]
 
-def logp(par, se, ei):
+def logp(par, events):
     p = param
     p['beta1'] = tf.convert_to_tensor(par[0], dtype=DTYPE)
     #p['beta2'] = tf.convert_to_tensor(par[1], dtype=DTYPE)
@@ -66,7 +66,8 @@ def logp(par, se, ei):
     #                       rate=tf.constant(2., dtype=DTYPE)).log_prob(p['beta3'])
     gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE),
                            rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
-    event_tensor = make_transition_matrix([se, ei, ir_events],  # ir_events global scope
+
+    event_tensor = make_transition_matrix(events,
                                           [[0, 1], [1, 2], [2, 3]],
                                           tf.zeros([num_times, num_meta, 4]))
     y_logp = beta1_logp + gamma_logp + tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
@@ -91,12 +92,13 @@ def make_parameter_kernel(scale, bounded_convergence):
     return kernel_func
 
 
-def make_events_step(p, alpha):
+def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
     def kernel_func(logp):
         return tfp.mcmc.MetropolisHastings(
             inner_kernel=UncalibratedEventTimesUpdate(target_log_prob_fn=logp,
-                                                      p=p,
-                                                      alpha=alpha)
+                                                      target_event_id=target_event_id,
+                                                      prev_event_id=prev_event_id,
+                                                      next_event_id=next_event_id)
         )
     return kernel_func
 
@@ -108,15 +110,15 @@ def is_accepted(result):
         return is_accepted(result.inner_results)
 
 
-@tf.function(autograph=False, experimental_compile=True)
+@tf.function  #(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
-    kernel_func1 = make_events_step(p=0.05, alpha=0.9)
-    kernel_func2 = make_events_step(p=0.05, alpha=0.9)
+    #kernel_func1 = make_events_step(0, None, 1)
+    kernel_func2 = make_events_step(1, 0, 2)
 
     # Based on Gibbs idea posted by Pavel Sountsov https://github.com/tensorflow/probability/issues/495
-    gibbs = MH_within_Gibbs(logp, [par_func, kernel_func1, kernel_func2])
+    gibbs = MH_within_Gibbs(logp, [par_func, kernel_func2])
     results = gibbs.bootstrap_results(init_state)
 
     samples_arr = [tf.TensorArray(s.dtype, size=n_samples) for s in init_state]
@@ -139,11 +141,11 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__=='__main__':
 
-    num_loop_iterations = 1000
+    num_loop_iterations = 50
     num_loop_samples = 100
-    current_state = [np.array([0.01, 0.25], dtype=DTYPE), se_events, ei_events]
+    current_state = [np.array([0.01, 0.25], dtype=DTYPE), tf.stack([se_events, ei_events, ir_events], axis=-1)]
 
-    posterior = h5py.File(os.getenv('global_scratch') + '/posterior.h5','w')
+    posterior = h5py.File(os.path.expandvars(config['output']['posterior']),'w')
     event_size = [num_loop_iterations * num_loop_samples] + list(current_state[1].shape)
     par_samples = posterior.create_dataset('samples/parameter', [num_loop_iterations*num_loop_samples,
                                                                  current_state[0].shape[0]], dtype=np.float64)
@@ -168,18 +170,18 @@ if __name__=='__main__':
         print(cov)
         if(np.all(np.isfinite(cov))):
             par_scale = 2.38**2 * cov / 2.
-        se_samples[s, ...] = samples[1].numpy()
-        ei_samples[s, ...] = samples[2].numpy()
+        #se_samples[s, ...] = samples[1].numpy()
+        ei_samples[s, ...] = samples[1].numpy()
         par_results[s, ...] = results[0].numpy()
-        se_results[s, ...] = results[1].numpy()
-        ei_results[s, ...] = results[2].numpy()
+        #se_results[s, ...] = results[1].numpy()
+        ei_results[s, ...] = results[1].numpy()
 
         print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:,1], tf.float32)))
         print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:,1], tf.float32)))
-        print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:,1], tf.float32)))
+        #print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:,1], tf.float32)))
 
     print(f'Acceptance param: {par_results[:,1].mean()}')
-    print(f'Acceptance S->E: {se_results[:,1].mean()}')
+    #print(f'Acceptance S->E: {se_results[:,1].mean()}')
     print(f'Acceptance E->I: {ei_results[:,1].mean()}')
 
     posterior.close()
