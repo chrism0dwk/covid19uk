@@ -201,9 +201,9 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             next_state = current_state - x_star['n_events']  # Subtract moved events
             next_state = next_state + n_events_star
 
-            next_target_log_prob = tf.where(tf.reduce_any(rows_to < 0),
-                                            tf.constant(-np.inf, dtype=current_state.dtype),
-                                            self.target_log_prob_fn(next_state))
+            next_target_log_prob = tf.where(tf.reduce_all((0 <= rows_to) & (rows_to < current_state.shape[0])),
+                                            self.target_log_prob_fn(next_state),
+                                            tf.constant(-np.inf, dtype=current_state.dtype))
 
             log_acceptance_correction = tfd.Binomial(next_state, probs=self._parameters['p']).log_prob(
                 n_events_star)

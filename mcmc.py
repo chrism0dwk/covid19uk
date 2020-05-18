@@ -60,16 +60,16 @@ def logp(par, se, ei):
     p['gamma'] = tf.convert_to_tensor(par[1], dtype=DTYPE)
     beta1_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
                           rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta1'])
-    beta2_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
-                           rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta2'])
-    beta3_logp = tfd.Gamma(concentration=tf.constant(2., dtype=DTYPE),
-                           rate=tf.constant(2., dtype=DTYPE)).log_prob(p['beta3'])
+    #beta2_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
+    #                       rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta2'])
+    #beta3_logp = tfd.Gamma(concentration=tf.constant(2., dtype=DTYPE),
+    #                       rate=tf.constant(2., dtype=DTYPE)).log_prob(p['beta3'])
     gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE),
                            rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
     event_tensor = make_transition_matrix([se, ei, ir_events],  # ir_events global scope
                                           [[0, 1], [1, 2], [2, 3]],
                                           tf.zeros([num_times, num_meta, 4]))
-    y_logp = beta1_logp + beta2_logp + beta3_logp + gamma_logp + tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
+    y_logp = beta1_logp + gamma_logp + tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
     logp = y_logp
     return logp
 
@@ -103,7 +103,7 @@ def make_events_step(p, alpha):
 
 def is_accepted(result):
     if hasattr(result, 'is_accepted'):
-        return result.is_accepted
+        return tf.cast(result.is_accepted, DTYPE)
     else:
         return is_accepted(result.inner_results)
 
@@ -120,12 +120,12 @@ def sample(n_samples, init_state, par_scale):
     results = gibbs.bootstrap_results(init_state)
 
     samples_arr = [tf.TensorArray(s.dtype, size=n_samples) for s in init_state]
-    results_arr = [tf.TensorArray(tf.bool, size=n_samples) for r in results]
+    results_arr = [tf.TensorArray(DTYPE, size=n_samples) for r in results]
 
     def body(i, state, prev_results, samples, results):
         new_state, new_results = gibbs.one_step(state, prev_results)
         samples = [samples[k].write(i, s) for k, s in enumerate(new_state)]
-        results = [results[k].write(i, is_accepted(r)) for k, r in enumerate(new_results)]
+        results = [results[k].write(i, (r.proposed_results.target_log_prob, is_accepted(r))) for k, r in enumerate(new_results)]
         return i+1, new_state, new_results, samples, results
 
     def cond(i, _1, _2, _3, _4):
@@ -139,19 +139,19 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__=='__main__':
 
-    num_loop_iterations = 50
+    num_loop_iterations = 1000
     num_loop_samples = 100
     current_state = [np.array([0.01, 0.25], dtype=DTYPE), se_events, ei_events]
 
-    posterior = h5py.File('posterior.h5','w')
+    posterior = h5py.File(os.getenv('global_scratch') + '/posterior.h5','w')
     event_size = [num_loop_iterations * num_loop_samples] + list(current_state[1].shape)
     par_samples = posterior.create_dataset('samples/parameter', [num_loop_iterations*num_loop_samples,
                                                                  current_state[0].shape[0]], dtype=np.float64)
     se_samples = posterior.create_dataset('samples/S->E', event_size, dtype=DTYPE)
     ei_samples = posterior.create_dataset('samples/E->I', event_size, dtype=DTYPE)
-    par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples,), dtype=np.bool)
-    se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples,), dtype=np.bool)
-    ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples,), dtype=np.bool)
+    par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
+    se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
+    ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
 
     print("Initial logpi:", logp(*current_state))
     par_scale = tf.linalg.diag(tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1)
@@ -174,13 +174,13 @@ if __name__=='__main__':
         se_results[s, ...] = results[1].numpy()
         ei_results[s, ...] = results[2].numpy()
 
-        print("Acceptance0:", tf.reduce_mean(tf.cast(results[0], tf.float32)))
-        print("Acceptance1:", tf.reduce_mean(tf.cast(results[1], tf.float32)))
-        print("Acceptance2:", tf.reduce_mean(tf.cast(results[2], tf.float32)))
+        print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:,1], tf.float32)))
+        print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:,1], tf.float32)))
+        print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:,1], tf.float32)))
 
-    print(f'Acceptance param: {par_results[:].mean()}')
-    print(f'Acceptance S->E: {se_results[:].mean()}')
-    print(f'Acceptance E->I: {ei_results[:].mean()}')
+    print(f'Acceptance param: {par_results[:,1].mean()}')
+    print(f'Acceptance S->E: {se_results[:,1].mean()}')
+    print(f'Acceptance E->I: {ei_results[:,1].mean()}')
 
     posterior.close()
 
