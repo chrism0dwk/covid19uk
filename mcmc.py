@@ -115,7 +115,7 @@ def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
     #kernel_func1 = make_events_step(0, None, 1)
-    kernel_func2 = make_events_step(1, 0, 2)
+    kernel_func2 = make_events_step(target_event_id=1, prev_event_id=0, next_event_id=2)
 
     # Based on Gibbs idea posted by Pavel Sountsov https://github.com/tensorflow/probability/issues/495
     gibbs = MH_within_Gibbs(logp, [par_func, kernel_func2])

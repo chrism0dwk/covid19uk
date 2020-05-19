@@ -84,9 +84,10 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                  name=None):
         """An uncalibrated random walk for event times.
         :param target_log_prob_fn: the log density of the target distribution
-        :param p: the proportion of events to move
-        :param alpha: the magnitude of the distance over which to move
-        :param seed: a random seed stream
+        :param target_event_id: the position in the first dimension of the events tensor that we wish to move
+        :param prev_event_id: the position of the previous event in the events tensor
+        :param next_event_id: the position of the next event in the events tensor
+        :param seed: a random seed
         :param name: the name of the update step
         """
         self._target_log_prob_fn = target_log_prob_fn
@@ -105,8 +106,16 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         return self._parameters['target_log_prob_fn']
 
     @property
-    def transition_coord(self):
-        return self._parameters['transition_coord']
+    def target_event_id(self):
+        return self._parameters['target_event_id']
+
+    @property
+    def prev_event_id(self):
+        return self._parameters['prev_event_id']
+
+    @property
+    def next_event_id(self):
+        return self._parameters['next_event_id']
 
     @property
     def seed(self):
@@ -126,8 +135,14 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         return False
 
     def one_step(self, current_state, previous_kernel_results):
+        """One update of event times.
+        :param current_state: a [T, M, X] tensor containing number of events per time t, metapopulation m,
+                              and transition x.
+        :param previous_kernel_results: an object of type UncalibratedRandomWalkResults.
+        :returns: a tuple containing new_state and UncalibratedRandomWalkResults.
+        """
         with tf.name_scope('uncalibrated_event_times_rw/onestep'):
-            target_events = current_state[..., self.parameters['target_event_id']]
+            target_events = current_state[..., self.target_event_id]
             num_times = target_events.shape[0]
             num_meta = target_events.shape[1]
 
@@ -138,31 +153,36 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             u = tf.random.uniform([1], 0.0, 1.0, seed=self.seed)
             direction = tf.where(u < 0.5, -1, 1)
             # Select either previous or next event for constraint calculation
-            constraining_events = tf.squeeze(tf.where(u < 0.5, self.parameters['prev_event_id'],
-                                             self.parameters['next_event_id']))
+            constraining_event_id = tf.squeeze(tf.where(u < 0.5, self.prev_event_id,
+                                             self.next_event_id))
             # 3. Calculate number of events to move subject to constraints
             target_cumsum = tf.cumsum(target_events)
-            other_cumsum = tf.cumsum(current_state[..., constraining_events])
+            other_cumsum = tf.cumsum(current_state[..., constraining_event_id])
             real_move_to_index = tf.squeeze(t_star+direction)
+
+            # Clip here to prevent move_to_index going out of range.  Can we replace with a tf.cond?
             move_to_index = tf.clip_by_value(real_move_to_index, 0, num_times-1)
             n_max = tf.abs(other_cumsum[move_to_index] - target_cumsum[move_to_index])
-            x_star = tf.floor(tf.random.uniform([1], minval=0, maxval=n_max, dtype=current_state.dtype,
+            tf.print("Nmax: ", n_max)
+            tf.print("Direction: ", direction)
+            x_star = tf.floor(tf.random.uniform([1], minval=0., maxval=n_max, dtype=current_state.dtype,
                                                 seed=self.seed))
+            tf.print("sum(x_star):", tf.reduce_sum(x_star))
 
-            # Update the state
+            # Update the state -- ugh, do we really have to call tf.tensor_scatter_nd_* twice?
             indices = tf.stack([tf.broadcast_to(t_star, [num_meta]),
                                 tf.range(num_meta),
-                                tf.broadcast_to([self.parameters['target_event_id']], [num_meta])], axis=-1)
+                                tf.broadcast_to([self.target_event_id], [num_meta])], axis=-1)
             next_state = tf.tensor_scatter_nd_sub(current_state, indices, x_star)
             indices = tf.stack([tf.broadcast_to(t_star+direction, [num_meta]),
                                 tf.range(num_meta),
-                                tf.broadcast_to(self.parameters['target_event_id'], [num_meta])], axis=-1)
+                                tf.broadcast_to(self.target_event_id, [num_meta])], axis=-1)
             next_state = tf.tensor_scatter_nd_add(next_state, indices, x_star)
 
             next_target_log_prob = tf.where((0 <= real_move_to_index) & (real_move_to_index < num_times),
                                             self.target_log_prob_fn(next_state),
                                             tf.constant(-np.inf, dtype=current_state.dtype))
-
+            tf.print("alpha = ", next_target_log_prob - previous_kernel_results.target_log_prob)
             return [next_state,
                     tfp.mcmc.random_walk_metropolis.UncalibratedRandomWalkResults(
                         log_acceptance_correction=tf.constant(0.0, dtype=next_target_log_prob.dtype),
@@ -188,7 +208,7 @@ def get_accepted_results(results):
 
 def set_accepted_results(results, accepted_results):
     if hasattr(results, 'accepted_results'):
-        results  = results._replace(accepted_results=accepted_results)
+        results = results._replace(accepted_results=accepted_results)
         return results
     else:
         next_inner_results = set_accepted_results(results.inner_results, accepted_results)
