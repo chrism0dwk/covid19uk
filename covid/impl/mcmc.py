@@ -11,6 +11,11 @@ tfd = tfp.distributions
 DTYPE = tf.float64
 
 
+def _is_within(x, low, high):
+    """Returns true if low <= x < high"""
+    return tf.logical_and(tf.less_equal(low, x), tf.less(x, high))
+
+
 def random_walk_mvnorm_fn(covariance, p_u=0.95, name=None):
     """Returns callable that adds Multivariate Normal noise to the input
     :param covariance: the covariance matrix of the mvnorm proposal
@@ -24,7 +29,7 @@ def random_walk_mvnorm_fn(covariance, p_u=0.95, name=None):
     rv_adapt = tfp.distributions.MultivariateNormalTriL(loc=tf.zeros(covariance.shape[0], dtype=DTYPE),
                                                         scale_tril=scale_tril)
     rv_fix = tfp.distributions.Normal(loc=tf.zeros(covariance.shape[0], dtype=DTYPE),
-                                      scale=0.01/covariance.shape[0],)
+                                      scale=0.01 / covariance.shape[0], )
     u = tfp.distributions.Bernoulli(probs=p_u)
 
     def _fn(state_parts, seed):
@@ -33,6 +38,7 @@ def random_walk_mvnorm_fn(covariance, p_u=0.95, name=None):
                 rv = tf.stack([rv_fix.sample(), rv_adapt.sample()])
                 uv = u.sample()
                 return tf.gather(rv, uv)
+
             new_state_parts = [proposal() + state_part for state_part in state_parts]
             return new_state_parts
 
@@ -53,7 +59,8 @@ class UncalibratedLogRandomWalk(tfp.mcmc.UncalibratedRandomWalk):
                 ]
 
             # Log random walk
-            next_state_parts = self.new_state_fn([tf.zeros_like(s) for s in current_state_parts],  # pylint: disable=not-callable
+            next_state_parts = self.new_state_fn([tf.zeros_like(s) for s in current_state_parts],
+                                                 # pylint: disable=not-callable
                                                  self._seed_stream())
             next_state_parts = [cs * tf.exp(ns) for cs, ns in zip(current_state_parts, next_state_parts)]
 
@@ -149,40 +156,44 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             # 1. Choose a timepoint
             t_star = tf.random.uniform([1], minval=0, maxval=num_times,
                                        dtype=tf.int32, seed=self.seed)
+
             # 2. Choose to move +1 or -1
             u = tf.random.uniform([1], 0.0, 1.0, seed=self.seed)
             direction = tf.where(u < 0.5, -1, 1)
             # Select either previous or next event for constraint calculation
             constraining_event_id = tf.squeeze(tf.where(u < 0.5, self.prev_event_id,
-                                             self.next_event_id))
-            # 3. Calculate number of events to move subject to constraints
-            target_cumsum = tf.cumsum(target_events)
-            other_cumsum = tf.cumsum(current_state[..., constraining_event_id])
-            real_move_to_index = tf.squeeze(t_star+direction)
+                                                        self.next_event_id))
+            move_to_index = tf.squeeze(t_star + direction)
 
-            # Clip here to prevent move_to_index going out of range.  Can we replace with a tf.cond?
-            move_to_index = tf.clip_by_value(real_move_to_index, 0, num_times-1)
-            n_max = tf.abs(other_cumsum[move_to_index] - target_cumsum[move_to_index])
-            tf.print("Nmax: ", n_max)
-            tf.print("Direction: ", direction)
-            x_star = tf.floor(tf.random.uniform([1], minval=0., maxval=n_max, dtype=current_state.dtype,
-                                                seed=self.seed))
-            tf.print("sum(x_star):", tf.reduce_sum(x_star))
+            def do_move():
+                # 3. Calculate max number of events to move subject to constraints
+                target_cumsum = tf.cumsum(target_events)
+                other_cumsum = tf.cumsum(current_state[..., constraining_event_id])
+                n_max = tf.abs(other_cumsum[move_to_index] - target_cumsum[move_to_index])
 
-            # Update the state -- ugh, do we really have to call tf.tensor_scatter_nd_* twice?
-            indices = tf.stack([tf.broadcast_to(t_star, [num_meta]),
-                                tf.range(num_meta),
-                                tf.broadcast_to([self.target_event_id], [num_meta])], axis=-1)
-            next_state = tf.tensor_scatter_nd_sub(current_state, indices, x_star)
-            indices = tf.stack([tf.broadcast_to(t_star+direction, [num_meta]),
-                                tf.range(num_meta),
-                                tf.broadcast_to(self.target_event_id, [num_meta])], axis=-1)
-            next_state = tf.tensor_scatter_nd_add(next_state, indices, x_star)
+                # Draw number to move uniformly
+                x_star = tf.floor(tf.random.uniform([1], minval=0., maxval=n_max, dtype=current_state.dtype,
+                                                    seed=self.seed))
 
-            next_target_log_prob = tf.where((0 <= real_move_to_index) & (real_move_to_index < num_times),
-                                            self.target_log_prob_fn(next_state),
-                                            tf.constant(-np.inf, dtype=current_state.dtype))
-            tf.print("alpha = ", next_target_log_prob - previous_kernel_results.target_log_prob)
+                # Update the state -- ugh, do we really have to call tf.tensor_scatter_nd_* twice?
+                indices = tf.stack([tf.broadcast_to(t_star, [num_meta]),  # Timepoint
+                                    tf.range(num_meta),  # All meta-populations
+                                    tf.broadcast_to([self.target_event_id], [num_meta])], axis=-1)  # Event
+                next_state = tf.tensor_scatter_nd_sub(current_state, indices, x_star)
+                indices = tf.stack([tf.broadcast_to(t_star + direction, [num_meta]),
+                                    tf.range(num_meta),
+                                    tf.broadcast_to(self.target_event_id, [num_meta])], axis=-1)
+                next_state = tf.tensor_scatter_nd_add(next_state, indices, x_star)
+                next_target_log_prob = self.target_log_prob_fn(next_state)
+                return next_state, next_target_log_prob
+
+            # Trap out-of-bounds moves that go outside [0, num_times)
+            def noop():
+                return current_state, tf.constant(-np.inf, dtype=current_state.dtype)
+            next_state, next_target_log_prob = tf.cond(_is_within(move_to_index, 0, num_times),
+                                                       do_move,
+                                                       noop)
+
             return [next_state,
                     tfp.mcmc.random_walk_metropolis.UncalibratedRandomWalkResults(
                         log_acceptance_correction=tf.constant(0.0, dtype=next_target_log_prob.dtype),
@@ -218,7 +229,8 @@ def set_accepted_results(results, accepted_results):
 def advance_target_log_prob(next_results, previous_results):
     prev_accepted_results = get_accepted_results(previous_results)
     next_accepted_results = get_accepted_results(next_results)
-    next_accepted_results = next_accepted_results._replace(target_log_prob=prev_accepted_results.target_log_prob)
+    next_accepted_results = next_accepted_results._replace(
+        target_log_prob=prev_accepted_results.target_log_prob)
     return set_accepted_results(next_results, next_accepted_results)
 
 
@@ -248,7 +260,8 @@ class MH_within_Gibbs(tfp.mcmc.TransitionKernel):
 
             kernel = make_kernel_fn(_target_log_prob_fn_part)
             results = advance_target_log_prob(step_results[i],
-                                              step_results[prev_step[i]]) or kernel.bootstrap_results(state[i])
+                                              step_results[prev_step[i]]) or kernel.bootstrap_results(
+                state[i])
             state[i], step_results[i] = kernel.one_step(state[i], results)
         return state, step_results
 
@@ -258,6 +271,7 @@ class MH_within_Gibbs(tfp.mcmc.TransitionKernel):
             def _target_log_prob_fn_part(state_part):
                 state[i] = state_part
                 return self._target_log_prob_fn(*state)
+
             kernel = make_kernel_fn(_target_log_prob_fn_part)
             results.append(kernel.bootstrap_results(init_state=state[i]))
 
