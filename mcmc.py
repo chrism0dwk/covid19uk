@@ -110,7 +110,7 @@ def is_accepted(result):
         return is_accepted(result.inner_results)
 
 
-@tf.function  #(autograph=False, experimental_compile=True)
+@tfp.experimental.nn.util.tfcompile  #()@tf.function  #(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
