@@ -69,7 +69,7 @@ def logp(par, events):
 
     event_tensor = make_transition_matrix(events,
                                           [[0, 1], [1, 2], [2, 3]],
-                                          tf.zeros([num_times, num_meta, 4]))
+                                          [num_times, num_meta, 4])
     y_logp = beta1_logp + gamma_logp + tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
     logp = y_logp
     return logp
@@ -110,7 +110,7 @@ def is_accepted(result):
         return is_accepted(result.inner_results)
 
 
-@tfp.experimental.nn.util.tfcompile  #()@tf.function  #(autograph=False, experimental_compile=True)
+@tf.function(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
@@ -141,48 +141,50 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__=='__main__':
 
-    num_loop_iterations = 50
-    num_loop_samples = 100
-    current_state = [np.array([0.01, 0.25], dtype=DTYPE), tf.stack([se_events, ei_events, ir_events], axis=-1)]
+    with tf.profiler.experimental.Profile('/tmp/logdir', options=tf.profiler.experimental.ProfilerOptions()):
+        num_loop_iterations = 50
+        num_loop_samples = 100
+        current_state = [np.array([0.01, 0.25], dtype=DTYPE), tf.stack([se_events, ei_events, ir_events], axis=-1)]
 
-    posterior = h5py.File(os.path.expandvars(config['output']['posterior']),'w')
-    event_size = [num_loop_iterations * num_loop_samples] + list(current_state[1].shape)
-    par_samples = posterior.create_dataset('samples/parameter', [num_loop_iterations*num_loop_samples,
-                                                                 current_state[0].shape[0]], dtype=np.float64)
-    se_samples = posterior.create_dataset('samples/S->E', event_size, dtype=DTYPE)
-    ei_samples = posterior.create_dataset('samples/E->I', event_size, dtype=DTYPE)
-    par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
-    se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
-    ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
+        posterior = h5py.File(os.path.expandvars(config['output']['posterior']),'w')
+        event_size = [num_loop_iterations * num_loop_samples] + list(current_state[1].shape)
+        par_samples = posterior.create_dataset('samples/parameter', [num_loop_iterations*num_loop_samples,
+                                                                     current_state[0].shape[0]], dtype=np.float64)
+        se_samples = posterior.create_dataset('samples/S->E', event_size, dtype=DTYPE)
+        ei_samples = posterior.create_dataset('samples/E->I', event_size, dtype=DTYPE)
+        par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
+        se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
+        ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
 
-    print("Initial logpi:", logp(*current_state))
-    par_scale = tf.linalg.diag(tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1)
+        print("Initial logpi:", logp(*current_state))
+        par_scale = tf.linalg.diag(tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1)
 
-    # We loop over successive calls to sample because we have to dump results
-    #   to disc, or else end OOM (even on a 32GB system).
-    for i in tqdm.tqdm(range(num_loop_iterations), unit_scale=num_loop_samples):
-        samples, results = sample(num_loop_samples, init_state=current_state, par_scale=par_scale)
-        current_state = [s[-1] for s in samples]
-        s = slice(i*num_loop_samples, i*num_loop_samples+num_loop_samples)
-        par_samples[s, ...] = samples[0].numpy()
-        cov = np.cov(np.log(par_samples[:(i*num_loop_samples+num_loop_samples), ...]), rowvar=False)
-        print(current_state[0].numpy())
-        print(cov)
-        if(np.all(np.isfinite(cov))):
-            par_scale = 2.38**2 * cov / 2.
-        #se_samples[s, ...] = samples[1].numpy()
-        ei_samples[s, ...] = samples[1].numpy()
-        par_results[s, ...] = results[0].numpy()
-        #se_results[s, ...] = results[1].numpy()
-        ei_results[s, ...] = results[1].numpy()
+        # warmup
+        _ = sample(num_loop_samples, init_state=current_state, par_scale=par_scale)
+        # We loop over successive calls to sample because we have to dump results
+        #   to disc, or else end OOM (even on a 32GB system).
+        for i in tqdm.tqdm(range(num_loop_iterations), unit_scale=num_loop_samples):
+            samples, results = sample(num_loop_samples, init_state=current_state, par_scale=par_scale)
+            current_state = [s[-1] for s in samples]
+            s = slice(i*num_loop_samples, i*num_loop_samples+num_loop_samples)
+            par_samples[s, ...] = samples[0].numpy()
+            cov = np.cov(np.log(par_samples[:(i*num_loop_samples+num_loop_samples), ...]), rowvar=False)
+            print(current_state[0].numpy())
+            print(cov)
+            if(np.all(np.isfinite(cov))):
+                par_scale = 2.38**2 * cov / 2.
+            #se_samples[s, ...] = samples[1].numpy()
+            ei_samples[s, ...] = samples[1].numpy()
+            par_results[s, ...] = results[0].numpy()
+            #se_results[s, ...] = results[1].numpy()
+            ei_results[s, ...] = results[1].numpy()
 
-        print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:,1], tf.float32)))
-        print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:,1], tf.float32)))
-        #print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:,1], tf.float32)))
+            print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:,1], tf.float32)))
+            print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:,1], tf.float32)))
+            #print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:,1], tf.float32)))
 
     print(f'Acceptance param: {par_results[:,1].mean()}')
     #print(f'Acceptance S->E: {se_results[:,1].mean()}')
     print(f'Acceptance E->I: {ei_results[:,1].mean()}')
 
     posterior.close()
-

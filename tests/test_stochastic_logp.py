@@ -30,7 +30,7 @@ class TestChainBinomialLogp(unittest.TestCase):
             si = beta * state[..., S] * state[..., I] / tf.reduce_sum(state, axis=-1)
             ir = gamma * state[..., I]
 
-            rate_matrix = make_transition_matrix([si, ir], [[S, I], [I, R]], state)
+            rate_matrix = make_transition_matrix([si, ir], [[S, I], [I, R]], state.shape)
             return rate_matrix
         return fn
 

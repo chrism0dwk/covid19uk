@@ -24,10 +24,11 @@ def _max_free_events(target_t, target_events, constraining_t, constraining_event
     :param constraining_t: the time of the constraining events
     :param constraining_events: the constraining events
     """
+    target_events = tf.cast(target_events, tf.float32)
     target_cumsum = tf.cumsum(target_events, axis=0)
-    constraining_cumsum = tf.cumsum(constraining_events, axis=0)
+    constraining_cumsum = tf.cumsum(tf.cast(constraining_events, tf.float32), axis=0)
     free_events = tf.abs(target_cumsum[constraining_t] - constraining_cumsum[constraining_t])
-    return tf.minimum(free_events, target_events[target_t])
+    return tf.cast(tf.minimum(free_events, target_events[target_t]), tf.float64)
 
 
 def random_walk_mvnorm_fn(covariance, p_u=0.95, name=None):
@@ -164,7 +165,6 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         """
         with tf.name_scope('uncalibrated_event_times_rw/onestep'):
             target_events = current_state[..., self.target_event_id]
-            event_cumsum = tf.cumsum(current_state, axis=0)
 
             num_times = target_events.shape[0]
             num_meta = target_events.shape[1]
@@ -172,9 +172,9 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             # 1. Choose a timepoint to move, conditional on it having events to move
             current_p = tf.cast(tf.reduce_sum(target_events, axis=1) > 0., target_events.dtype)
             current_t = tf.squeeze(tf.random.categorical(logits=[tf.math.log(current_p)],
-                                                      num_samples=1,
-                                                      seed=self.seed,
-                                                      dtype=tf.int32))
+                                                         num_samples=1,
+                                                         seed=self.seed,
+                                                         dtype=tf.int32))
 
             # 2. Choose to move +1 or -1 in time
             u = tf.random.uniform([1], 0.0, 1.0, seed=self.seed)
@@ -187,7 +187,8 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
 
             # 3. Calculate max number of events to move subject to constraints
             n_max = _max_free_events(current_t, current_state[..., self.target_event_id],
-                                     constraint_t, current_state[..., constraining_event_id])
+                                     constraint_t, tf.gather(current_state,
+                                                             constraining_event_id, axis=-1))
 
             # Draw number to move uniformly from n_max
             x_star = tf.floor(tf.random.uniform([1], minval=0., maxval=n_max+1., dtype=current_state.dtype,
@@ -219,7 +220,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
 
             # 2. Calculate probability of selecting events
             next_n_max = _max_free_events(next_t, next_state[..., self.target_event_id],
-                                          constraint_t, next_state[..., constraining_event_id])
+                                          constraint_t, tf.gather(next_state, constraining_event_id, axis=-1))
             log_acceptance_correction += tf.reduce_sum(tf.math.log(n_max+1) - tf.math.log(next_n_max+1))
 
             return [next_state,
