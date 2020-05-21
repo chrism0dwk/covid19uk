@@ -29,7 +29,7 @@ class TestRateUtils(unittest.TestCase):
              tf.reduce_sum(state, axis=-1)  # S->I rate
         ir = 0.14 * state[..., 1]  # I->R rate
 
-        trm = make_transition_matrix([si, ir], [[0, 1], [1, 2]], state)
+        trm = make_transition_matrix([si, ir], [[0, 1], [1, 2]], state.shape)
         np.testing.assert_array_almost_equal(trm.numpy(), state2b3c3s, decimal=5)
 
 
