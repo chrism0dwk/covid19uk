@@ -1,41 +1,62 @@
 import unittest
+import pickle as pkl
 import numpy as np
 import tensorflow as tf
 
-from covid.impl.mcmc import make_event_time_move
+from covid.impl.mcmc import _max_free_events
 
-class TestMakeEventTimeMove(unittest.TestCase):
+class TestMaxFreeEvents(unittest.TestCase):
 
     def setUp(self):
-        self.events = np.random.randint(0, 15, [20, 100]).astype(np.float64)
+        with open('../stochastic_sim_small.pkl','rb') as f:
+            sim = pkl.load(f)
+        self.events = np.stack([sim['events'][..., 0, 1],
+                                sim['events'][..., 1, 2],
+                                sim['events'][..., 2, 3]], axis=-1)
+        self.initial_state = sim['state_init']
 
-    def test_matrix_where(self):
-        from covid.impl.mcmc import matrix_where
-        mw = matrix_where(self.events > 0.).numpy()
-        tfw = tf.where(self.events > 0.).numpy()
-        np.testing.assert_array_equal(mw, tfw)
+    def test_fwd_state(self):
+        t = 19
+        target_events = self.events[..., 1].copy()
+        n_max = _max_free_events(events=self.events, target_t=t, target_id=1,
+                                 constraint_t=t, constraint_id=2).numpy()
+        np.testing.assert_array_equal(n_max, [1., 2., 4., 1., 0., 0., 0., 0., 0., 0.])
 
-    def test_sample(self):
-        proposal = make_event_time_move(self.events, 0.005, 0.5, 5)
-        @tf.function
-        def sample():
-            return proposal.sample()
+        target_events[t, :] -= n_max
+        target_events[t+1, :] += n_max
+        state = np.cumsum(target_events, axis=0) + self.initial_state[:, 1]
+        self.assertTrue(np.all(target_events >= 0))
+        self.assertTrue(np.all(state >= 0))
 
-        xstar = sample()
-        print(xstar)
+    def test_fwd_none(self):
+        for t in range(self.events.shape[0]):
+            n_max = _max_free_events(events=self.events, target_t=t, target_id=2,
+                                     constraint_t=t, constraint_id=-1).numpy()
+            np.testing.assert_array_equal(n_max, self.events[t, :, 2])
 
-    def test_log_prob(self):
-        proposal = make_event_time_move(self.events, 0.005, 0.5, 5)
-        xstar = proposal.sample()
+    def test_bwd_state(self):
+        t = 26
+        target_events = self.events[..., 1].copy()
+        constraining_events = self.events[..., 0].copy()
+        n_max = _max_free_events(events=self.events, target_t=t, target_id=1,
+                                 constraint_t=t-1, constraint_id=0).numpy()
+        np.testing.assert_array_equal(n_max, [0., 5., 3., 4., 0., 0., 0., 0., 0., 0.])
 
-        lp = {}
-        for i, k in zip(range(6), xstar.keys()):
-            lp[k] = proposal.submodules[i].log_prob(xstar[k])
-            print("Distribution:", proposal.submodules[i])
-            print(lp[k])
+        # Assert moving events doesn't invalidate the state
+        print('Before move', target_events[t])
+        target_events[t, :] -= n_max
+        target_events[t-1, :] += n_max
+        print('After move', target_events[t])
+        state = np.cumsum(target_events, axis=0)
+        self.assertTrue(np.all(target_events >= 0))
+        self.assertTrue(np.all(state >= 0))
 
-        lp = tf.reduce_sum(proposal.log_prob(xstar))
-        print(lp)
+    def test_bwd_none(self):
+        for t in range(self.events.shape[0]):
+            n_max = _max_free_events(events=self.events, target_t=t, target_id=0,
+                                     constraint_t=t, constraint_id=-1).numpy()
+            np.testing.assert_array_equal(n_max, self.events[t, :, 0])
+
 
 if __name__ == '__main__':
     unittest.main()

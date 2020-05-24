@@ -14,8 +14,7 @@ from covid import config
 from covid.model import load_data, CovidUKStochastic
 from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 from covid.impl.util import make_transition_matrix
-from covid.impl.mcmc import UncalibratedEventTimesUpdate, UncalibratedLogRandomWalk, MH_within_Gibbs, \
-    random_walk_mvnorm_fn
+from covid.impl.mcmc import UncalibratedEventTimesUpdate, UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 
 DTYPE = config.floatX
 
@@ -66,12 +65,12 @@ def logp(par, events):
     #                       rate=tf.constant(2., dtype=DTYPE)).log_prob(p['beta3'])
     gamma_logp = tfd.Gamma(concentration=tf.constant(100., dtype=DTYPE),
                            rate=tf.constant(400., dtype=DTYPE)).log_prob(p['gamma'])
-
-    event_tensor = make_transition_matrix(events,
-                                          [[0, 1], [1, 2], [2, 3]],
-                                          [num_times, num_meta, 4])
-    y_logp = beta1_logp + gamma_logp + tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
-    logp = y_logp
+    with tf.name_scope('main_log_p'):
+        event_tensor = make_transition_matrix(events,
+                                              [[0, 1], [1, 2], [2, 3]],
+                                              [num_times, num_meta, 4])
+        y_logp = tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
+    logp = beta1_logp + gamma_logp + y_logp
     return logp
 
 
@@ -98,7 +97,8 @@ def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
             inner_kernel=UncalibratedEventTimesUpdate(target_log_prob_fn=logp,
                                                       target_event_id=target_event_id,
                                                       prev_event_id=prev_event_id,
-                                                      next_event_id=next_event_id)
+                                                      next_event_id=next_event_id,
+                                                      initial_state=state_init)  # Todo get rid of global dep
         )
     return kernel_func
 
@@ -114,21 +114,32 @@ def is_accepted(result):
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
-    #kernel_func1 = make_events_step(0, None, 1)
-    kernel_func2 = make_events_step(target_event_id=1, prev_event_id=0, next_event_id=2)
+    se_func = make_events_step(0, None, 1)
+    ei_func = make_events_step(target_event_id=1, prev_event_id=0, next_event_id=2)
 
     # Based on Gibbs idea posted by Pavel Sountsov https://github.com/tensorflow/probability/issues/495
-    gibbs = MH_within_Gibbs(logp, [par_func, kernel_func2])
-    results = gibbs.bootstrap_results(init_state)
+    results = ei_func(lambda s: logp(init_state[0], s)).bootstrap_results(init_state[1])
 
     samples_arr = [tf.TensorArray(s.dtype, size=n_samples) for s in init_state]
-    results_arr = [tf.TensorArray(DTYPE, size=n_samples) for r in results]
+    results_arr = [tf.TensorArray(DTYPE, size=n_samples) for r in range(3)]
 
     def body(i, state, prev_results, samples, results):
-        new_state, new_results = gibbs.one_step(state, prev_results)
-        samples = [samples[k].write(i, s) for k, s in enumerate(new_state)]
-        results = [results[k].write(i, (r.proposed_results.target_log_prob, is_accepted(r))) for k, r in enumerate(new_results)]
-        return i+1, new_state, new_results, samples, results
+        # Parameters
+        def par_logp(par_state):
+            state[0] = par_state  # close over state from outer scope
+            return logp(*state)
+        state[0], par_results = par_func(par_logp).one_step(state[0], prev_results)
+
+        # States
+        def state_logp(event_state):
+            state[1] = event_state
+            return logp(*state)
+        state[1], se_results = se_func(state_logp).one_step(state[1], par_results)
+        state[1], ei_results = ei_func(state_logp).one_step(state[1], se_results)
+
+        samples = [samples[k].write(i, s) for k, s in enumerate(state)]
+        results = [results[k].write(i, (r.proposed_results.target_log_prob, is_accepted(r))) for k, r in enumerate([par_results, se_results, ei_results])]
+        return i+1, state, ei_results, samples, results
 
     def cond(i, _1, _2, _3, _4):
         return i < n_samples
@@ -141,50 +152,48 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__=='__main__':
 
-    with tf.profiler.experimental.Profile('/tmp/logdir', options=tf.profiler.experimental.ProfilerOptions()):
-        num_loop_iterations = 50
-        num_loop_samples = 100
-        current_state = [np.array([0.01, 0.25], dtype=DTYPE), tf.stack([se_events, ei_events, ir_events], axis=-1)]
+    num_loop_iterations = 100
+    num_loop_samples = 100
+    current_state = [np.array([0.01, 0.25], dtype=DTYPE), tf.stack([se_events, ei_events, ir_events], axis=-1)]
 
-        posterior = h5py.File(os.path.expandvars(config['output']['posterior']),'w')
-        event_size = [num_loop_iterations * num_loop_samples] + list(current_state[1].shape)
-        par_samples = posterior.create_dataset('samples/parameter', [num_loop_iterations*num_loop_samples,
-                                                                     current_state[0].shape[0]], dtype=np.float64)
-        se_samples = posterior.create_dataset('samples/S->E', event_size, dtype=DTYPE)
-        ei_samples = posterior.create_dataset('samples/E->I', event_size, dtype=DTYPE)
-        par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
-        se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
-        ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
+    posterior = h5py.File(os.path.expandvars(config['output']['posterior']), 'w')
+    event_size = [num_loop_iterations * num_loop_samples] + list(current_state[1].shape)
+    par_samples = posterior.create_dataset('samples/parameter', [num_loop_iterations*num_loop_samples,
+                                                                 current_state[0].shape[0]], dtype=np.float64)
+    se_samples = posterior.create_dataset('samples/events', event_size, dtype=DTYPE)
+    par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
+    se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
+    ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
 
-        print("Initial logpi:", logp(*current_state))
-        par_scale = tf.linalg.diag(tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1)
+    print("Initial logpi:", logp(*current_state))
+    par_scale = tf.linalg.diag(tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1)
 
-        # warmup
-        _ = sample(num_loop_samples, init_state=current_state, par_scale=par_scale)
-        # We loop over successive calls to sample because we have to dump results
-        #   to disc, or else end OOM (even on a 32GB system).
-        for i in tqdm.tqdm(range(num_loop_iterations), unit_scale=num_loop_samples):
-            samples, results = sample(num_loop_samples, init_state=current_state, par_scale=par_scale)
-            current_state = [s[-1] for s in samples]
-            s = slice(i*num_loop_samples, i*num_loop_samples+num_loop_samples)
-            par_samples[s, ...] = samples[0].numpy()
-            cov = np.cov(np.log(par_samples[:(i*num_loop_samples+num_loop_samples), ...]), rowvar=False)
-            print(current_state[0].numpy())
-            print(cov)
-            if(np.all(np.isfinite(cov))):
-                par_scale = 2.38**2 * cov / 2.
-            #se_samples[s, ...] = samples[1].numpy()
-            ei_samples[s, ...] = samples[1].numpy()
-            par_results[s, ...] = results[0].numpy()
-            #se_results[s, ...] = results[1].numpy()
-            ei_results[s, ...] = results[1].numpy()
+    # We loop over successive calls to sample because we have to dump results
+    #   to disc, or else end OOM (even on a 32GB system).
+    #with tf.profiler.experimental.Profile('/tmp/tf_logdir'):
+    for i in tqdm.tqdm(range(num_loop_iterations), unit_scale=num_loop_samples):
+        samples, results = sample(num_loop_samples, init_state=current_state, par_scale=par_scale)
+        current_state = [s[-1] for s in samples]
+        s = slice(i*num_loop_samples, i*num_loop_samples+num_loop_samples)
+        par_samples[s, ...] = samples[0].numpy()
+        cov = np.cov(np.log(par_samples[:(i*num_loop_samples+num_loop_samples), ...]), rowvar=False)
+        print(current_state[0].numpy())
+        print(cov)
+        if(np.all(np.isfinite(cov))):
+            par_scale = 2.38**2 * cov / 2.
 
-            print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:,1], tf.float32)))
-            print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:,1], tf.float32)))
-            #print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:,1], tf.float32)))
+        se_samples[s, ...] = samples[1].numpy()
+        par_results[s, ...] = results[0].numpy()
+        se_results[s, ...] = results[1].numpy()
+        ei_results[s, ...] = results[2].numpy()
 
-    print(f'Acceptance param: {par_results[:,1].mean()}')
-    #print(f'Acceptance S->E: {se_results[:,1].mean()}')
-    print(f'Acceptance E->I: {ei_results[:,1].mean()}')
+        print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
+        print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32)))
+        print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:, 1], tf.float32)))
+
+    print(f'Acceptance param: {par_results[:, 1].mean()}')
+    print(f'Acceptance S->E: {se_results[:, 1].mean()}')
+    print(f'Acceptance E->I: {ei_results[:, 1].mean()}')
 
     posterior.close()
+

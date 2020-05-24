@@ -16,19 +16,48 @@ def _is_within(x, low, high):
     return tf.logical_and(tf.less_equal(low, x), tf.less(x, high))
 
 
-def _max_free_events(target_t, target_events, constraining_t, constraining_events):
+def _max_free_events(events, target_t, target_id, constraint_t, constraint_id):
     """Returns the maximum number of free events to move in target_events constrained by
     constraining_events.
-    :param target_t: the time of the target events to move
-    :param target_events: the target events matrix
-    :param constraining_t: the time of the constraining events
-    :param constraining_events: the constraining events
+    :param events: a [T, M, X] tensor of transition events
+    :param target_t: the target time
+    :param target_id: the Xth index of the target event
+    :param constraining_t: the Tth time of the constraint
+    :param constraining_id: the Xth index of the constraining event, -1 implies no constraint
+    :returns: a tensor of shape [M] of max free events, dtype=target_events.dtype
     """
-    target_events = tf.cast(target_events, tf.float32)
-    target_cumsum = tf.cumsum(target_events, axis=0)
-    constraining_cumsum = tf.cumsum(tf.cast(constraining_events, tf.float32), axis=0)
-    free_events = tf.abs(target_cumsum[constraining_t] - constraining_cumsum[constraining_t])
-    return tf.cast(tf.minimum(free_events, target_events[target_t]), tf.float64)
+    def true_fn():
+        target_events_ = tf.cast(tf.gather(events, target_id, axis=-1), tf.int32)
+        target_cumsum = tf.cumsum(target_events_, axis=0)
+        constraining_cumsum = tf.cumsum(tf.cast(tf.gather(events, constraint_id, axis=-1), tf.int32), axis=0)
+
+        free_events = tf.abs(
+            tf.gather(target_cumsum, constraint_t, axis=0) - tf.gather(constraining_cumsum, constraint_t,
+                                                                         axis=0))
+        max_free_events = tf.minimum(free_events, tf.gather(target_events_, target_t, axis=0))
+        return tf.cast(max_free_events, dtype=events.dtype)
+
+    def false_fn():
+        return tf.gather(events[..., target_id], target_t, axis=0)
+
+    return tf.cond(constraint_id != -1, true_fn, false_fn)
+
+
+def _move_events(event_tensor, event_id, from_t, to_t, n_move):
+    """Subtracts n_move from event_tensor[from_t, :, event_id]
+    and adds n_move to event_tensor[to_t, :, event_id]."""
+    num_meta = n_move.shape[-1]
+    indices = tf.stack([tf.broadcast_to(from_t, [num_meta]),  # Timepoint
+                        tf.range(num_meta),  # All meta-populations
+                        tf.broadcast_to([event_id], [num_meta])], axis=-1)  # Event
+    # Subtract x_star from the [from_t, :, event_id] row of the state tensor
+    next_state = tf.tensor_scatter_nd_sub(event_tensor, indices, n_move)
+    indices = tf.stack([tf.broadcast_to(to_t, [num_meta]),
+                        tf.range(num_meta),
+                        tf.broadcast_to(event_id, [num_meta])], axis=-1)
+    # Add x_star to the [to_t, :, event_id] row of the state tensor
+    next_state = tf.tensor_scatter_nd_add(next_state, indices, n_move)
+    return next_state
 
 
 def random_walk_mvnorm_fn(covariance, p_u=0.95, name=None):
@@ -102,6 +131,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                  target_event_id,
                  prev_event_id,
                  next_event_id,
+                 initial_state,
                  seed=None,
                  name=None):
         """An uncalibrated random walk for event times.
@@ -109,6 +139,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         :param target_event_id: the position in the first dimension of the events tensor that we wish to move
         :param prev_event_id: the position of the previous event in the events tensor
         :param next_event_id: the position of the next event in the events tensor
+        :param initial_state: the initial state tensor
         :param seed: a random seed
         :param name: the name of the update step
         """
@@ -120,6 +151,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             target_event_id=target_event_id,
             prev_event_id=prev_event_id,
             next_event_id=next_event_id,
+            initial_state=initial_state,
             seed=seed,
             name=name)
 
@@ -173,38 +205,29 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             current_p = tf.cast(tf.reduce_sum(target_events, axis=1) > 0., target_events.dtype)
             current_t = tf.squeeze(tf.random.categorical(logits=[tf.math.log(current_p)],
                                                          num_samples=1,
-                                                         seed=self.seed,
+                                                         seed=self._seed_stream(),
                                                          dtype=tf.int32))
 
             # 2. Choose to move +1 or -1 in time
-            u = tf.random.uniform([1], 0.0, 1.0, seed=self.seed)
-            direction = tf.where(u < 0.5, -1, 1)
-            next_t = tf.squeeze(current_t + direction)
-            constraint_t = tf.squeeze(tf.where(u < 0.5, current_t - 1, 0))
+            u = tf.squeeze(tf.random.uniform(shape=[1], seed=self._seed_stream(),
+                                             minval=0, maxval=2, dtype=tf.int32))
+            direction = tf.gather([-1, 1], u)
+            next_t = current_t + direction
             # Select either previous or next event for constraint calculation
-            constraining_event_id = tf.squeeze(tf.where(u < 0.5, self.prev_event_id,
-                                                        self.next_event_id))
+            constraint_t = tf.gather([current_t - 1, current_t], u)
+            constraining_event_id = tf.gather([self.prev_event_id or -1, self.next_event_id], u)
 
             # 3. Calculate max number of events to move subject to constraints
-            n_max = _max_free_events(current_t, current_state[..., self.target_event_id],
-                                     constraint_t, tf.gather(current_state,
-                                                             constraining_event_id, axis=-1))
+            n_max = _max_free_events(current_state, current_t, self.target_event_id, constraint_t,
+                                     constraining_event_id)
 
             # Draw number to move uniformly from n_max
-            x_star = tf.floor(tf.random.uniform([1], minval=0., maxval=n_max+1., dtype=current_state.dtype,
-                                                seed=self.seed))
+            x_star = tf.floor(tf.random.uniform((), minval=0., maxval=n_max + 1., dtype=current_state.dtype))
 
-            # Update the state -- ugh, do we really have to call tf.tensor_scatter_nd_* twice?
-            indices = tf.stack([tf.broadcast_to(current_t, [num_meta]),  # Timepoint
-                                tf.range(num_meta),  # All meta-populations
-                                tf.broadcast_to([self.target_event_id], [num_meta])], axis=-1)  # Event
-            # Subtract x_star from the [current_t, :, target_event_id] row of the state tensor
-            next_state = tf.tensor_scatter_nd_sub(current_state, indices, x_star)
-            indices = tf.stack([tf.broadcast_to(current_t + direction, [num_meta]),
-                                tf.range(num_meta),
-                                tf.broadcast_to(self.target_event_id, [num_meta])], axis=-1)
-            # Add x_star to the [next_t, :, target_event_id] row of the state tensor
-            next_state = tf.tensor_scatter_nd_add(next_state, indices, x_star)
+            # Propose next_state
+            next_state = _move_events(event_tensor=current_state, event_id=self.target_event_id,
+                                      from_t=current_t, to_t=next_t,
+                                      n_move=x_star)
             next_target_log_prob = self.target_log_prob_fn(next_state)
 
             # Trap out-of-bounds moves that go outside [0, num_times)
@@ -215,13 +238,13 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             # Calculate proposal density
             # 1. Calculate probability of choosing a timepoint
             next_p = tf.cast(tf.reduce_sum(next_state[..., self.target_event_id], axis=1) > 0.,
-                               next_state.dtype)
-            log_acceptance_correction = tf.math.log(tf.reduce_sum(next_p)/tf.reduce_sum(current_p))
+                             next_state.dtype)
+            log_acceptance_correction = tf.math.log(tf.reduce_sum(next_p) / tf.reduce_sum(current_p))
 
             # 2. Calculate probability of selecting events
-            next_n_max = _max_free_events(next_t, next_state[..., self.target_event_id],
-                                          constraint_t, tf.gather(next_state, constraining_event_id, axis=-1))
-            log_acceptance_correction += tf.reduce_sum(tf.math.log(n_max+1) - tf.math.log(next_n_max+1))
+            next_n_max = _max_free_events(next_state, next_t, self.target_event_id,
+                                          constraint_t, constraining_event_id)
+            log_acceptance_correction += tf.reduce_sum(tf.math.log(n_max + 1.) - tf.math.log(next_n_max + 1.))
 
             return [next_state,
                     tfp.mcmc.random_walk_metropolis.UncalibratedRandomWalkResults(
