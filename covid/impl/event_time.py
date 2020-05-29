@@ -23,15 +23,15 @@ def _max_free_events(events, target_t, target_id, constraint_t, constraint_id):
     :returns: a tensor of shape [M] of max free events, dtype=target_events.dtype
     """
     def true_fn():
-        target_events_ = tf.cast(tf.gather(events, target_id, axis=-1), tf.int32)
+        target_events_ = tf.gather(events, target_id, axis=-1)
         target_cumsum = tf.cumsum(target_events_, axis=0)
-        constraining_cumsum = tf.cumsum(tf.cast(tf.gather(events, constraint_id, axis=-1), tf.int32), axis=0)
+        constraining_cumsum = tf.cumsum(tf.gather(events, constraint_id, axis=-1), axis=0)
 
         free_events = tf.abs(
             tf.gather(target_cumsum, constraint_t, axis=0) - tf.gather(constraining_cumsum, constraint_t,
                                                                          axis=0))
         max_free_events = tf.minimum(free_events, tf.gather(target_events_, target_t, axis=0))
-        return tf.cast(max_free_events, dtype=events.dtype)
+        return max_free_events
 
     def false_fn():
         return tf.gather(events[..., target_id], target_t, axis=0)
