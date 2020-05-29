@@ -1,9 +1,9 @@
 import unittest
 import pickle as pkl
 import numpy as np
-import tensorflow as tf
 
-from covid.impl.mcmc import _max_free_events
+from covid.impl.event_time import _max_free_events
+
 
 class TestMaxFreeEvents(unittest.TestCase):
 

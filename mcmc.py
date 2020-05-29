@@ -14,7 +14,8 @@ from covid import config
 from covid.model import load_data, CovidUKStochastic
 from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 from covid.impl.util import make_transition_matrix
-from covid.impl.mcmc import UncalibratedEventTimesUpdate, UncalibratedLogRandomWalk, random_walk_mvnorm_fn
+from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
+from covid.impl.event_time import UncalibratedEventTimesUpdate
 
 DTYPE = config.floatX
 
