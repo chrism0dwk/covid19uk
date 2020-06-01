@@ -181,7 +181,7 @@ if __name__ == '__main__':
     data['pop'] = data['pop'].sum(level=0)
 
     model = CovidUKStochastic(C=data['C'][:10, :10],
-                              N=[100]*10, #data['pop']['n'].to_numpy()[:10],
+                              N=[1000]*10, #data['pop']['n'].to_numpy()[:10],
                               W=data['W'],
                               date_range=settings['prediction_period'],
                               holidays=settings['holiday'],
@@ -218,5 +218,5 @@ if __name__ == '__main__':
     fig_uk.gca().grid(True)
     plt.show()
 
-    with open('stochastic_sim_small.pkl', 'wb') as f:
+    with open('stochastic_sim_medium.pkl', 'wb') as f:
         pkl.dump({'events': upd.numpy(), 'state_init': state_init.numpy()}, f)

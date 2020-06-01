@@ -39,7 +39,3 @@ def make_transition_matrix(rates, rate_coords, state_shape):
     return rate_tensor
 
 
-def squared_jumping_distance(chain):
-    diff = chain[1:] - chain[:-1]
-    diff = diff * diff
-    return diff.sum(axis=tuple(np.arange(1, diff.ndim)))

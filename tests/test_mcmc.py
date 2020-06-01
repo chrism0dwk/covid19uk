@@ -28,6 +28,20 @@ class TestMaxFreeEvents(unittest.TestCase):
         self.assertTrue(np.all(target_events >= 0))
         self.assertTrue(np.all(state >= 0))
 
+    def test_fwd_state_multi(self):
+        t = [19, 20, 21]
+        target_events = self.events[..., 1].copy()
+        n_max = _max_free_events(events=self.events, initial_state=self.initial_state,
+                                 target_t=t[0], target_id=1,
+                                 constraint_t=t, constraint_id=2).numpy()
+        np.testing.assert_array_equal(n_max, [1., 2., 4., 1., 0., 0., 0., 0., 0., 0.])
+
+        target_events[np.min(t), :] -= n_max
+        target_events[np.max(t), :] += n_max
+        state = np.cumsum(target_events, axis=0) + self.initial_state[:, 1]
+        self.assertTrue(np.all(target_events >= 0))
+        self.assertTrue(np.all(state >= 0))
+
     def test_fwd_none(self):
         for t in range(self.events.shape[0]):
             n_max = _max_free_events(events=self.events, target_t=t, target_id=2,

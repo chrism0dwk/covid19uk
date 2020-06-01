@@ -237,3 +237,9 @@ def initialise_previous_events(events, rate):
             lambda cases: initialise_previous_events_one_time(cases, 0.5))
     events = events.sum(level=list(range(1, 4)))
     return events
+
+
+def squared_jumping_distance(chain):
+    diff = chain[1:] - chain[:-1]
+    diff = diff * diff
+    return diff.sum(axis=tuple(np.arange(1, diff.ndim)))

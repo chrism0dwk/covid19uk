@@ -1,14 +1,28 @@
 """MCMC Update classes for stochastic epidemic models"""
 import numpy as np
+from collections import namedtuple
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability.python.mcmc.internal import util as mcmc_util
-from tensorflow_probability.python.mcmc.random_walk_metropolis import UncalibratedRandomWalkResults
 
+import covid.config
+DTYPE = covid.config.floatX
 
 tfd = tfp.distributions
 
-DTYPE = tf.float64
+
+# The kernel result NamedTuple mechanism in TFP is too restrictive for our use here
+# since the tfp MetropolisHastings class enforces that
+# the types of the previous and current results are the same.
+#
+# See https://github.com/tensorflow/probability/blob/f051e03dd3cc847d31061803c2b31c564562a993/tensorflow_probability/python/mcmc/metropolis_hastings.py#L233)
+#
+# In order to trace the internals of the samplers used, we need an 'extra'
+# field in the Results structure, so we implement and use our own Results tuple.
+
+KernelResults = namedtuple('KernelResults', ('log_acceptance_correction',
+                                             'target_log_prob',
+                                             'extra'))
 
 
 def random_walk_mvnorm_fn(covariance, p_u=0.95, name=None):
@@ -69,9 +83,10 @@ class UncalibratedLogRandomWalk(tfp.mcmc.UncalibratedRandomWalk):
 
             return [
                 maybe_flatten(next_state_parts),
-                UncalibratedRandomWalkResults(
+                KernelResults(
                     log_acceptance_correction=log_acceptance_correction,
                     target_log_prob=next_target_log_prob,
+                    extra=tf.zeros(10, dtype=DTYPE)
                 ),
             ]
 

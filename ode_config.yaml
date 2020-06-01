@@ -9,7 +9,7 @@ data:
   reported_cases: data/DailyConfirmedCases_2020-04-18.csv
 
 parameter:
-  beta1: 0.01    # R0 2.4
+  beta1: 0.15    # R0 2.4
   beta2: 0.3   # Contact with commuters 1/3rd of the time
   beta3: 1.0    # lockdown vs normal
   omega: 1.0    # Non-linearity parameter for commuting volume
@@ -34,5 +34,5 @@ settings:
     - 2020-06-01
 
 output:
-  posterior: posterior.h5
+  posterior: posterior_medium_dmax1.h5
   simulation: covid_ode.hd5

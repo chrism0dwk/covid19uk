@@ -15,7 +15,7 @@ from covid.model import load_data, CovidUKStochastic
 from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 from covid.impl.util import make_transition_matrix
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
-from covid.impl.event_time import UncalibratedEventTimesUpdate
+from covid.impl.event_time import EventTimesUpdate
 
 DTYPE = config.floatX
 
@@ -94,13 +94,12 @@ def make_parameter_kernel(scale, bounded_convergence):
 
 def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
     def kernel_func(logp):
-        return tfp.mcmc.MetropolisHastings(
-            inner_kernel=UncalibratedEventTimesUpdate(target_log_prob_fn=logp,
-                                                      target_event_id=target_event_id,
-                                                      prev_event_id=prev_event_id,
-                                                      next_event_id=next_event_id,
-                                                      initial_state=state_init)  # Todo get rid of global dep
-        )
+        return EventTimesUpdate(target_log_prob_fn=logp,
+                                target_event_id=target_event_id,
+                                prev_event_id=prev_event_id,
+                                next_event_id=next_event_id,
+                                dmax=1,
+                                initial_state=state_init)
     return kernel_func
 
 
@@ -111,7 +110,14 @@ def is_accepted(result):
         return is_accepted(result.inner_results)
 
 
-@tf.function(autograph=False, experimental_compile=True)
+def trace_results_fn(results):
+    log_prob = results.proposed_results.target_log_prob
+    accepted = is_accepted(results)
+    proposed = results.proposed_results.extra
+    return tf.concat([[log_prob], [accepted], proposed], axis=0)
+
+
+@tfp.experimental.nn.util.tfcompile #()@tf.function(autograph=False, experimental_compile=False)
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
@@ -139,7 +145,8 @@ def sample(n_samples, init_state, par_scale):
         state[1], ei_results = ei_func(state_logp).one_step(state[1], se_results)
 
         samples = [samples[k].write(i, s) for k, s in enumerate(state)]
-        results = [results[k].write(i, (r.proposed_results.target_log_prob, is_accepted(r))) for k, r in enumerate([par_results, se_results, ei_results])]
+        results = [results[k].write(i, trace_results_fn(r))
+                   for k, r in enumerate([par_results, se_results, ei_results])]
         return i+1, state, ei_results, samples, results
 
     def cond(i, _1, _2, _3, _4):
@@ -155,16 +162,16 @@ if __name__=='__main__':
 
     num_loop_iterations = 100
     num_loop_samples = 100
-    current_state = [np.array([0.01, 0.25], dtype=DTYPE), tf.stack([se_events, ei_events, ir_events], axis=-1)]
+    current_state = [np.array([0.15, 0.25], dtype=DTYPE), tf.stack([se_events, ei_events, ir_events], axis=-1)]
 
     posterior = h5py.File(os.path.expandvars(config['output']['posterior']), 'w')
     event_size = [num_loop_iterations * num_loop_samples] + list(current_state[1].shape)
     par_samples = posterior.create_dataset('samples/parameter', [num_loop_iterations*num_loop_samples,
                                                                  current_state[0].shape[0]], dtype=np.float64)
     se_samples = posterior.create_dataset('samples/events', event_size, dtype=DTYPE)
-    par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
-    se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
-    ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples,2), dtype=DTYPE)
+    par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples, 12), dtype=DTYPE)
+    se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples, 12), dtype=DTYPE)
+    ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples, 12), dtype=DTYPE)
 
     print("Initial logpi:", logp(*current_state))
     par_scale = tf.linalg.diag(tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1)
