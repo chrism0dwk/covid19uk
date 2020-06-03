@@ -239,8 +239,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
 
             # Compute the constraint times (current_t, time_offsets, (target, prev, next),
             #                               events_tensor, initial state, distance)
-            constraining_event_id, constraint_times, n_max = self.compute_constraints(current_events,
-                                                                                      current_t, time_delta)
+            n_max = self.compute_constraints(current_events, current_t, time_delta)
 
             # Draw number to move uniformly from n_max
             x_star = tf.floor(tf.random.uniform(n_max.shape, minval=0., maxval=n_max + 1.,
@@ -264,9 +263,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                                         tf.math.log(tf.reduce_sum(next_p))
 
             # 2. Calculate probability of selecting events
-            next_n_max = _max_free_events(events=next_state, initial_state=self.parameters['initial_state'],
-                                          target_t=next_t, target_id=self.target_event_id,
-                                          constraint_t=constraint_times, constraint_id=constraining_event_id)
+            next_n_max = self.compute_constraints(next_state, next_t, -time_delta)
             log_acceptance_correction += tf.reduce_sum(tf.math.log(n_max + 1.) - tf.math.log(next_n_max + 1.))
 
             return [next_state,
