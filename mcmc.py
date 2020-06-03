@@ -19,7 +19,6 @@ from covid.impl.event_time import EventTimesUpdate
 
 DTYPE = config.floatX
 
-
 # Random moves of events.  What invalidates an epidemic, how can we test for it?
 with open('ode_config.yaml','r') as f:
     config = yaml.load(f)
@@ -33,7 +32,7 @@ data = load_data(config['data'], settings, DTYPE)
 data['pop'] = data['pop'].sum(level=0)
 
 model = CovidUKStochastic(C=data['C'][:10, :10],
-                          N=[100]*10, #data['pop']['n'].to_numpy(),
+                          N=[1000]*10, #data['pop']['n'].to_numpy(),
                           W=data['W'],
                           date_range=settings['inference_period'],
                           holidays=settings['holiday'],
@@ -41,7 +40,7 @@ model = CovidUKStochastic(C=data['C'][:10, :10],
                           time_step=1.)
 
 # Load data
-with open('stochastic_sim_small.pkl', 'rb') as f:
+with open('stochastic_sim_medium.pkl', 'rb') as f:
     example_sim = pkl.load(f)
 
 event_tensor = example_sim['events']  # shape [T, M, S, S]
@@ -98,7 +97,7 @@ def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
                                 target_event_id=target_event_id,
                                 prev_event_id=prev_event_id,
                                 next_event_id=next_event_id,
-                                dmax=1,
+                                dmax=5,
                                 initial_state=state_init)
     return kernel_func
 
@@ -117,7 +116,7 @@ def trace_results_fn(results):
     return tf.concat([[log_prob], [accepted], proposed], axis=0)
 
 
-@tfp.experimental.nn.util.tfcompile #()@tf.function(autograph=False, experimental_compile=False)
+@tf.function(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
@@ -160,7 +159,7 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__=='__main__':
 
-    num_loop_iterations = 100
+    num_loop_iterations = 1000
     num_loop_samples = 100
     current_state = [np.array([0.15, 0.25], dtype=DTYPE), tf.stack([se_events, ei_events, ir_events], axis=-1)]
 
@@ -169,9 +168,9 @@ if __name__=='__main__':
     par_samples = posterior.create_dataset('samples/parameter', [num_loop_iterations*num_loop_samples,
                                                                  current_state[0].shape[0]], dtype=np.float64)
     se_samples = posterior.create_dataset('samples/events', event_size, dtype=DTYPE)
-    par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples, 12), dtype=DTYPE)
-    se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples, 12), dtype=DTYPE)
-    ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples, 12), dtype=DTYPE)
+    par_results = posterior.create_dataset('acceptance/parameter', (num_loop_iterations * num_loop_samples, 22), dtype=DTYPE)
+    se_results = posterior.create_dataset('acceptance/S->E', (num_loop_iterations * num_loop_samples, 22), dtype=DTYPE)
+    ei_results = posterior.create_dataset('acceptance/E->I', (num_loop_iterations * num_loop_samples, 22), dtype=DTYPE)
 
     print("Initial logpi:", logp(*current_state))
     par_scale = tf.linalg.diag(tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1)

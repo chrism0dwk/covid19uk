@@ -1,18 +1,28 @@
 import collections
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability.python.util import SeedStream
 
+from covid import config
 from covid.impl.mcmc import KernelResults
 
-from covid import config
 DTYPE = config.floatX
+
+TransitionTopology = collections.namedtuple('TransitionTopology',
+                                            ('prev',
+                                             'target',
+                                             'next'))
 
 
 def _is_within(x, low, high):
     """Returns true if low <= x < high"""
     return tf.logical_and(tf.less_equal(low, x), tf.less(x, high))
+
+
+def _nonzero_rows(m):
+    return tf.cast(tf.reduce_sum(m, axis=-1) > 0., m.dtype)
 
 
 def _max_free_events(events, initial_state,
@@ -26,31 +36,38 @@ def _max_free_events(events, initial_state,
     :param target_id: the Xth index of the target event
     :param constraint_t: the Tth times of the constraint
     :param constraining_id: the Xth index of the constraining event, -1 implies no constraint
-    :returns: a tensor of shape [M] of max free events, dtype=target_events.dtype
+    :returns: a tensor of shape constraint_t.shape[0] + [M] of max free events, dtype=target_events.dtype
     """
+
     def true_fn():
         target_events_ = tf.gather(events, target_id, axis=-1)
         target_cumsum = tf.cumsum(target_events_, axis=0)
         constraining_events = tf.gather(events, constraint_id, axis=-1)  # TxM
         constraining_cumsum = tf.cumsum(constraining_events, axis=0)  # TxM
-        constraining_init_state = tf.gather(initial_state, constraint_id+1, axis=-1)
+        constraining_init_state = tf.gather(initial_state, constraint_id + 1, axis=-1)
         n1 = tf.gather(target_cumsum, constraint_t, axis=0)
         n2 = tf.gather(constraining_cumsum, constraint_t, axis=0)
         free_events = tf.abs(n1 - n2) + constraining_init_state
-        max_free_events = tf.minimum(tf.reduce_min(free_events, axis=0),
+        max_free_events = tf.minimum(free_events,
                                      tf.gather(target_events_, target_t, axis=0))
         return max_free_events
 
+    # Manual broadcasting of n_events_t is required here so that the XLA
+    # compiler can guarantee that the output shapes of true_fn() and
+    # false_fn() are equal.  Known shape information can thus be
+    # propagated right through the algorithm, so the return value has known shape.
     def false_fn():
-        return tf.gather(events[..., target_id], target_t, axis=0)
+        n_events_t = tf.gather(events[..., target_id], target_t, axis=0)
+        return tf.broadcast_to([n_events_t], [constraint_t.shape[0]] + [n_events_t.shape[0]])
 
-    return tf.cond(constraint_id != -1, true_fn, false_fn)
+    ret_val = tf.cond(constraint_id != -1, true_fn, false_fn)
+    return ret_val
 
 
 def _move_events(event_tensor, event_id, from_t, to_t, n_move):
     """Subtracts n_move from event_tensor[from_t, :, event_id]
     and adds n_move to event_tensor[to_t, :, event_id]."""
-    num_meta = n_move.shape[-1]
+    num_meta = event_tensor.shape[1]
     indices = tf.stack([tf.broadcast_to(from_t, [num_meta]),  # Timepoint
                         tf.range(num_meta),  # All meta-populations
                         tf.broadcast_to([event_id], [num_meta])], axis=-1)  # Event
@@ -132,7 +149,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                  prev_event_id,
                  next_event_id,
                  initial_state,
-                 dmax=4,
+                 dmax=1,
                  seed=None,
                  name=None):
         """An uncalibrated random walk for event times.
@@ -156,6 +173,8 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             dmax=dmax,
             seed=seed,
             name=name)
+        self.tx_topology = TransitionTopology(prev_event_id, target_event_id, next_event_id)
+        self.time_offsets = tf.range(self.parameters['dmax'])
 
     @property
     def target_log_prob_fn(self):
@@ -198,45 +217,37 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         :returns: a tuple containing new_state and UncalibratedRandomWalkResults.
         """
         with tf.name_scope('uncalibrated_event_times_rw/onestep'):
-            target_events = current_events[..., self.target_event_id]
-
+            target_events = current_events[..., self.tx_topology.target]
             num_times = target_events.shape[0]
 
             # 1. Choose a timepoint to move, conditional on it having events to move
-            current_p = tf.cast(tf.reduce_sum(target_events, axis=1) > 0., target_events.dtype)
+            current_p = _nonzero_rows(target_events)
             current_t = tf.squeeze(tf.random.categorical(logits=[tf.math.log(current_p)],
                                                          num_samples=1,
                                                          seed=self._seed_stream(),
                                                          dtype=tf.int32))
 
-            # 2. Choose a direction to move in time
+            # 2. time_delta has a magnitude and sign -- a jump in time for which to move events
             u = tf.squeeze(tf.random.uniform(shape=[1], seed=self._seed_stream(),  # 0 is backwards
                                              minval=0, maxval=2, dtype=tf.int32))  # 1 is forwards
+            jump_sign = tf.gather([-1, 1], u)
+            jump_magnitude = tf.squeeze(tf.random.uniform([1], seed=self._seed_stream(),
+                                                          minval=0, maxval=self.parameters['dmax'],
+                                                          dtype=tf.int32)) + 1
+            time_delta = jump_sign * jump_magnitude
+            next_t = current_t + time_delta
 
-            # 3. Choose a distance to move in time (>=1)
-            distance = tf.squeeze(tf.random.uniform([1], seed=self._seed_stream(),
-                                                    minval=1, maxval=self.parameters['dmax']+1,
-                                                    dtype=tf.int32))
-
-            # Compute the move
-            direction = tf.gather([-1, 1], u)
-            next_t = current_t + direction*distance
-
-            # Compute the constraint times
-            time_span = tf.range(distance)  # This is not XLA-able.  Maybe we could choose from a list?
-            constraint_times = tf.gather([current_t - time_span - 1, current_t + time_span], u)
-            constraining_event_id = tf.gather([self.prev_event_id or -1, self.next_event_id or -1], u)
-
-            # 3. Calculate max number of events to move subject to constraints
-            n_max = _max_free_events(events=current_events, initial_state=self.parameters['initial_state'],
-                                     target_t=current_t, target_id=self.target_event_id,
-                                     constraint_t=constraint_times, constraint_id=constraining_event_id)
+            # Compute the constraint times (current_t, time_offsets, (target, prev, next),
+            #                               events_tensor, initial state, distance)
+            constraining_event_id, constraint_times, n_max = self.compute_constraints(current_events,
+                                                                                      current_t, time_delta)
 
             # Draw number to move uniformly from n_max
-            x_star = tf.floor(tf.random.uniform((), minval=0., maxval=n_max + 1., dtype=current_events.dtype))
+            x_star = tf.floor(tf.random.uniform(n_max.shape, minval=0., maxval=n_max + 1.,
+                                                dtype=current_events.dtype))
 
             # Propose next_state
-            next_state = _move_events(event_tensor=current_events, event_id=self.target_event_id,
+            next_state = _move_events(event_tensor=current_events, event_id=self.tx_topology.target,
                                       from_t=current_t, to_t=next_t,
                                       n_move=x_star)
             next_target_log_prob = self.target_log_prob_fn(next_state)
@@ -248,9 +259,9 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
 
             # Calculate proposal density
             # 1. Calculate probability of choosing a timepoint
-            next_p = tf.cast(tf.reduce_sum(next_state[..., self.target_event_id], axis=1) > 0.,
-                             next_state.dtype)
-            log_acceptance_correction = tf.math.log(tf.reduce_sum(next_p) / tf.reduce_sum(current_p))
+            next_p = _nonzero_rows(next_state[..., self.target_event_id])
+            log_acceptance_correction = tf.math.log(tf.reduce_sum(current_p)) - \
+                                        tf.math.log(tf.reduce_sum(next_p))
 
             # 2. Calculate probability of selecting events
             next_n_max = _max_free_events(events=next_state, initial_state=self.parameters['initial_state'],
@@ -262,8 +273,31 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                     KernelResults(
                         log_acceptance_correction=log_acceptance_correction,
                         target_log_prob=next_target_log_prob,
-                        extra=x_star
+                        extra=tf.concat([x_star, n_max], axis=0)
                     )]
+
+    def compute_constraints(self, current_events, current_t, time_delta):
+        """Computes the constraints on an event time move given the move magnitude and sign
+        :param current_events: an event tensor describing the state
+        :param current_t: the time from which events need to be moved
+        :param time_delta: the time_delta by which to move the events
+        """
+        constraint_time_idx = tf.where(time_delta < 0,
+                                       current_t - self.time_offsets - 1,
+                                       current_t + self.time_offsets)
+
+        constraining_event_id = tf.where(time_delta < 0,
+                                         self.tx_topology.prev or -1,
+                                         self.tx_topology.next or -1)
+
+        # 3. Calculate max number of events to move subject to constraints
+        n_max = _max_free_events(events=current_events, initial_state=self.parameters['initial_state'],
+                                 target_t=current_t, target_id=self.tx_topology.target,
+                                 constraint_t=constraint_time_idx, constraint_id=constraining_event_id)
+        inf_mask = tf.cumsum(tf.one_hot(tf.math.abs(time_delta),
+                                        self.parameters['dmax'], dtype=tf.int32)) * tf.int32.max
+        n_max = tf.reduce_min(tf.cast(inf_mask[:, None], n_max.dtype) + n_max, axis=0)
+        return n_max
 
     def bootstrap_results(self, init_state):
         with tf.name_scope('uncalibrated_event_times_rw/bootstrap_results'):
@@ -272,5 +306,5 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             return KernelResults(
                 log_acceptance_correction=tf.constant(0., dtype=DTYPE),
                 target_log_prob=init_target_log_prob,
-                extra=tf.zeros(init_state.shape[-2], dtype=DTYPE)
+                extra=tf.zeros(2 * init_state.shape[-2], dtype=DTYPE)
             )

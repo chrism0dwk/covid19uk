@@ -86,7 +86,7 @@ class UncalibratedLogRandomWalk(tfp.mcmc.UncalibratedRandomWalk):
                 KernelResults(
                     log_acceptance_correction=log_acceptance_correction,
                     target_log_prob=next_target_log_prob,
-                    extra=tf.zeros(10, dtype=DTYPE)
+                    extra=tf.zeros(20, dtype=DTYPE)
                 ),
             ]
 

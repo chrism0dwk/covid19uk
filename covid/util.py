@@ -243,3 +243,29 @@ def squared_jumping_distance(chain):
     diff = chain[1:] - chain[:-1]
     diff = diff * diff
     return diff.sum(axis=tuple(np.arange(1, diff.ndim)))
+
+
+def p_null(results):
+    accepted = results[:, 1] == 1.0
+    pnull = np.mean(results[accepted, 2:].sum(axis=-1) == 0)
+    return pnull
+
+
+def jump_summary(posterior_file):
+    f = h5py.File(posterior_file, 'r')
+
+    # SJD
+    sjd_se = squared_jumping_distance(f['samples/events'][..., 0])
+    sjd_ei = squared_jumping_distance(f['samples/events'][..., 1])
+
+    # Acceptance
+    accept_se = np.mean(f['acceptance/S->E'][:, 1])
+    accept_ei = np.mean(f['acceptance/E->I'][:, 1])
+
+    # Pr(null move | accepted)
+    p_null_se = p_null(f['acceptance/S->E'])
+    p_null_ei = p_null(f['acceptance/E->I'])
+
+    f.close()
+    return {'S->E': {'sjd': np.mean(sjd_se), 'accept': accept_se, 'p_null': p_null_se},
+            'E->I': {'sjd': np.mean(sjd_ei), 'accept': accept_ei, 'p_null': p_null_ei}}

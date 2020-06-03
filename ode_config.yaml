@@ -34,5 +34,5 @@ settings:
     - 2020-06-01
 
 output:
-  posterior: posterior_medium_dmax1.h5
+  posterior: posterior_medium_dmax5.h5
   simulation: covid_ode.hd5
