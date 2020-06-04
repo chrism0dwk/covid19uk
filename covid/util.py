@@ -269,3 +269,34 @@ def jump_summary(posterior_file):
     f.close()
     return {'S->E': {'sjd': np.mean(sjd_se), 'accept': accept_se, 'p_null': p_null_se},
             'E->I': {'sjd': np.mean(sjd_ei), 'accept': accept_ei, 'p_null': p_null_ei}}
+
+
+def plot_event_posterior(posterior, simulation, metapopulation=0):
+    import matplotlib.pyplot as plt
+    idx = np.linspace(0, posterior['samples/events'].shape[0] - 1, 200)
+    fig, ax = plt.subplots(2, 2)
+
+    ax[0][0].plot(posterior['samples/events'][idx, :, metapopulation, 0].T, color='lightblue', alpha=0.1)
+    ax[0][0].plot(simulation['events'][:, metapopulation, 0, 1], color='black', label='True events')
+
+    ax[0][1].plot(np.cumsum(posterior['samples/events'][idx, :, metapopulation, 0].T, axis=0),
+                  color='lightblue', alpha=0.1)
+    ax[0][1].plot(np.cumsum(simulation['events'][:, metapopulation, 0, 1]), color='black',
+                  label='True events')
+
+    ax[1][0].plot(posterior['samples/events'][idx, :, metapopulation, 1].T, color='lightblue', alpha=0.1)
+    ax[1][0].plot(simulation['events'][:, metapopulation, 1, 2], color='black', label='True events')
+
+    ax[1][1].plot(np.cumsum(posterior['samples/events'][idx, :, metapopulation, 1].T, axis=0),
+                  color='lightblue',
+                  alpha=0.1)
+    ax[1][1].plot(np.cumsum(simulation['events'][:, metapopulation, 1, 2]), color='black',
+                  label='True events')
+
+    ax[0][0].set_title('Events per day')
+    ax[0][1].set_title('Cumulative events')
+
+    ax[0][0].set_ylabel('S->E')
+    ax[1][0].set_ylabel('E->I')
+
+    return fig, ax
