@@ -97,7 +97,7 @@ def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
                                 target_event_id=target_event_id,
                                 prev_event_id=prev_event_id,
                                 next_event_id=next_event_id,
-                                dmax=5,
+                                dmax=1,
                                 initial_state=state_init)
     return kernel_func
 

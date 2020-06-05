@@ -8,6 +8,8 @@ from tensorflow_probability.python.util import SeedStream
 from covid import config
 from covid.impl.mcmc import KernelResults
 
+tfd = tfp.distributions
+
 DTYPE = config.floatX
 
 TransitionTopology = collections.namedtuple('TransitionTopology',
@@ -242,8 +244,11 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             n_max = self.compute_constraints(current_events, current_t, time_delta)
 
             # Draw number to move uniformly from n_max
+            p_msk = tf.cast(n_max > 0., dtype=tf.float32)
+            W = tfd.OneHotCategorical(logits=tf.math.log(p_msk))
+            msk = tf.cast(W.sample(), n_max.dtype)
             x_star = tf.floor(tf.random.uniform(n_max.shape, minval=0., maxval=n_max + 1.,
-                                                dtype=current_events.dtype))
+                                                dtype=current_events.dtype)) * msk
 
             # Propose next_state
             next_state = _move_events(event_tensor=current_events, event_id=self.tx_topology.target,
@@ -265,6 +270,11 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             # 2. Calculate probability of selecting events
             next_n_max = self.compute_constraints(next_state, next_t, -time_delta)
             log_acceptance_correction += tf.reduce_sum(tf.math.log(n_max + 1.) - tf.math.log(next_n_max + 1.))
+
+            # 3. Prob of choosing a non-zero element to move
+            log_acceptance_correction = tf.math.log(
+                tf.math.count_nonzero(n_max, dtype=log_acceptance_correction.dtype)) - tf.math.log(
+                tf.math.count_nonzero(next_n_max, dtype=log_acceptance_correction.dtype))
 
             return [next_state,
                     KernelResults(
