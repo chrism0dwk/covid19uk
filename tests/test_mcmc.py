@@ -1,3 +1,4 @@
+from pprint import pprint
 import unittest
 import pickle as pkl
 import numpy as np
@@ -6,11 +7,10 @@ import tensorflow as tf
 
 from covid.impl.event_time_proposal import _abscumdiff, EventTimeProposal, TransitionTopology
 
-
 class TestAbsCumDiff(unittest.TestCase):
 
     def setUp(self):
-        with open('../stochastic_sim_small.pkl','rb') as f:
+        with open('./stochastic_sim_small.pkl','rb') as f:
             sim = pkl.load(f)
         self.events = np.stack([sim['events'][..., 0, 1],
                                 sim['events'][..., 1, 2],
@@ -61,10 +61,9 @@ class TestAbsCumDiff(unittest.TestCase):
                                 bound_t=t, bound_id=-1).numpy()
             np.testing.assert_array_equal(n_max, np.zeros([self.events.shape[0], 1]))
 
-
 class TestEventTimeProposal(unittest.TestCase):
     def setUp(self):
-        with open('../stochastic_sim_small.pkl', 'rb') as f:
+        with open('./stochastic_sim_small.pkl', 'rb') as f:
             sim = pkl.load(f)
         self.events = np.stack([sim['events'][..., 0, 1],  # S->E
                                 sim['events'][..., 1, 2],  # E->I
@@ -81,7 +80,7 @@ class TestEventTimeProposal(unittest.TestCase):
 
     def test_event_time_proposal_sample(self):
         q = self.Q.sample()
-        print(q)
+        pprint(q)
 
 
 if __name__ == '__main__':
