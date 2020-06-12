@@ -4,6 +4,17 @@ import numpy as np
 import tensorflow as tf
 from tensorflow_probability.python.mcmc.internal import util as mcmc_util
 
+
+def which(predicate):
+    """Returns the indices of True elements of predicate"""
+    with tf.name_scope('which'):
+        x = tf.cast(predicate, dtype=tf.int32)
+        index_range = tf.range(x.shape[0])
+        indices = tf.cumsum(x) * x
+        indices = tf.scatter_nd(indices[:, None], index_range, x.shape)
+        return indices[1:]
+
+
 def _gen_index(state_shape, trm_coords):
     """Returns a tensor of indices indexing
     coordinates trm_coords into a

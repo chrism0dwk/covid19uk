@@ -7,6 +7,7 @@ from tensorflow_probability.python.util import SeedStream
 
 from covid import config
 from covid.impl.mcmc import KernelResults
+from covid.impl.util import which
 
 tfd = tfp.distributions
 
@@ -44,8 +45,8 @@ def _max_free_events(events, initial_state,
     def true_fn():
         target_events_ = tf.gather(events, target_id, axis=-1)
         target_cumsum = tf.cumsum(target_events_, axis=0)
-        constraining_events = tf.gather(events, constraint_id, axis=-1)  # TxM
-        constraining_cumsum = tf.cumsum(constraining_events, axis=0)  # TxM
+        constraining_events = tf.gather(events, constraint_id, axis=-1) # TxM
+        constraining_cumsum = tf.cumsum(constraining_events, axis=0)    # TxM
         constraining_init_state = tf.gather(initial_state, constraint_id + 1, axis=-1)
         n1 = tf.gather(target_cumsum, constraint_t, axis=0)
         n2 = tf.gather(constraining_cumsum, constraint_t, axis=0)
@@ -91,6 +92,8 @@ class EventTimesUpdate(tfp.mcmc.TransitionKernel):
                  next_event_id,
                  initial_state,
                  dmax,
+                 mmax,
+                 nmax,
                  seed=None,
                  name=None):
         """A random walk Metropolis Hastings for event times.
@@ -99,6 +102,9 @@ class EventTimesUpdate(tfp.mcmc.TransitionKernel):
         :param prev_event_id: the position of the previous event in the events tensor
         :param next_event_id: the position of the next event in the events tensor
         :param initial_state: the initial state tensor
+        :param dmax: maximum distance to move in time
+        :param mmax: number of metapopulations to move
+        :param nmax: max number of events to move
         :param seed: a random seed
         :param name: the name of the update step
         """
@@ -109,6 +115,8 @@ class EventTimesUpdate(tfp.mcmc.TransitionKernel):
                                                       prev_event_id=prev_event_id,
                                                       next_event_id=next_event_id,
                                                       dmax=dmax,
+                                                      mmax=mmax,
+                                                      nmax=nmax,
                                                       initial_state=initial_state))
         self._parameters = self._impl.inner_kernel.parameters.copy()
         self._parameters['seed'] = seed
@@ -151,7 +159,9 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                  prev_event_id,
                  next_event_id,
                  initial_state,
-                 dmax=1,
+                 dmax,
+                 mmax,
+                 nmax,
                  seed=None,
                  name=None):
         """An uncalibrated random walk for event times.
@@ -173,6 +183,8 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             next_event_id=next_event_id,
             initial_state=initial_state,
             dmax=dmax,
+            mmax=mmax,
+            nmax=nmax,
             seed=seed,
             name=name)
         self.tx_topology = TransitionTopology(prev_event_id, target_event_id, next_event_id)
@@ -230,6 +242,8 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                                                          dtype=tf.int32))
 
             # 2. time_delta has a magnitude and sign -- a jump in time for which to move events
+            # tfp.math.random_rademacker
+            # bernoulli * 2 - 1
             u = tf.squeeze(tf.random.uniform(shape=[1], seed=self._seed_stream(),  # 0 is backwards
                                              minval=0, maxval=2, dtype=tf.int32))  # 1 is forwards
             jump_sign = tf.gather([-1, 1], u)
@@ -247,7 +261,9 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             p_msk = tf.cast(n_max > 0., dtype=tf.float32)
             W = tfd.OneHotCategorical(logits=tf.math.log(p_msk))
             msk = tf.cast(W.sample(), n_max.dtype)
-            x_star = tf.floor(tf.random.uniform(n_max.shape, minval=0., maxval=n_max + 1.,
+            clip_max = 20.
+            n_max = tf.clip_by_value(n_max, clip_value_min=0., clip_value_max=clip_max)
+            x_star = tf.floor(tf.random.uniform(n_max.shape, minval=0., maxval=(n_max + 1.),
                                                 dtype=current_events.dtype)) * msk
 
             # Propose next_state
@@ -269,6 +285,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
 
             # 2. Calculate probability of selecting events
             next_n_max = self.compute_constraints(next_state, next_t, -time_delta)
+            next_n_max = tf.clip_by_value(next_n_max, clip_value_min=0., clip_value_max=clip_max)
             log_acceptance_correction += tf.reduce_sum(tf.math.log(n_max + 1.) - tf.math.log(next_n_max + 1.))
 
             # 3. Prob of choosing a non-zero element to move

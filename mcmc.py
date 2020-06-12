@@ -15,7 +15,7 @@ from covid.model import load_data, CovidUKStochastic
 from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 from covid.impl.util import make_transition_matrix
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
-from covid.impl.event_time import EventTimesUpdate
+from covid.impl.event_time_mh import EventTimesUpdate
 
 DTYPE = config.floatX
 
@@ -98,6 +98,8 @@ def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
                                 prev_event_id=prev_event_id,
                                 next_event_id=next_event_id,
                                 dmax=1,
+                                mmax=1,
+                                nmax=20,
                                 initial_state=state_init)
     return kernel_func
 
@@ -116,7 +118,7 @@ def trace_results_fn(results):
     return tf.concat([[log_prob], [accepted], proposed], axis=0)
 
 
-@tf.function(autograph=False, experimental_compile=True)
+#@tf.function #(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
