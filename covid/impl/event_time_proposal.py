@@ -1,13 +1,17 @@
 """Mechanism for proposing event times to move"""
 import collections
+
 import tensorflow as tf
 import tensorflow_probability as tfp
+from covid.impl.UniformInteger import UniformInteger
+
 tfd = tfp.distributions
 
 TransitionTopology = collections.namedtuple('TransitionTopology',
                                             ('prev',
                                              'target',
                                              'next'))
+
 
 def _abscumdiff(events, initial_state,
                 target_t, target_id,
@@ -47,7 +51,8 @@ def _abscumdiff(events, initial_state,
             axis=-1)
 
         indices = tf.stack([
-            tf.repeat(tf.range(bound_t.shape[0], dtype=tf.int32), [bound_t.shape[1]]),
+            tf.repeat(tf.range(bound_t.shape[0], dtype=tf.int32),
+                      [bound_t.shape[1]]),
             tf.reshape(bound_t, [-1])
         ], axis=-1)
         indices = tf.reshape(indices, bound_t.shape + [2])
@@ -65,13 +70,15 @@ def _abscumdiff(events, initial_state,
     return ret_val
 
 
-def TimeDelta(dmax, p_pos=0.5, name=None):
-    outcomes = tf.concat([-tf.range(1, dmax + 1), tf.range(1, dmax + 1)], axis=0)
+def TimeDelta(dmax, name=None):
+    outcomes = tf.concat([-tf.range(1, dmax + 1), tf.range(1, dmax + 1)],
+                         axis=0)
     logits = tf.ones_like(outcomes, dtype=tf.float64)
     return tfd.FiniteDiscrete(outcomes=outcomes, logits=logits, name=name)
 
 
-def EventTimeProposal(events, initial_state, topology, d_max, n_max, dtype=tf.int32, name=None):
+def EventTimeProposal(events, initial_state, topology, d_max, n_max,
+                      dtype=tf.int32, name=None):
     """Draws an event time move proposal.
     :param events: a [M, T, K] tensor of event times (M number of metapopulations,
                   T number of timepoints, K number of transitions)
@@ -130,8 +137,7 @@ def EventTimeProposal(events, initial_state, topology, d_max, n_max, dtype=tf.in
                                       clip_value_max=n_max)
 
         # Draw x_star
-        # TODO: needs correct sample/log_prob (mass)
-        return tfd.Uniform(low=0, high=max_events, name='x_star')
+        return UniformInteger(low=0, high=max_events+1, name='x_star')
 
     return tfd.JointDistributionNamed(dict(t=t,
                                            time_delta=time_delta,
