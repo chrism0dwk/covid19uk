@@ -1,18 +1,19 @@
+import os
 import pickle as pkl
 import unittest
-from pprint import pprint
-
 import numpy as np
 import tensorflow as tf
 
 from covid.impl.event_time_proposal import _abscumdiff, EventTimeProposal, \
-    TransitionTopology
+    FilteredEventTimeProposal, TransitionTopology
+
+_thisdir = os.path.dirname(__file__)
+_testsim = os.path.join(_thisdir, 'fixture/stochastic_sim_small.pkl')
 
 
 class TestAbsCumDiff(unittest.TestCase):
-
     def setUp(self):
-        with open('./stochastic_sim_small.pkl', 'rb') as f:
+        with open(_testsim, 'rb') as f:
             sim = pkl.load(f)
         self.events = np.stack([sim['events'][..., 0, 1],
                                 sim['events'][..., 1, 2],
@@ -76,7 +77,7 @@ class TestAbsCumDiff(unittest.TestCase):
 
 class TestEventTimeProposal(unittest.TestCase):
     def setUp(self):
-        with open('../stochastic_sim_small.pkl', 'rb') as f:
+        with open(_testsim, 'rb') as f:
             sim = pkl.load(f)
         self.events = np.stack([sim['events'][..., 0, 1],  # S->E
                                 sim['events'][..., 1, 2],  # E->I
@@ -95,9 +96,38 @@ class TestEventTimeProposal(unittest.TestCase):
 
     def test_event_time_proposal_sample(self):
         q = self.Q.sample()
-        self.assertTrue(np.array_equal(q['t'], [21, 11, 23, 36, 24, 35]))
+        np.testing.assert_array_equal(q['t'], [21, 11, 23, 36, 24, 35])
         self.assertEqual(2, q['delta_t'])
         np.testing.assert_array_equal(q['x_star'], [1, 0, 1, 0, 0, 1])
+        log_prob = tf.reduce_sum(self.Q.log_prob(q))
+        self.assertAlmostEqual(log_prob.numpy(), -33.236160, places=6)
+
+
+class TestFilteredEventTimeProposal(unittest.TestCase):
+    def setUp(self):
+        with open(_testsim, 'rb') as f:
+            sim = pkl.load(f)
+        self.events = np.stack([sim['events'][..., 0, 1],  # S->E
+                                sim['events'][..., 1, 2],  # E->I
+                                sim['events'][..., 2, 3]], axis=-1)  # I->R
+
+        self.events = np.transpose(self.events,
+                                   axes=(1, 0, 2))  # shape [M, T, K]
+        self.initial_state = sim['state_init']
+        self.topology = TransitionTopology(prev=0, target=1, next=2)
+        tf.random.set_seed(10202010)
+        self.Q = FilteredEventTimeProposal(self.events, self.initial_state,
+                                           self.topology,
+                                           3, 10)
+
+    def test_filtered_event_time_proposal_sample(self):
+        q = self.Q.sample()
+        np.testing.assert_array_equal(q['x_star'],
+                                      [0, 0, 0, 0, 2, 0, 0, 0, 0, 0])
+        np.testing.assert_array_equal(q['t'], [0, 0, 0, 0, 37, 0, 0, 0, 0, 0])
+        self.assertEqual(3, q['delta_t'])
+        log_prob = self.Q.log_prob(q)
+        self.assertAlmostEqual(log_prob.numpy(), -33.333333, delta=1.e-6)
 
 
 if __name__ == '__main__':

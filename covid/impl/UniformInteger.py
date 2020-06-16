@@ -12,7 +12,8 @@ tfd = tfp.distributions
 
 class UniformInteger(tfd.Distribution):
     def __init__(self, low=0, high=1, validate_args=False,
-                 allow_nan_stats=True, dtype=tf.int32, name='UniformInteger'):
+                 allow_nan_stats=True, dtype=tf.int32, float_dtype=tf.float64,
+                 name='UniformInteger'):
         """Initialise a UniformInteger random variable on `[low, high)`.
 
         Args:
@@ -45,6 +46,7 @@ class UniformInteger(tfd.Distribution):
                 allow_nan_stats=allow_nan_stats,
                 parameters=parameters,
                 name=name)
+        self.float_dtype = float_dtype
 
     @staticmethod
     def _param_shapes(sample_shape):
@@ -103,9 +105,9 @@ class UniformInteger(tfd.Distribution):
             self.dtype)
 
     def _prob(self, x):
-        low = tf.cast(self.low, tf.float32)
-        high = tf.cast(self.high, tf.float32)
-        x = tf.cast(x, dtype=tf.float32)
+        low = tf.cast(self.low, self.float_dtype)
+        high = tf.cast(self.high, self.float_dtype)
+        x = tf.cast(x, dtype=self.float_dtype)
 
         return tf.where(
             tf.math.is_nan(x),
@@ -116,4 +118,5 @@ class UniformInteger(tfd.Distribution):
                 tf.ones_like(x) / self._range(low=low, high=high)))
 
     def _log_prob(self, x):
-        return tf.math.log(self._prob(x))
+        res = tf.math.log(self._prob(x))
+        return res

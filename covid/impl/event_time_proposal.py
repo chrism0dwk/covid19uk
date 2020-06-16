@@ -70,6 +70,30 @@ def _abscumdiff(events, initial_state,
     return ret_val
 
 
+class Deterministic2(tfd.Deterministic):
+    def __init__(self,
+                 loc,
+                 atol=None,
+                 rtol=None,
+                 validate_args=False,
+                 allow_nan_stats=True,
+                 log_prob_dtype=tf.float32,
+                 name='Deterministic'):
+        parameters = dict(locals())
+        super(Deterministic2, self).__init__(
+            loc,
+            atol=atol,
+            rtol=rtol,
+            validate_args=validate_args,
+            allow_nan_stats=allow_nan_stats,
+            name=name
+        )
+        self.log_prob_dtype=log_prob_dtype
+
+    def _prob(self, x):
+        return tf.constant(1, dtype=self.log_prob_dtype)
+
+
 def TimeDelta(dmax, name=None):
     outcomes = tf.concat([-tf.range(1, dmax + 1), tf.range(1, dmax + 1)],
                          axis=0)
@@ -140,3 +164,49 @@ def EventTimeProposal(events, initial_state, topology, d_max, n_max,
     return tfd.JointDistributionNamed(dict(t=t,
                                            delta_t=delta_t,
                                            x_star=x_star), name=name)
+
+
+def FilteredEventTimeProposal(events, initial_state, topology, d_max, n_max,
+                              dtype=tf.int32, name=None):
+    """FilteredEventTimeProposal allows us to choose a subset of indices
+    in `range(events.shape[0])` for which to propose an update.  The
+    results are then broadcast back to `events.shape[0]`. """
+    target_events = tf.gather(events, topology.target, axis=-1)
+
+    def m():
+        hot_meta = tf.math.count_nonzero(target_events, axis=1) > 0
+        logits = tf.math.log(tf.cast(hot_meta, tf.float64))
+        return tfd.Categorical(logits=[logits], name='m')
+
+    def inner_move(m):
+        select_meta = tf.gather(events, m, axis=0)
+        select_init = tf.gather(initial_state, m, axis=0)
+        return EventTimeProposal(select_meta, select_init, topology, d_max, n_max,
+                                 dtype=dtype, name=None)
+
+    def t(m, inner_move):
+        """Scatter metapop updates to original metapop dimension"""
+        return Deterministic2(
+            tf.scatter_nd([m], inner_move['t'], [events.shape[0]]),
+            log_prob_dtype=events.dtype,
+            name='t'
+        )
+
+    def delta_t(inner_move):
+        return Deterministic2(inner_move['delta_t'],
+                              log_prob_dtype=events.dtype,
+                              name='delta_t')
+
+    def x_star(m, inner_move):
+        """Scatter metapop updates to original metapop dimension"""
+        return Deterministic2(
+            tf.scatter_nd([m], inner_move['x_star'], [events.shape[0]]),
+            log_prob_dtype=events.dtype,
+            name='x_star'
+        )
+
+    return tfd.JointDistributionNamed(dict(m=m,
+                                           inner_move=inner_move,
+                                           t=t,
+                                           delta_t=delta_t,
+                                           x_star=x_star))
