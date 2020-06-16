@@ -129,8 +129,7 @@ def EventTimeProposal(events, initial_state, topology, d_max, n_max,
         free_events = tf.reduce_min(inf_mask + free_events, axis=-1)
         indices = tf.stack([
             tf.range(events.shape[0], dtype=dtype),
-            tf.squeeze(t)
-        ], axis=-1)
+            t[:, 0]], axis=-1)
         available_events = tf.gather_nd(target_events, indices)
         max_events = tf.minimum(free_events, available_events)
         max_events = tf.clip_by_value(max_events, clip_value_min=0,
