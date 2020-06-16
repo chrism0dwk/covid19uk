@@ -95,10 +95,9 @@ class TestEventTimeProposal(unittest.TestCase):
 
     def test_event_time_proposal_sample(self):
         q = self.Q.sample()
-        pprint(q)
-        self.assertTrue(np.array_equal(q['t'], [20, 31, 16,30, 35, 35]))
-        self.assertEqual(q['time_delta'], -3)
-        self.assertTrue(np.array_equal(q['x_star'], [1, 1, 1, 1, 0, 1]))
+        self.assertTrue(np.array_equal(q['t'], [21, 11, 23, 36, 24, 35]))
+        self.assertEqual(2, q['delta_t'])
+        np.testing.assert_array_equal(q['x_star'], [1, 0, 1, 0, 0, 1])
 
 
 if __name__ == '__main__':

@@ -96,11 +96,10 @@ def EventTimeProposal(events, initial_state, topology, d_max, n_max,
         x = tf.cast(target_events > 0, dtype=tf.float64)  # [M, T]
         return tfd.Categorical(logits=tf.math.log(x), name='event_coords')
 
-    def time_delta():
+    def delta_t():
         return TimeDelta(d_max, name='TimeDelta')
 
-    def x_star(t, time_delta):
-        delta_t = time_delta
+    def x_star(t, delta_t):
         # Compute bounds
         # The limitations of XLA mean that we must calculate bounds for
         # intervals [t, t+delta_t) if delta_t > 0, and [t+delta_t, t) if
@@ -108,7 +107,7 @@ def EventTimeProposal(events, initial_state, topology, d_max, n_max,
         t = t[..., tf.newaxis]
         bound_interval = tf.where(delta_t < 0,
                                   t - time_interval - 1,  # [t+delta_t, t)
-                                  t + time_interval)  # [t, t+delta_t)
+                                  t + time_interval)      # [t, t+delta_t)
 
         bound_event_id = tf.where(delta_t < 0,
                                   topology.prev or -1,
@@ -139,5 +138,5 @@ def EventTimeProposal(events, initial_state, topology, d_max, n_max,
         return UniformInteger(low=0, high=max_events+1, name='x_star')
 
     return tfd.JointDistributionNamed(dict(t=t,
-                                           time_delta=time_delta,
+                                           delta_t=delta_t,
                                            x_star=x_star), name=name)
