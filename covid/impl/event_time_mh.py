@@ -63,23 +63,31 @@ def _max_free_events(events, initial_state,
     return ret_val
 
 
-def _move_events(event_tensor, event_id, from_t, to_t, n_move):
-    """Subtracts n_move from event_tensor[:, from_t, event_id]
-    and adds n_move to event_tensor[:, to_t, event_id]."""
-    num_meta = event_tensor.shape[0]
-    indices = tf.stack([tf.range(num_meta),  # All meta-populations
+def _move_events(event_tensor, event_id, m, from_t, to_t, n_move):
+    """Subtracts n_move from event_tensor[m, from_t, event_id]
+    and adds n_move to event_tensor[m, to_t, event_id].
+
+    :param event_tensor: shape [M, T, X]
+    :param event_id: the event id to move
+    :param m: the metapopulation to move
+    :param from_t: the move-from time
+    :param to_t: the move-to time
+    :param n_move: the number of events to move
+    :return: the modified event_tensor
+    """
+    # Todo rationalise this -- compute a delta, and add once.
+    indices = tf.stack([m,  # All meta-populations
                         from_t,
-                        tf.broadcast_to([event_id], [num_meta])],
-                       axis=-1)  # Event
+                        [event_id]], axis=-1)  # Event
     # Subtract x_star from the [from_t, :, event_id] row of the state tensor
     n_move = tf.cast(n_move, event_tensor.dtype)
-    next_state = tf.tensor_scatter_nd_sub(event_tensor, indices, n_move)
-    indices = tf.stack([tf.range(num_meta),
+    new_state = tf.tensor_scatter_nd_sub(event_tensor, indices, n_move)
+    indices = tf.stack([m,
                         to_t,
-                        tf.broadcast_to(event_id, [num_meta])], axis=-1)
+                        [event_id]], axis=-1)
     # Add x_star to the [to_t, :, event_id] row of the state tensor
-    next_state = tf.tensor_scatter_nd_add(next_state, indices, n_move)
-    return next_state
+    new_state = tf.tensor_scatter_nd_add(new_state, indices, n_move)
+    return new_state
 
 
 class EventTimesUpdate(tfp.mcmc.TransitionKernel):
@@ -150,6 +158,12 @@ class EventTimesUpdate(tfp.mcmc.TransitionKernel):
     def bootstrap_results(self, init_state):
         kernel_results = self._impl.bootstrap_results(init_state)
         return kernel_results
+
+
+def _reverse_move(move):
+    move['t'] = move['t'] + move['delta_t']
+    move['delta_t'] = -move['delta_t']
+    return move
 
 
 class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
@@ -237,7 +251,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         with tf.name_scope('uncalibrated_event_times_rw/onestep'):
             current_events = tf.transpose(current_events, perm=(1, 0, 2))
             target_events = current_events[..., self.tx_topology.target]
-            num_times = target_events.shape[0]
+            num_times = target_events.shape[1]
 
             proposal = FilteredEventTimeProposal(current_events,
                                                  self.parameters[
@@ -245,43 +259,69 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                                                  self.tx_topology,
                                                  self.parameters['dmax'],
                                                  self.parameters['nmax'])
-            move = proposal.sample()
+            update = proposal.sample()
+            move = update['move']
+            to_t = move['t'] + move['delta_t']
 
-            next_state = _move_events(event_tensor=current_events,
-                                      event_id=self.tx_topology.target,
-                                      from_t=move['t'],
-                                      to_t=move['t'] + move['delta_t'],
-                                      n_move=move['x_star'])
+            # Moves outside the range [0, num_times] are illegal
+            # Todo: address potential issue in the proposal if
+            #       dmax accesses indices outside this range.
+            def true_fn():
+                next_state = _move_events(event_tensor=current_events,
+                                          event_id=self.tx_topology.target,
+                                          m=update['m'],
+                                          from_t=move['t'],
+                                          to_t=to_t,
+                                          n_move=move['x_star'])
 
-            next_state_tr = tf.transpose(next_state, perm=(1, 0, 2))
-            next_target_log_prob = self.target_log_prob_fn(next_state_tr)
+                next_state_tr = tf.transpose(next_state, perm=(1, 0, 2))
+                next_target_log_prob = self._target_log_prob_fn(next_state_tr)
+
+                # Calculate proposal mass ratio
+                q_fwd = proposal.log_prob(update)
+                rev_move = _reverse_move(move.copy())
+                rev_update = dict(m=update['m'],
+                                  move=rev_move)
+                Q_rev = FilteredEventTimeProposal(
+                    events=next_state,
+                    initial_state=self.parameters[
+                        'initial_state'],
+                    topology=self.tx_topology,
+                    d_max=self.parameters['dmax'],
+                    n_max=self.parameters[
+                        'nmax'])
+                q_rev = Q_rev.log_prob(rev_update)
+                log_acceptance_correction = tf.reduce_sum(q_rev - q_fwd)
+
+                return (next_target_log_prob,
+                        log_acceptance_correction,
+                        next_state_tr)
+
+            def false_fn():
+                next_target_log_prob = tf.constant(-np.inf,
+                                                   dtype=current_events.dtype)
+                log_acceptance_correction = tf.constant(0.0,
+                                                        dtype=current_events.dtype)
+                return (next_target_log_prob,
+                        log_acceptance_correction,
+                        tf.transpose(current_events, perm=(1, 0, 2)))
 
             # Trap out-of-bounds moves that go outside [0, num_times)
-            next_target_log_prob = tf.where(
-                _is_within(move['t'] + move['delta_t'], 0,
-                           num_times),
-                next_target_log_prob,
-                tf.constant(-np.inf,
-                            dtype=current_events.dtype))
+            (next_target_log_prob,
+             log_acceptance_correction,
+             next_state) = tf.cond(
+                tf.reduce_all(_is_within(to_t, 0, num_times)),
+                true_fn=true_fn,
+                false_fn=false_fn)
 
-            # Calculate proposal mass ratio
-            q_fwd = proposal.log_prob(move)
-            move['t'] = move['t'] + move['delta_t']
-            move['delta_t'] = -move['delta_t']
-            q_rev = FilteredEventTimeProposal(event_tensor=next_state,
-                                              initial_state=self.parameters[
-                                                  'initial_state'],
-                                              topology=self.tx_topology,
-                                              d_max=self.parameters['dmax'],
-                                              n_max=self.parameters[
-                                                  'nmax']).log_prob(move)
-            log_acceptance_correction = q_rev - q_fwd
+            x_star_results = tf.scatter_nd([update['m']], move['x_star'],
+                                           [current_events.shape[0]])
 
-            return [next_state_tr,
+            return [next_state,
                     KernelResults(
                         log_acceptance_correction=log_acceptance_correction,
                         target_log_prob=next_target_log_prob,
-                        extra=tf.concat(move['x_star'], axis=0)
+                        extra=tf.cast(x_star_results, current_events.dtype)
                     )]
 
     def compute_constraints(self, current_events, current_t, time_delta):
@@ -319,5 +359,5 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             return KernelResults(
                 log_acceptance_correction=tf.constant(0., dtype=DTYPE),
                 target_log_prob=init_target_log_prob,
-                extra=tf.zeros(2 * init_state.shape[-2], dtype=DTYPE)
+                extra=tf.zeros(init_state.shape[-2], dtype=DTYPE)
             )

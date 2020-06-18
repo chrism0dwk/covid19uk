@@ -3,6 +3,7 @@ import collections
 
 import tensorflow as tf
 import tensorflow_probability as tfp
+
 from covid.impl.UniformInteger import UniformInteger
 
 tfd = tfp.distributions
@@ -13,14 +14,12 @@ TransitionTopology = collections.namedtuple('TransitionTopology',
                                              'next'))
 
 
-def _abscumdiff(events, initial_state,
-                target_t, target_id,
-                bound_t, bound_id, int_dtype=tf.int32):
+def _abscumdiff(events, initial_state, target_id, bound_t, bound_id,
+                int_dtype=tf.int32):
     """Returns the number of free events to move in target_events
        bounded by max([N_{target_id}(t)-N_{bound_id}(t)]_{bound_t}).
     :param events: a [(M), T, X] tensor of transition events
     :param initial_state: a [M, X] tensor of the constraining initial state
-    :param target_t: the target time
     :param target_id: the Xth index of the target event
     :param bound_t: the times to compute the constraints
     :param bound_id: the Xth index of the bounding event, -1 implies no bound
@@ -28,12 +27,17 @@ def _abscumdiff(events, initial_state,
               dtype=target_events.dtype
     """
 
+    # Broadcast rules for bound_t:
+    # ============================
+    # If bound_t is a scalar, it is broadcast to [M, 1]
+    # If bound_t is a 1-D tensor, it is broadcast to [M, bound_t.shape[0]]
+    # If bound_t is a 2-D tensor, leave alone
+
     bound_t = tf.convert_to_tensor(bound_t)
-    if bound_t.ndim == 0:
-        bound_t = tf.expand_dims(bound_t, axis=0)
-    target_t = tf.convert_to_tensor(target_t)
-    if target_t.ndim == 0:
-        target_t = tf.expand_dims(target_t, axis=0)
+    if bound_t.shape.rank == 0:
+        bound_t = tf.broadcast_to(bound_t, [events.shape[0], 1])
+    elif bound_t.shape.rank == 1:
+        bound_t = tf.broadcast_to(bound_t, [events.shape[0], bound_t.shape[0]])
 
     def true_fn():
         # Fetch events
@@ -51,11 +55,11 @@ def _abscumdiff(events, initial_state,
             axis=-1)
 
         indices = tf.stack([
-            tf.repeat(tf.range(bound_t.shape[0], dtype=tf.int32),
+            tf.repeat(tf.range(cumdiff.shape[0], dtype=int_dtype),
                       [bound_t.shape[1]]),
             tf.reshape(bound_t, [-1])
-        ], axis=-1)
-        indices = tf.reshape(indices, bound_t.shape + [2])
+            ], axis=-1)
+        indices = tf.reshape(indices, [cumdiff.shape[0], bound_t.shape[1], 2])
         free_events = tf.gather_nd(cumdiff, indices) + bound_init_state[:, None]
         return free_events
 
@@ -88,7 +92,7 @@ class Deterministic2(tfd.Deterministic):
             allow_nan_stats=allow_nan_stats,
             name=name
         )
-        self.log_prob_dtype=log_prob_dtype
+        self.log_prob_dtype = log_prob_dtype
 
     def _prob(self, x):
         return tf.constant(1, dtype=self.log_prob_dtype)
@@ -131,19 +135,16 @@ def EventTimeProposal(events, initial_state, topology, d_max, n_max,
         t = t[..., tf.newaxis]
         bound_interval = tf.where(delta_t < 0,
                                   t - time_interval - 1,  # [t+delta_t, t)
-                                  t + time_interval)      # [t, t+delta_t)
+                                  t + time_interval)  # [t, t+delta_t)
 
         bound_event_id = tf.where(delta_t < 0,
                                   topology.prev or -1,
                                   topology.next or -1)
 
-        free_events = _abscumdiff(events=events,
-                                  initial_state=initial_state,
-                                  target_t=t,
+        free_events = _abscumdiff(events=events, initial_state=initial_state,
                                   target_id=topology.target,
                                   bound_t=bound_interval,
-                                  bound_id=bound_event_id,
-                                  int_dtype=dtype)
+                                  bound_id=bound_event_id, int_dtype=dtype)
         # Mask out bits of the interval we don't need for our delta_t
         inf_mask = tf.cumsum(tf.one_hot(tf.math.abs(delta_t),
                                         d_max,
@@ -159,7 +160,8 @@ def EventTimeProposal(events, initial_state, topology, d_max, n_max,
                                       clip_value_max=n_max)
 
         # Draw x_star
-        return UniformInteger(low=0, high=max_events+1, name='x_star')
+        # Todo Lower bound must be 1.  We must *always* move something.
+        return UniformInteger(low=0, high=max_events + 1, name='x_star')
 
     return tfd.JointDistributionNamed(dict(t=t,
                                            delta_t=delta_t,
@@ -174,39 +176,23 @@ def FilteredEventTimeProposal(events, initial_state, topology, d_max, n_max,
     target_events = tf.gather(events, topology.target, axis=-1)
 
     def m():
-        hot_meta = tf.math.count_nonzero(target_events, axis=1) > 0
+        hot_meta = tf.math.count_nonzero(target_events, axis=1,
+                                         keepdims=True) > 0
+        hot_meta = tf.reshape(hot_meta, [1, events.shape[0]])
         logits = tf.math.log(tf.cast(hot_meta, tf.float64))
-        return tfd.Categorical(logits=[logits], name='m')
+        X = tfd.Categorical(logits=logits, name='m')
+        return X
 
-    def inner_move(m):
+    def move(m):
+        """We select out meta-population `m` from the first
+        dimension of `events`.
+        :param m: a 1-D tensor of indices of meta-populations
+        :return: a random variable of type `EventTimeProposal`
+        """
         select_meta = tf.gather(events, m, axis=0)
         select_init = tf.gather(initial_state, m, axis=0)
-        return EventTimeProposal(select_meta, select_init, topology, d_max, n_max,
-                                 dtype=dtype, name=None)
-
-    def t(m, inner_move):
-        """Scatter metapop updates to original metapop dimension"""
-        return Deterministic2(
-            tf.scatter_nd([m], inner_move['t'], [events.shape[0]]),
-            log_prob_dtype=events.dtype,
-            name='t'
-        )
-
-    def delta_t(inner_move):
-        return Deterministic2(inner_move['delta_t'],
-                              log_prob_dtype=events.dtype,
-                              name='delta_t')
-
-    def x_star(m, inner_move):
-        """Scatter metapop updates to original metapop dimension"""
-        return Deterministic2(
-            tf.scatter_nd([m], inner_move['x_star'], [events.shape[0]]),
-            log_prob_dtype=events.dtype,
-            name='x_star'
-        )
+        return EventTimeProposal(select_meta, select_init, topology, d_max,
+                                 n_max, dtype=dtype, name=None)
 
     return tfd.JointDistributionNamed(dict(m=m,
-                                           inner_move=inner_move,
-                                           t=t,
-                                           delta_t=delta_t,
-                                           x_star=x_star))
+                                           move=move))

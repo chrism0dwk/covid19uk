@@ -25,40 +25,49 @@ class TestAbsCumDiff(unittest.TestCase):
         t = 19
         target_events = self.events[..., 1].copy()
         n_max = _abscumdiff(events=self.events,
-                            initial_state=self.initial_state, target_t=t,
-                            target_id=1, bound_t=t, bound_id=2).numpy()
+                            initial_state=self.initial_state, target_id=1,
+                            bound_t=t, bound_id=2).numpy()
         # Numpy equivalent
         dNt_np = np.absolute(
             np.cumsum(self.events[..., 1] - self.events[..., 2], axis=-1))
-        n_max_np = dNt_np[:, t] + self.initial_state[:, 2]
+        n_max_np = dNt_np[:, np.squeeze(t)] + self.initial_state[:, 2]
         np.testing.assert_array_equal(n_max.flatten(), n_max_np)
 
     def test_fwd_state_multi(self):
         t = [19, 20, 21]
         target_events = self.events[..., 1].copy()
         n_max = _abscumdiff(events=self.events,
-                            initial_state=self.initial_state,
-                            target_t=t[0], target_id=1,
+                            initial_state=self.initial_state, target_id=1,
                             bound_t=t, bound_id=2).numpy()
         dNt_np = np.absolute(
             np.cumsum(self.events[..., 1] - self.events[..., 2], axis=-1))
         n_max_np = dNt_np[:, t] + self.initial_state[:, [2]]
         np.testing.assert_array_equal(n_max, n_max_np)
 
+    def test_fwd_state_multi_multi(self):
+        t = tf.broadcast_to([19, 20, 21], [10, 3])
+        target_events = self.events[..., 1].copy()
+        n_max = _abscumdiff(events=self.events,
+                            initial_state=self.initial_state, target_id=1,
+                            bound_t=t, bound_id=2).numpy()
+        dNt_np = np.absolute(
+            np.cumsum(self.events[..., 1] - self.events[..., 2], axis=-1))
+        n_max_np = dNt_np[:, 19:22] + self.initial_state[:, [2]]
+        np.testing.assert_array_equal(n_max, n_max_np)
+
     def test_fwd_none(self):
         for t in range(self.events.shape[0]):
             n_max = _abscumdiff(events=self.events,
-                                initial_state=self.initial_state,
-                                target_t=t, target_id=2,
+                                initial_state=self.initial_state, target_id=2,
                                 bound_t=t, bound_id=-1).numpy()
             np.testing.assert_array_equal(n_max,
-                                          np.zeros([self.events.shape[0], 1]))
+                                          np.full([self.events.shape[0], 1],
+                                                  tf.int32.max))
 
     def test_bwd_state(self):
         t = 26
         n_max = _abscumdiff(events=self.events,
-                            initial_state=self.initial_state,
-                            target_t=t, target_id=1,
+                            initial_state=self.initial_state, target_id=1,
                             bound_t=t - 1, bound_id=0).numpy()
         dNt_np = np.absolute(
             np.cumsum(self.events[..., 1] - self.events[..., 0], axis=-1))
@@ -68,11 +77,11 @@ class TestAbsCumDiff(unittest.TestCase):
     def test_bwd_none(self):
         for t in range(self.events.shape[0]):
             n_max = _abscumdiff(events=self.events,
-                                initial_state=self.initial_state,
-                                target_t=t, target_id=0,
+                                initial_state=self.initial_state, target_id=0,
                                 bound_t=t, bound_id=-1).numpy()
             np.testing.assert_array_equal(n_max,
-                                          np.zeros([self.events.shape[0], 1]))
+                                          np.full([self.events.shape[0], 1],
+                                                  tf.int32.max))
 
 
 class TestEventTimeProposal(unittest.TestCase):
@@ -96,11 +105,11 @@ class TestEventTimeProposal(unittest.TestCase):
 
     def test_event_time_proposal_sample(self):
         q = self.Q.sample()
-        np.testing.assert_array_equal(q['t'], [21, 11, 23, 36, 24, 35])
+        np.testing.assert_array_equal(q['t'], [37, 36, 38, 22, 11, 33])
         self.assertEqual(2, q['delta_t'])
         np.testing.assert_array_equal(q['x_star'], [1, 0, 1, 0, 0, 1])
         log_prob = tf.reduce_sum(self.Q.log_prob(q))
-        self.assertAlmostEqual(log_prob.numpy(), -33.236160, places=6)
+        self.assertAlmostEqual(log_prob.numpy(), -31.732083, places=6)
 
 
 class TestFilteredEventTimeProposal(unittest.TestCase):
@@ -118,17 +127,27 @@ class TestFilteredEventTimeProposal(unittest.TestCase):
         tf.random.set_seed(10202010)
         self.Q = FilteredEventTimeProposal(self.events, self.initial_state,
                                            self.topology,
-                                           3, 10)
+                                           2, 10)
 
     def test_filtered_event_time_proposal_sample(self):
         q = self.Q.sample()
-        np.testing.assert_array_equal(q['x_star'],
-                                      [0, 0, 0, 0, 2, 0, 0, 0, 0, 0])
-        np.testing.assert_array_equal(q['t'], [0, 0, 0, 0, 37, 0, 0, 0, 0, 0])
-        self.assertEqual(3, q['delta_t'])
+        move = q['move']
+        np.testing.assert_array_equal(move['x_star'],
+                                      [1],
+                                      'mismatch in x_star')
+        np.testing.assert_array_equal(move['t'], [33],
+                                      'mismatch in t')
+        self.assertEqual(1, move['delta_t'])
         log_prob = self.Q.log_prob(q)
-        self.assertAlmostEqual(log_prob.numpy(), -33.333333, delta=1.e-6)
+        self.assertAlmostEqual(log_prob.numpy(), -4.56436819, delta=2.e-5)
 
+    def test_zero_move(self):
+        move = dict(m=tf.constant([6], dtype=tf.int32),
+                    move=dict(t=tf.constant([33], dtype=tf.int32),
+                              delta_t=tf.constant(1, dtype=tf.int32),
+                              x_star=tf.constant([1], dtype=tf.int32)))
+        lp = self.Q.log_prob(move)
+        self.assertAlmostEqual(lp, -4.56436819, delta=2.e-5)
 
 if __name__ == '__main__':
     unittest.main()
