@@ -1,6 +1,8 @@
 import os
 import pickle as pkl
 import unittest
+from pprint import pprint
+
 import numpy as np
 import tensorflow as tf
 
@@ -103,12 +105,53 @@ class TestEventTimeProposal(unittest.TestCase):
                                    self.topology,
                                    3, 10)
 
+    def test_data(self):
+        """Quick check to make sure target indices have events"""
+        target_events = tf.gather(self.events, self.topology.target, axis=-1)
+        indices = tf.stack([[0, 1, 2, 3, 4, 5], [14, 65, 28, 36, 16, 33]], axis=-1)
+        self.assertTrue(tf.reduce_all(
+            tf.gather_nd(self.events[..., self.topology.target], indices)>0))
+
+    def test_tfd_categorical_XLA(self):
+        """Tests XLA compilation of tfd.Categorical to address
+        https://github.com/tensorflow/probability/issues/975"""
+        import tensorflow_probability as tfp
+        tfd = tfp.distributions
+        x = tf.constant([0, 1, 1, 0, 0, 1], tf.float32)
+        logits = tf.math.log(x)
+
+        @tf.function(experimental_compile=True)
+        def f():
+            X = tfd.Categorical(logits=tf.math.log(x))
+            lp = X.log_prob(2)  # Valid index of x
+            return lp
+        self.assertAlmostEqual(f().numpy(), -1.0986123, delta=1.e-5)
+
     def test_event_time_proposal_sample(self):
         q = self.Q.sample()
         np.testing.assert_array_equal(q['t'], [37, 36, 38, 22, 11, 33])
         self.assertEqual(2, q['delta_t'])
         np.testing.assert_array_equal(q['x_star'], [1, 0, 1, 0, 0, 1])
+
+    def test_event_time_proposal_log_prob(self):
+        q = dict(t=tf.constant([37, 36, 38, 22, 11, 33], dtype=tf.int32),
+                 delta_t=tf.constant(2, dtype=tf.int32),
+                 x_star=tf.constant([1, 0, 1, 0, 0, 1], dtype=tf.int32))
         log_prob = tf.reduce_sum(self.Q.log_prob(q))
+        self.assertAlmostEqual(log_prob.numpy(), -31.732083, places=6)
+
+    def test_event_time_proposal_sample_XLA(self):
+        q = tf.function(lambda: self.Q.sample(), experimental_compile=True)()
+        np.testing.assert_array_equal(q['t'], [14, 65, 28, 36, 16, 33])
+        self.assertEqual(-3, q['delta_t'])
+        np.testing.assert_array_equal(q['x_star'], [1, 1, 2, 2, 0, 1])
+
+    def test_event_time_proposal_log_prob_XLA(self):
+        q = dict(t=tf.constant([14, 65, 28, 36, 16, 33], dtype=tf.int32),
+                 delta_t=tf.constant(-3, dtype=tf.int32),
+                 x_star=tf.constant([1, 1, 2, 2, 0, 1], dtype=tf.int32))
+        log_prob = tf.function(lambda: tf.reduce_sum(self.Q.log_prob(q)),
+                               experimental_compile=True)()
         self.assertAlmostEqual(log_prob.numpy(), -31.732083, places=6)
 
 
@@ -148,6 +191,20 @@ class TestFilteredEventTimeProposal(unittest.TestCase):
                               x_star=tf.constant([1], dtype=tf.int32)))
         lp = self.Q.log_prob(move)
         self.assertAlmostEqual(lp, -4.56436819, delta=2.e-5)
+
+    def test_filtered_event_time_proposal_sample_XLA(self):
+        q = tf.function(lambda: self.Q.sample(), experimental_compile=True)()
+        move = q['move']
+        np.testing.assert_array_equal(move['x_star'],
+                                      [0],
+                                      'mismatch in x_star')
+        np.testing.assert_array_equal(move['t'], [35],
+                                      'mismatch in t')
+        self.assertEqual(2, move['delta_t'])
+        log_prob = tf.function(lambda: self.Q.log_prob(q),
+                               experimental_compile=True)()
+        self.assertAlmostEqual(log_prob.numpy(), -4.56436819, delta=2.e-5)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -121,11 +121,12 @@ def is_accepted(result):
 def trace_results_fn(results):
     log_prob = results.proposed_results.target_log_prob
     accepted = is_accepted(results)
+    q_ratio = results.proposed_results.log_acceptance_correction
     proposed = results.proposed_results.extra
-    return tf.concat([[log_prob], [accepted], proposed], axis=0)
+    return tf.concat([[log_prob], [accepted], [q_ratio], proposed], axis=0)
 
 
-@tf.function #(autograph=False, experimental_compile=True)
+@tf.function(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
@@ -179,7 +180,7 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__ == '__main__':
 
-    num_loop_iterations = 1000
+    num_loop_iterations = 10
     num_loop_samples = 100
     current_state = [np.array([0.15, 0.25], dtype=DTYPE),
                      tf.stack([se_events, ei_events, ir_events], axis=-1)]
@@ -194,11 +195,11 @@ if __name__ == '__main__':
     se_samples = posterior.create_dataset('samples/events', event_size,
                                           dtype=DTYPE)
     par_results = posterior.create_dataset('acceptance/parameter', (
-    num_loop_iterations * num_loop_samples, 12), dtype=DTYPE)
+    num_loop_iterations * num_loop_samples, 13), dtype=DTYPE)
     se_results = posterior.create_dataset('acceptance/S->E', (
-    num_loop_iterations * num_loop_samples, 12), dtype=DTYPE)
+    num_loop_iterations * num_loop_samples, 13), dtype=DTYPE)
     ei_results = posterior.create_dataset('acceptance/E->I', (
-    num_loop_iterations * num_loop_samples, 12), dtype=DTYPE)
+    num_loop_iterations * num_loop_samples, 13), dtype=DTYPE)
 
     print("Initial logpi:", logp(*current_state))
     par_scale = tf.linalg.diag(
