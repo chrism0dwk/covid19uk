@@ -180,7 +180,7 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__ == '__main__':
 
-    num_loop_iterations = 10
+    num_loop_iterations = 1000
     num_loop_samples = 100
     current_state = [np.array([0.15, 0.25], dtype=DTYPE),
                      tf.stack([se_events, ei_events, ir_events], axis=-1)]

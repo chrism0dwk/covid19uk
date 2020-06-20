@@ -120,9 +120,18 @@ def EventTimeProposal(events, initial_state, topology, d_max, n_max,
     target_events = tf.gather(events, topology.target, axis=-1)
     time_interval = tf.range(d_max, dtype=dtype)
 
-    def t():
-        x = tf.cast(target_events > 0, dtype=tf.float64)  # [M, T]
-        return tfd.Categorical(logits=tf.math.log(x), name='event_coords')
+    def t_():
+        x = tf.cast(target_events > 0, dtype=tf.float64)
+        logits = tf.math.log(x)
+        return tfd.Multinomial(total_count=1, logits=tf.math.log(x), name='t_')
+
+    def t(t_):
+        #x = tf.cast(target_events > 0, dtype=tf.float64)  # [M, T]
+        #return tfd.Categorical(logits=tf.math.log(x), name='event_coords')
+        return Deterministic2(
+            tf.argmax(t_, axis=-1, output_type=dtype),
+            log_prob_dtype=events.dtype,
+            name='t')
 
     def delta_t():
         return TimeDelta(d_max, name='TimeDelta')
@@ -164,7 +173,8 @@ def EventTimeProposal(events, initial_state, topology, d_max, n_max,
         # Todo Lower bound must be 1.  We must *always* move something.
         return UniformInteger(low=0, high=max_events + 1, name='x_star')
 
-    return tfd.JointDistributionNamed(dict(t=t,
+    return tfd.JointDistributionNamed(dict(t_=t_,
+                                           t=t,
                                            delta_t=delta_t,
                                            x_star=x_star), name=name)
 
