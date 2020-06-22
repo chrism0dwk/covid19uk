@@ -1,3 +1,5 @@
+from pprint import pprint
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -78,13 +80,13 @@ def _move_events(event_tensor, event_id, m, from_t, to_t, n_move):
     # Todo rationalise this -- compute a delta, and add once.
     indices = tf.stack([m,  # All meta-populations
                         from_t,
-                        [event_id]], axis=-1)  # Event
+                        tf.broadcast_to(event_id, m.shape)], axis=-1)  # Event
     # Subtract x_star from the [from_t, :, event_id] row of the state tensor
     n_move = tf.cast(n_move, event_tensor.dtype)
     new_state = tf.tensor_scatter_nd_sub(event_tensor, indices, n_move)
     indices = tf.stack([m,
                         to_t,
-                        [event_id]], axis=-1)
+                        tf.broadcast_to(event_id, m.shape)], axis=-1)
     # Add x_star to the [to_t, :, event_id] row of the state tensor
     new_state = tf.tensor_scatter_nd_add(new_state, indices, n_move)
     return new_state
@@ -162,6 +164,10 @@ class EventTimesUpdate(tfp.mcmc.TransitionKernel):
 
 def _reverse_move(move):
     move['t'] = move['t'] + move['delta_t']
+    # Todo remove this hack once tfd.Categorical is working correctly.
+    move['t_'] = tf.one_hot(indices=move['t'],
+                            depth=move['t_'].shape[1],
+                            dtype=move['t_'].dtype)
     move['delta_t'] = -move['delta_t']
     return move
 
@@ -253,12 +259,14 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             target_events = current_events[..., self.tx_topology.target]
             num_times = target_events.shape[1]
 
-            proposal = FilteredEventTimeProposal(current_events,
-                                                 self.parameters[
+            proposal = FilteredEventTimeProposal(events=current_events,
+                                                 initial_state=self.parameters[
                                                      'initial_state'],
-                                                 self.tx_topology,
-                                                 self.parameters['dmax'],
-                                                 self.parameters['nmax'])
+                                                 topology=self.tx_topology,
+                                                 m_max=self.parameters['mmax'],
+                                                 d_max=self.parameters['dmax'],
+                                                 n_max=self.parameters['nmax'],
+                                                 direction='fwd')
             update = proposal.sample()
             move = update['move']
             to_t = move['t'] + move['delta_t']
@@ -287,9 +295,11 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                     initial_state=self.parameters[
                         'initial_state'],
                     topology=self.tx_topology,
+                    m_max=self.parameters['mmax'],
                     d_max=self.parameters['dmax'],
                     n_max=self.parameters[
-                        'nmax'])
+                        'nmax'],
+                    direction='rev')
                 q_rev = Q_rev.log_prob(rev_update)
                 log_acceptance_correction = tf.reduce_sum(q_rev - q_fwd)
 
@@ -314,7 +324,8 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                 true_fn=true_fn,
                 false_fn=false_fn)
 
-            x_star_results = tf.scatter_nd([update['m']], move['x_star'],
+            x_star_results = tf.scatter_nd(update['m'][:, tf.newaxis],
+                                           tf.abs(move['x_star']*move['delta_t']),
                                            [current_events.shape[0]])
 
             return [next_state,
@@ -323,34 +334,6 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                         target_log_prob=next_target_log_prob,
                         extra=tf.cast(x_star_results, current_events.dtype)
                     )]
-
-    def compute_constraints(self, current_events, current_t, time_delta):
-        """Computes the constraints on an event time move given the move magnitude and sign
-        :param current_events: an event tensor describing the state
-        :param current_t: the time from which events need to be moved
-        :param time_delta: the time_delta by which to move the events
-        """
-        constraint_time_idx = tf.where(time_delta < 0,
-                                       current_t - self.time_offsets - 1,
-                                       current_t + self.time_offsets)
-
-        constraining_event_id = tf.where(time_delta < 0,
-                                         self.tx_topology.prev or -1,
-                                         self.tx_topology.next or -1)
-
-        # 3. Calculate max number of events to move subject to constraints
-        n_max = _max_free_events(events=current_events,
-                                 initial_state=self.parameters['initial_state'],
-                                 target_t=current_t,
-                                 target_id=self.tx_topology.target,
-                                 constraint_t=constraint_time_idx,
-                                 constraint_id=constraining_event_id)
-        inf_mask = tf.cumsum(tf.one_hot(tf.math.abs(time_delta),
-                                        self.parameters['dmax'],
-                                        dtype=tf.int32)) * tf.int32.max
-        n_max = tf.reduce_min(tf.cast(inf_mask[:, None], n_max.dtype) + n_max,
-                              axis=0)
-        return n_max
 
     def bootstrap_results(self, init_state):
         with tf.name_scope('uncalibrated_event_times_rw/bootstrap_results'):
