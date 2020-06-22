@@ -47,6 +47,9 @@ class UniformInteger(tfd.Distribution):
                 parameters=parameters,
                 name=name)
         self.float_dtype = float_dtype
+        if validate_args is True:
+            tf.assert_greater(self._high, self._low,
+                              "Condition low < high failed")
 
     @staticmethod
     def _param_shapes(sample_shape):

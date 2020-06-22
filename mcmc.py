@@ -20,6 +20,10 @@ from covid.impl.event_time_mh import EventTimesUpdate
 
 DTYPE = config.floatX
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
+tf.random.set_seed(10)
+
 # Random moves of events.  What invalidates an epidemic, how can we test for it?
 with open('ode_config.yaml', 'r') as f:
     config = yaml.load(f)
@@ -78,11 +82,6 @@ def logp(par, events):
     return logp
 
 
-def trace_fn(state, prev_results):
-    return (prev_results.is_accepted,
-            prev_results.accepted_results.target_log_prob)
-
-
 # Pavel's suggestion for a Gibbs kernel requires
 # kernel factory functions.
 def make_parameter_kernel(scale, bounded_convergence):
@@ -103,9 +102,9 @@ def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
                                 target_event_id=target_event_id,
                                 prev_event_id=prev_event_id,
                                 next_event_id=next_event_id,
-                                dmax=1,
-                                mmax=1,
-                                nmax=20,
+                                dmax=2,
+                                mmax=2,
+                                nmax=10,
                                 initial_state=state_init)
 
     return kernel_func
@@ -131,8 +130,7 @@ def sample(n_samples, init_state, par_scale):
     init_state = init_state.copy()
     par_func = make_parameter_kernel(par_scale, 0.95)
     se_func = make_events_step(0, None, 1)
-    ei_func = make_events_step(target_event_id=1, prev_event_id=0,
-                               next_event_id=2)
+    ei_func = make_events_step(1, 0, 2)
 
     # Based on Gibbs idea posted by Pavel Sountsov
     # https://github.com/tensorflow/probability/issues/495
@@ -180,7 +178,12 @@ def sample(n_samples, init_state, par_scale):
 
 if __name__ == '__main__':
 
-    num_loop_iterations = 10
+    if tf.test.gpu_device_name():
+        print('Using GPU')
+    else:
+        print("Using CPU")
+
+    num_loop_iterations = 1000
     num_loop_samples = 100
     current_state = [np.array([0.15, 0.25], dtype=DTYPE),
                      tf.stack([se_events, ei_events, ir_events], axis=-1)]
