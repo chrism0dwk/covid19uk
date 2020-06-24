@@ -4,6 +4,7 @@ import pickle as pkl
 
 import tensorflow as tf
 import tensorflow_probability as tfp
+
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
@@ -16,15 +17,17 @@ from covid.util import sanitise_parameter, sanitise_settings, seed_areas
 
 DTYPE = np.float64
 
+
 def random_walk_mvnorm_fn(covariance, name=None):
     """Returns callable that adds Multivariate Normal noise to the input"""
-    covariance = covariance + tf.eye(covariance.shape[0], dtype=tf.float64) * 1.e-9
+    covariance = covariance + tf.eye(covariance.shape[0], dtype=tf.float64) * 1.0e-9
     scale_tril = tf.linalg.cholesky(covariance)
-    rv = tfp.distributions.MultivariateNormalTriL(loc=tf.zeros(covariance.shape[0], dtype=tf.float64),
-                                                  scale_tril=scale_tril)
+    rv = tfp.distributions.MultivariateNormalTriL(
+        loc=tf.zeros(covariance.shape[0], dtype=tf.float64), scale_tril=scale_tril
+    )
 
     def _fn(state_parts, seed):
-        with tf.name_scope(name or 'random_walk_mvnorm_fn'):
+        with tf.name_scope(name or "random_walk_mvnorm_fn"):
             new_state_parts = [rv.sample() + state_part for state_part in state_parts]
             return new_state_parts
 
@@ -61,12 +64,12 @@ def plot_total_curve(sim):
     infec_uk = sum_la(sim)
     infec_uk = infec_uk.sum(axis=1)
     removals = sum_total_removals(sim)
-    times = np.datetime64('2020-02-20') + np.arange(removals.shape[0])
-    plt.plot(times, infec_uk, 'r-', label='Infected')
-    plt.plot(times, removals, 'b-', label='Removed')
-    plt.title('UK total cases')
-    plt.xlabel('Date')
-    plt.ylabel('Num infected or removed')
+    times = np.datetime64("2020-02-20") + np.arange(removals.shape[0])
+    plt.plot(times, infec_uk, "r-", label="Infected")
+    plt.plot(times, removals, "b-", label="Removed")
+    plt.title("UK total cases")
+    plt.xlabel("Date")
+    plt.ylabel("Num infected or removed")
     plt.grid()
     plt.legend()
 
@@ -74,33 +77,33 @@ def plot_total_curve(sim):
 def plot_infec_curve(ax, sim, label):
     infec_uk = sum_la(sim)
     infec_uk = infec_uk.sum(axis=1)
-    times = np.datetime64('2020-02-20') + np.arange(infec_uk.shape[0])
-    ax.plot(times, infec_uk, '-', label=label)
+    times = np.datetime64("2020-02-20") + np.arange(infec_uk.shape[0])
+    ax.plot(times, infec_uk, "-", label=label)
 
 
-def plot_by_age(sim, labels, t0=np.datetime64('2020-02-20'), ax=None):
+def plot_by_age(sim, labels, t0=np.datetime64("2020-02-20"), ax=None):
     if ax is None:
         ax = plt.figure().gca()
     infec_uk = sum_la(sim)
     total_uk = infec_uk.mean(axis=1)
     t = t0 + np.arange(infec_uk.shape[0])
-    colours = plt.cm.viridis(np.linspace(0., 1., infec_uk.shape[1]))
+    colours = plt.cm.viridis(np.linspace(0.0, 1.0, infec_uk.shape[1]))
     for i in range(infec_uk.shape[1]):
-        ax.plot(t, infec_uk[:, i], 'r-', alpha=0.4, color=colours[i], label=labels[i])
-    ax.plot(t, total_uk, '-', color='black', label='Mean')
+        ax.plot(t, infec_uk[:, i], "r-", alpha=0.4, color=colours[i], label=labels[i])
+    ax.plot(t, total_uk, "-", color="black", label="Mean")
     return ax
 
 
-def plot_by_la(sim, labels, t0=np.datetime64('2020-02-20'), ax=None):
+def plot_by_la(sim, labels, t0=np.datetime64("2020-02-20"), ax=None):
     if ax is None:
         ax = plt.figure().gca()
     infec_uk = sum_age_groups(sim)
     total_uk = infec_uk.mean(axis=1)
     t = t0 + np.arange(infec_uk.shape[0])
-    colours = plt.cm.viridis(np.linspace(0., 1., infec_uk.shape[1]))
+    colours = plt.cm.viridis(np.linspace(0.0, 1.0, infec_uk.shape[1]))
     for i in range(infec_uk.shape[1]):
-        ax.plot(t, infec_uk[:, i], 'r-', alpha=0.4, color=colours[i], label=labels[i])
-    ax.plot(t, total_uk, '-', color='black', label='Mean')
+        ax.plot(t, infec_uk[:, i], "r-", alpha=0.4, color=colours[i], label=labels[i])
+    ax.plot(t, total_uk, "-", color="black", label="Mean")
     return ax
 
 
@@ -115,25 +118,25 @@ def draw_figs(sim, N):
     # Total UK epidemic curve
     plot_total_curve(sim)
     plt.xticks(rotation=45, horizontalalignment="right")
-    plt.savefig('total_uk_curve.pdf')
+    plt.savefig("total_uk_curve.pdf")
     plt.show()
 
     # TotalUK epidemic curve by age-group
     fig, ax = plt.subplots(1, 2, figsize=[24, 12])
-    plot_by_la(sim, data['la_names'], ax=ax[0])
-    plot_by_age(sim, data['age_groups'], ax=ax[1])
+    plot_by_la(sim, data["la_names"], ax=ax[0])
+    plot_by_age(sim, data["age_groups"], ax=ax[1])
     ax[1].legend()
     plt.xticks(rotation=45, horizontalalignment="right")
     fig.autofmt_xdate()
-    plt.savefig('la_age_infec_curves.pdf')
+    plt.savefig("la_age_infec_curves.pdf")
     plt.show()
 
     # Plot attack rate
     plt.figure(figsize=[4, 2])
-    plt.plot(data['age_groups'], attack_rate, 'o-')
+    plt.plot(data["age_groups"], attack_rate, "o-")
     plt.xticks(rotation=90)
-    plt.title('Age-specific attack rate')
-    plt.savefig('age_attack_rate.pdf')
+    plt.title("Age-specific attack rate")
+    plt.savefig("age_attack_rate.pdf")
     plt.show()
 
 
@@ -151,58 +154,70 @@ def plot_age_attack_rate(ax, sim, N, label):
     Ns = N.reshape([152, 17]).sum(axis=0)
     fs = final_size(sim.numpy())
     attack_rate = fs / Ns
-    ax.plot(data['age_groups'], attack_rate, 'o-', label=label)
+    ax.plot(data["age_groups"], attack_rate, "o-", label=label)
 
 
-if __name__ == '__main__':
-
-    parser = optparse.OptionParser()
-    parser.add_option("--config", "-c", dest="config", default="ode_config.yaml",
-                      help="configuration file")
-    options, args = parser.parse_args()
-
-    with open(options.config, 'r') as ymlfile:
-        config = yaml.load(ymlfile)
-
-    param = sanitise_parameter(config['parameter'])
-    settings = sanitise_settings(config['settings'])
+if __name__ == "__main__":
 
     parser = optparse.OptionParser()
-    parser.add_option("--config", "-c", dest="config", default="ode_config.yaml",
-                      help="configuration file")
+    parser.add_option(
+        "--config",
+        "-c",
+        dest="config",
+        default="ode_config.yaml",
+        help="configuration file",
+    )
     options, args = parser.parse_args()
-    with open(options.config, 'r') as ymlfile:
+
+    with open(options.config, "r") as ymlfile:
         config = yaml.load(ymlfile)
 
-    param = sanitise_parameter(config['parameter'])
-    settings = sanitise_settings(config['settings'])
+    param = sanitise_parameter(config["parameter"])
+    settings = sanitise_settings(config["settings"])
 
-    data = load_data(config['data'], settings, DTYPE)
-    data['pop'] = data['pop'].sum(level=0)
+    parser = optparse.OptionParser()
+    parser.add_option(
+        "--config",
+        "-c",
+        dest="config",
+        default="ode_config.yaml",
+        help="configuration file",
+    )
+    options, args = parser.parse_args()
+    with open(options.config, "r") as ymlfile:
+        config = yaml.load(ymlfile)
 
-    model = CovidUKStochastic(C=data['C'][:10, :10],
-                              N=[1000]*10, #data['pop']['n'].to_numpy()[:10],
-                              W=data['W'],
-                              date_range=settings['prediction_period'],
-                              holidays=settings['holiday'],
-                              lockdown=settings['lockdown'],
-                              time_step=1.)
+    param = sanitise_parameter(config["parameter"])
+    settings = sanitise_settings(config["settings"])
 
-    #seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
-    #seeding = tf.one_hot(tf.squeeze(tf.where(data['pop'].index=='E09000008')), depth=data['pop'].size, dtype=DTYPE)
-    seeding = tf.one_hot(0, depth=10, dtype=DTYPE)
+    data = load_data(config["data"], settings, DTYPE)
+    data["pop"] = data["pop"].sum(level=0)
+
+    model = CovidUKStochastic(
+        C=data["C"],
+        N=data["pop"]["n"].to_numpy(),
+        W=data["W"],
+        date_range=settings["prediction_period"],
+        holidays=settings["holiday"],
+        lockdown=settings["lockdown"],
+        time_step=1.0,
+    )
+
+    # seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
+    # seeding = tf.one_hot(tf.squeeze(tf.where(data['pop'].index=='E09000008')), depth=data['pop'].size, dtype=DTYPE)
+    seeding = tf.one_hot(58, depth=model.N.shape[0], dtype=DTYPE)  # Manchester
     state_init = model.create_initial_state(init_matrix=seeding)
 
     start = time.perf_counter()
     t, sim = model.simulate(param, state_init)
     end = time.perf_counter()
-    print(f'Run 1 Complete in {end - start} seconds')
+    print(f"Run 1 Complete in {end - start} seconds")
 
     start = time.perf_counter()
     for i in range(1):
         t, upd = model.simulate(param, state_init)
     end = time.perf_counter()
-    print(f'Run 2 Complete in {(end - start)/1.} seconds')
+    print(f"Run 2 Complete in {(end - start)/1.} seconds")
 
     # Plotting functions
     fig_uk = plt.figure()
@@ -210,7 +225,7 @@ if __name__ == '__main__':
 
     # plot_age_attack_rate(fig_attack.gca(), sim, data['pop']['n'].to_numpy(), "Attack Rate")
     # fig_attack.suptitle("Attack Rate")
-    #plot_infec_curve(fig_uk.gca(), sim.numpy(), "Infections")
+    # plot_infec_curve(fig_uk.gca(), sim.numpy(), "Infections")
     fig_uk.gca().plot(sim[:, :, 2])
     fig_uk.suptitle("UK Infections")
 
@@ -218,5 +233,5 @@ if __name__ == '__main__':
     fig_uk.gca().grid(True)
     plt.show()
 
-    with open('stochastic_sim_medium.pkl', 'wb') as f:
-        pkl.dump({'events': upd.numpy(), 'state_init': state_init.numpy()}, f)
+    with open("stochastic_sim_covid.pkl", "wb") as f:
+        pkl.dump({"events": upd.numpy(), "state_init": state_init.numpy()}, f)
