@@ -154,14 +154,16 @@ class EventTimesUpdate(tfp.mcmc.TransitionKernel):
         :param previous_kernel_results: a named tuple of results.
         :returns: (next_state, kernel_results)
         """
-        next_state, kernel_results = self._impl.one_step(
-            current_state, previous_kernel_results
-        )
-        return next_state, kernel_results
+        with tf.name_scope("EventTimesUpdate/one_step"):
+            next_state, kernel_results = self._impl.one_step(
+                current_state, previous_kernel_results
+            )
+            return next_state, kernel_results
 
     def bootstrap_results(self, init_state):
-        kernel_results = self._impl.bootstrap_results(init_state)
-        return kernel_results
+        with tf.name_scope("EventTimesUpdate/bootstrap_results"):
+            kernel_results = self._impl.bootstrap_results(init_state)
+            return kernel_results
 
 
 def _reverse_move(move):
@@ -272,56 +274,67 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                 n_max=self.parameters["nmax"],
             )
             update = proposal.sample()
-            q_fwd = proposal.log_prob(update)
-            tf.debugging.assert_all_finite(q_fwd, "q_fwd is not finite")
 
             move = update["move"]
             to_t = move["t"] + move["delta_t"]
 
-            # Moves outside the range [0, num_times] are illegal
-            # Todo: address potential issue in the proposal if
-            #       dmax accesses indices outside this range.
             def true_fn():
+                with tf.name_scope("true_fn"):
+                    # Prob of fwd move
+                    q_fwd = proposal.log_prob(update)
+                    tf.debugging.assert_all_finite(q_fwd, "q_fwd is not finite")
 
-                next_state = _move_events(
-                    event_tensor=current_events,
-                    event_id=self.tx_topology.target,
-                    m=update["m"],
-                    from_t=move["t"],
-                    to_t=to_t,
-                    n_move=move["x_star"],
-                )
+                    # Propagate state
+                    next_state = _move_events(
+                        event_tensor=current_events,
+                        event_id=self.tx_topology.target,
+                        m=update["m"],
+                        from_t=move["t"],
+                        to_t=to_t,
+                        n_move=move["x_star"],
+                    )
 
-                next_state_tr = tf.transpose(next_state, perm=(1, 0, 2))
-                next_target_log_prob = self._target_log_prob_fn(next_state_tr)
+                    next_state_tr = tf.transpose(next_state, perm=(1, 0, 2))
+                    next_target_log_prob = self._target_log_prob_fn(next_state_tr)
 
-                # Calculate proposal mass ratio
-                rev_move = _reverse_move(move.copy())
-                rev_update = dict(m=update["m"], move=rev_move)
-                Q_rev = FilteredEventTimeProposal(  # pylint: disable-invalid-name
-                    events=next_state,
-                    initial_state=self.parameters["initial_state"],
-                    topology=self.tx_topology,
-                    m_max=self.parameters["mmax"],
-                    d_max=self.parameters["dmax"],
-                    n_max=self.parameters["nmax"],
-                )
-                q_rev = Q_rev.log_prob(rev_update)
-                log_acceptance_correction = tf.reduce_sum(q_rev - q_fwd)
+                    # Calculate proposal mass ratio
+                    rev_move = _reverse_move(move.copy())
+                    rev_update = dict(m=update["m"], move=rev_move)
+                    Q_rev = FilteredEventTimeProposal(  # pylint: disable-invalid-name
+                        events=next_state,
+                        initial_state=self.parameters["initial_state"],
+                        topology=self.tx_topology,
+                        m_max=self.parameters["mmax"],
+                        d_max=self.parameters["dmax"],
+                        n_max=self.parameters["nmax"],
+                    )
 
-                return (next_target_log_prob, log_acceptance_correction, next_state_tr)
+                    # Prob of reverse move and q-ratio
+                    q_rev = Q_rev.log_prob(rev_update)
+                    log_acceptance_correction = tf.reduce_sum(q_rev - q_fwd)
+
+                    return (
+                        next_target_log_prob,
+                        log_acceptance_correction,
+                        next_state_tr,
+                    )
 
             def false_fn():
-                next_target_log_prob = tf.constant(-np.inf, dtype=current_events.dtype)
-                log_acceptance_correction = tf.constant(0.0, dtype=current_events.dtype)
-                return (
-                    next_target_log_prob,
-                    log_acceptance_correction,
-                    tf.transpose(current_events, perm=(1, 0, 2)),
-                )
+                with tf.name_scope("false_fn"):
+                    next_target_log_prob = tf.constant(
+                        -np.inf, dtype=current_events.dtype
+                    )
+                    log_acceptance_correction = tf.constant(
+                        0.0, dtype=current_events.dtype
+                    )
+                    return (
+                        next_target_log_prob,
+                        log_acceptance_correction,
+                        tf.transpose(current_events, perm=(1, 0, 2)),
+                    )
 
             # Trap out-of-bounds moves that go outside [0, num_times)
-            (next_target_log_prob, log_acceptance_correction, next_state) = tf.cond(
+            next_target_log_prob, log_acceptance_correction, next_state = tf.cond(
                 tf.reduce_all(_is_within(to_t, 0, num_times)),
                 true_fn=true_fn,
                 false_fn=false_fn,

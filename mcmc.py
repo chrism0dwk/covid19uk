@@ -22,7 +22,7 @@ tfb = tfp.bijectors
 
 DTYPE = config.floatX
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 tf.random.set_seed(2)
 
@@ -79,7 +79,7 @@ def logp(par, events):
         concentration=tf.constant(100.0, dtype=DTYPE),
         rate=tf.constant(400.0, dtype=DTYPE),
     ).log_prob(p["gamma"])
-    with tf.name_scope("main_log_p"):
+    with tf.name_scope("epidemic_log_posterior"):
         event_tensor = make_transition_matrix(
             events, [[0, 1], [1, 2], [2, 3]], [num_times, num_meta, 4]
         )
@@ -134,53 +134,56 @@ def trace_results_fn(results):
     return tf.concat([[log_prob], [accepted], [q_ratio], proposed], axis=0)
 
 
-@tf.function(autograph=False, experimental_compile=True)
+@tf.function(autograph=True)  # , experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
-    init_state = init_state.copy()
-    par_func = make_parameter_kernel(par_scale, 0.95)
-    se_func = make_events_step(0, None, 1)
-    ei_func = make_events_step(1, 0, 2)
+    with tf.name_scope("main_mcmc_sample_loop"):
+        init_state = init_state.copy()
+        par_func = make_parameter_kernel(par_scale, 0.95)
+        se_func = make_events_step(0, None, 1)
+        ei_func = make_events_step(1, 0, 2)
 
-    # Based on Gibbs idea posted by Pavel Sountsov
-    # https://github.com/tensorflow/probability/issues/495
-    results = ei_func(lambda s: logp(init_state[0], s)).bootstrap_results(init_state[1])
+        # Based on Gibbs idea posted by Pavel Sountsov
+        # https://github.com/tensorflow/probability/issues/495
+        results = ei_func(lambda s: logp(init_state[0], s)).bootstrap_results(
+            init_state[1]
+        )
 
-    samples_arr = [tf.TensorArray(s.dtype, size=n_samples) for s in init_state]
-    results_arr = [tf.TensorArray(DTYPE, size=n_samples) for r in range(3)]
+        samples_arr = [tf.TensorArray(s.dtype, size=n_samples) for s in init_state]
+        results_arr = [tf.TensorArray(DTYPE, size=n_samples) for r in range(3)]
 
-    def body(i, state, prev_results, samples, results):
-        # Parameters
-        def par_logp(par_state):
-            state[0] = par_state  # close over state from outer scope
-            return logp(*state)
+        def body(i, state, prev_results, samples, results):
+            # Parameters
+            def par_logp(par_state):
+                state[0] = par_state  # close over state from outer scope
+                return logp(*state)
 
-        state[0], par_results = par_func(par_logp).one_step(state[0], prev_results)
+            state[0], par_results = par_func(par_logp).one_step(state[0], prev_results)
 
-        # States
-        def state_logp(event_state):
-            state[1] = event_state
-            return logp(*state)
+            # States
+            def state_logp(event_state):
+                state[1] = event_state
+                return logp(*state)
 
-        state[1], se_results = se_func(state_logp).one_step(state[1], par_results)
-        state[1], ei_results = ei_func(state_logp).one_step(state[1], se_results)
+            state[1], se_results = se_func(state_logp).one_step(state[1], par_results)
+            state[1], ei_results = ei_func(state_logp).one_step(state[1], se_results)
 
-        samples = [samples[k].write(i, s) for k, s in enumerate(state)]
-        results = [
-            results[k].write(i, trace_results_fn(r))
-            for k, r in enumerate([par_results, se_results, ei_results])
-        ]
-        return i + 1, state, ei_results, samples, results
+            samples = [samples[k].write(i, s) for k, s in enumerate(state)]
+            results = [
+                results[k].write(i, trace_results_fn(r))
+                for k, r in enumerate([par_results, se_results, ei_results])
+            ]
+            return i + 1, state, ei_results, samples, results
 
-    def cond(i, _1, _2, _3, _4):
-        return i < n_samples
+        def cond(i, _1, _2, _3, _4):
+            return i < n_samples
 
-    _1, _2, _3, samples, results = tf.while_loop(
-        cond=cond,
-        body=body,
-        loop_vars=[0, init_state, results, samples_arr, results_arr],
-    )
+        _1, _2, _3, samples, results = tf.while_loop(
+            cond=cond,
+            body=body,
+            loop_vars=[0, init_state, results, samples_arr, results_arr],
+        )
 
-    return [s.stack() for s in samples], [r.stack() for r in results]
+        return [s.stack() for s in samples], [r.stack() for r in results]
 
 
 ##################
@@ -192,8 +195,8 @@ if tf.test.gpu_device_name():
 else:
     print("Using CPU")
 
-NUM_LOOP_ITERATIONS = 500
-NUM_LOOP_SAMPLES = 100
+NUM_LOOP_ITERATIONS = 1
+NUM_LOOP_SAMPLES = 10
 current_state = [
     np.array([0.6, 0.25], dtype=DTYPE),
     tf.stack([se_events, ei_events, ir_events], axis=-1),
@@ -225,30 +228,30 @@ par_scale = tf.linalg.diag(
 # We loop over successive calls to sample because we have to dump results
 #   to disc, or else end OOM (even on a 32GB system).
 for i in tqdm.tqdm(range(NUM_LOOP_ITERATIONS), unit_scale=NUM_LOOP_SAMPLES):
-    # with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
-    samples, results = sample(
-        NUM_LOOP_SAMPLES, init_state=current_state, par_scale=par_scale
-    )
-    current_state = [s[-1] for s in samples]
-    s = slice(i * NUM_LOOP_SAMPLES, i * NUM_LOOP_SAMPLES + NUM_LOOP_SAMPLES)
-    par_samples[s, ...] = samples[0].numpy()
-    cov = np.cov(
-        np.log(par_samples[: (i * NUM_LOOP_SAMPLES + NUM_LOOP_SAMPLES), ...]),
-        rowvar=False,
-    )
-    print(current_state[0].numpy())
-    print(cov)
-    if np.all(np.isfinite(cov)):
-        par_scale = 2.38 ** 2 * cov / 2.0
+    with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
+        samples, results = sample(
+            NUM_LOOP_SAMPLES, init_state=current_state, par_scale=par_scale
+        )
+        current_state = [s[-1] for s in samples]
+        s = slice(i * NUM_LOOP_SAMPLES, i * NUM_LOOP_SAMPLES + NUM_LOOP_SAMPLES)
+        par_samples[s, ...] = samples[0].numpy()
+        cov = np.cov(
+            np.log(par_samples[: (i * NUM_LOOP_SAMPLES + NUM_LOOP_SAMPLES), ...]),
+            rowvar=False,
+        )
+        print(current_state[0].numpy())
+        print(cov)
+        if np.all(np.isfinite(cov)):
+            par_scale = 2.38 ** 2 * cov / 2.0
 
-    se_samples[s, ...] = samples[1].numpy()
-    par_results[s, ...] = results[0].numpy()
-    se_results[s, ...] = results[1].numpy()
-    ei_results[s, ...] = results[2].numpy()
+        se_samples[s, ...] = samples[1].numpy()
+        par_results[s, ...] = results[0].numpy()
+        se_results[s, ...] = results[1].numpy()
+        ei_results[s, ...] = results[2].numpy()
 
-    print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
-    print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32)))
-    print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:, 1], tf.float32)))
+        print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
+        print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32)))
+        print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:, 1], tf.float32)))
 
 print(f"Acceptance param: {par_results[:, 1].mean()}")
 print(f"Acceptance S->E: {se_results[:, 1].mean()}")
