@@ -17,6 +17,11 @@ from covid.impl.util import make_transition_matrix
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 from covid.impl.event_time_mh import EventTimesUpdate
 
+
+#############
+## TF Bits ##
+#############
+
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
@@ -24,7 +29,11 @@ DTYPE = config.floatX
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
-tf.random.set_seed(2)
+if tf.test.gpu_device_name():
+    print("Using GPU")
+else:
+    print("Using CPU")
+
 
 # Random moves of events.  What invalidates an epidemic, how can we test for it?
 with open("ode_config.yaml", "r") as f:
@@ -60,6 +69,11 @@ state_init = example_sim["state_init"]
 se_events = event_tensor[:, :, 0, 1]
 ei_events = event_tensor[:, :, 1, 2]
 ir_events = event_tensor[:, :, 2, 3]
+
+
+############################
+## Log p and MCMC kernels ##
+############################
 
 
 def logp(par, events):
@@ -134,7 +148,7 @@ def trace_results_fn(results):
     return tf.concat([[log_prob], [accepted], [q_ratio], proposed], axis=0)
 
 
-@tf.function(autograph=True)  # , experimental_compile=True)
+@tf.function(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     with tf.name_scope("main_mcmc_sample_loop"):
         init_state = init_state.copy()
@@ -190,18 +204,19 @@ def sample(n_samples, init_state, par_scale):
 # MCMC loop here #
 ##################
 
-if tf.test.gpu_device_name():
-    print("Using GPU")
-else:
-    print("Using CPU")
+# MCMC Control
+NUM_LOOP_ITERATIONS = 1000
+NUM_LOOP_SAMPLES = 100
 
-NUM_LOOP_ITERATIONS = 1
-NUM_LOOP_SAMPLES = 10
+# Initial States
+tf.random.set_seed(2)
 current_state = [
     np.array([0.6, 0.25], dtype=DTYPE),
     tf.stack([se_events, ei_events, ir_events], axis=-1),
 ]
 
+
+# Output Files
 posterior = h5py.File(os.path.expandvars(config["output"]["posterior"]), "w")
 event_size = [NUM_LOOP_ITERATIONS * NUM_LOOP_SAMPLES] + list(current_state[1].shape)
 par_samples = posterior.create_dataset(
@@ -220,6 +235,7 @@ ei_results = posterior.create_dataset(
     "acceptance/E->I", (NUM_LOOP_ITERATIONS * NUM_LOOP_SAMPLES, 152), dtype=DTYPE
 )
 
+
 print("Initial logpi:", logp(*current_state))
 par_scale = tf.linalg.diag(
     tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1
@@ -228,30 +244,30 @@ par_scale = tf.linalg.diag(
 # We loop over successive calls to sample because we have to dump results
 #   to disc, or else end OOM (even on a 32GB system).
 for i in tqdm.tqdm(range(NUM_LOOP_ITERATIONS), unit_scale=NUM_LOOP_SAMPLES):
-    with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
-        samples, results = sample(
-            NUM_LOOP_SAMPLES, init_state=current_state, par_scale=par_scale
-        )
-        current_state = [s[-1] for s in samples]
-        s = slice(i * NUM_LOOP_SAMPLES, i * NUM_LOOP_SAMPLES + NUM_LOOP_SAMPLES)
-        par_samples[s, ...] = samples[0].numpy()
-        cov = np.cov(
-            np.log(par_samples[: (i * NUM_LOOP_SAMPLES + NUM_LOOP_SAMPLES), ...]),
-            rowvar=False,
-        )
-        print(current_state[0].numpy())
-        print(cov)
-        if np.all(np.isfinite(cov)):
-            par_scale = 2.38 ** 2 * cov / 2.0
+    # with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
+    samples, results = sample(
+        NUM_LOOP_SAMPLES, init_state=current_state, par_scale=par_scale
+    )
+    current_state = [s[-1] for s in samples]
+    s = slice(i * NUM_LOOP_SAMPLES, i * NUM_LOOP_SAMPLES + NUM_LOOP_SAMPLES)
+    par_samples[s, ...] = samples[0].numpy()
+    cov = np.cov(
+        np.log(par_samples[: (i * NUM_LOOP_SAMPLES + NUM_LOOP_SAMPLES), ...]),
+        rowvar=False,
+    )
+    print(current_state[0].numpy())
+    print(cov)
+    if np.all(np.isfinite(cov)):
+        par_scale = 2.38 ** 2 * cov / 2.0
 
-        se_samples[s, ...] = samples[1].numpy()
-        par_results[s, ...] = results[0].numpy()
-        se_results[s, ...] = results[1].numpy()
-        ei_results[s, ...] = results[2].numpy()
+    se_samples[s, ...] = samples[1].numpy()
+    par_results[s, ...] = results[0].numpy()
+    se_results[s, ...] = results[1].numpy()
+    ei_results[s, ...] = results[2].numpy()
 
-        print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
-        print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32)))
-        print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:, 1], tf.float32)))
+    print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
+    print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32)))
+    print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:, 1], tf.float32)))
 
 print(f"Acceptance param: {par_results[:, 1].mean()}")
 print(f"Acceptance S->E: {se_results[:, 1].mean()}")
