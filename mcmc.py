@@ -27,7 +27,7 @@ tfb = tfp.bijectors
 
 DTYPE = config.floatX
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 if tf.test.gpu_device_name():
     print("Using GPU")
@@ -95,7 +95,7 @@ def logp(par, events):
     ).log_prob(p["gamma"])
     with tf.name_scope("epidemic_log_posterior"):
         event_tensor = make_transition_matrix(
-            events, [[0, 1], [1, 2], [2, 3]], [num_times, num_meta, 4]
+            events, [[0, 1], [1, 2], [2, 3]], [num_meta, num_times, 4]
         )
         y_logp = tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
     logp = beta1_logp + gamma_logp + y_logp
@@ -148,7 +148,7 @@ def trace_results_fn(results):
     return tf.concat([[log_prob], [accepted], [q_ratio], proposed], axis=0)
 
 
-@tf.function(autograph=False, experimental_compile=True)
+@tf.function  # (experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     with tf.name_scope("main_mcmc_sample_loop"):
         init_state = init_state.copy()
@@ -212,7 +212,7 @@ NUM_LOOP_SAMPLES = 100
 tf.random.set_seed(2)
 current_state = [
     np.array([0.6, 0.25], dtype=DTYPE),
-    tf.stack([se_events, ei_events, ir_events], axis=-1),
+    tf.transpose(tf.stack([se_events, ei_events, ir_events], axis=-1), perm=(1, 0, 2)),
 ]
 
 
