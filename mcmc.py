@@ -191,7 +191,7 @@ def sample(n_samples, init_state, par_scale):
             state[0], results[0] = par_func(par_logp).one_step(
                 state[0], forward_results(results[2], results[0])
             )
-            print("par ", is_accepted(results[0]))
+
             # States
             def state_logp(event_state):
                 state[1] = event_state
@@ -200,11 +200,9 @@ def sample(n_samples, init_state, par_scale):
             state[1], results[1] = se_func(state_logp).one_step(
                 state[1], forward_results(results[0], results[1])
             )
-            print("se ", is_accepted(results[1]))
             state[1], results[2] = ei_func(state_logp).one_step(
                 state[1], forward_results(results[1], results[2])
             )
-            print("ei ", is_accepted(results[2]))
             sample_accum = [sample_accum[k].write(i, s) for k, s in enumerate(state)]
             results_accum = [
                 results_accum[k].write(i, trace_results_fn(r))
