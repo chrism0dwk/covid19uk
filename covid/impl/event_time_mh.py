@@ -1,5 +1,4 @@
-from pprint import pprint
-
+from collections import namedtuple
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -7,10 +6,14 @@ from tensorflow_probability.python.util import SeedStream
 
 from covid import config
 from covid.impl.event_time_proposal import TransitionTopology, FilteredEventTimeProposal
-from covid.impl.mcmc import KernelResults
 
 tfd = tfp.distributions
 DTYPE = config.floatX
+
+
+EventTimesKernelResults = namedtuple(
+    "KernelResults", ("log_acceptance_correction", "target_log_prob", "extra")
+)
 
 
 def _is_within(x, low, high):
@@ -304,7 +307,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
 
             return [
                 next_state,
-                KernelResults(
+                EventTimesKernelResults(
                     log_acceptance_correction=log_acceptance_correction,
                     target_log_prob=next_target_log_prob,
                     extra=tf.cast(x_star_results, current_events.dtype),
@@ -315,7 +318,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         with tf.name_scope("uncalibrated_event_times_rw/bootstrap_results"):
             init_state = tf.convert_to_tensor(init_state, dtype=DTYPE)
             init_target_log_prob = self.target_log_prob_fn(init_state)
-            return KernelResults(
+            return EventTimesKernelResults(
                 log_acceptance_correction=tf.constant(0.0, dtype=DTYPE),
                 target_log_prob=init_target_log_prob,
                 extra=tf.zeros(init_state.shape[-3], dtype=DTYPE),
