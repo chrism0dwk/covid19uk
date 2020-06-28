@@ -276,8 +276,8 @@ def initialise_previous_events(events, rate):
 
 def squared_jumping_distance(chain):
     diff = chain[1:] - chain[:-1]
-    cumdiff = np.cumsum(diff, axis=1)
-    sqjumpdist = np.sum(cumdiff, axis=1) ** 2
+    cumdiff = np.cumsum(diff, axis=2)
+    sqjumpdist = np.sum(cumdiff, axis=2) ** 2
     return sqjumpdist
 
 
@@ -316,7 +316,7 @@ def plot_event_posterior(posterior, simulation, metapopulation=0):
     fig, ax = plt.subplots(2, 2)
 
     ax[0][0].plot(
-        posterior["samples/events"][idx, :, metapopulation, 0].T,
+        posterior["samples/events"][idx, metapopulation, :, 0].T,
         color="lightblue",
         alpha=0.1,
     )
@@ -327,7 +327,7 @@ def plot_event_posterior(posterior, simulation, metapopulation=0):
     )
 
     ax[0][1].plot(
-        np.cumsum(posterior["samples/events"][idx, :, metapopulation, 0].T, axis=0),
+        np.cumsum(posterior["samples/events"][idx, metapopulation, :, 0].T, axis=0),
         color="lightblue",
         alpha=0.1,
     )
@@ -338,7 +338,7 @@ def plot_event_posterior(posterior, simulation, metapopulation=0):
     )
 
     ax[1][0].plot(
-        posterior["samples/events"][idx, :, metapopulation, 1].T,
+        posterior["samples/events"][idx, metapopulation, :, 1].T,
         color="lightblue",
         alpha=0.1,
     )
@@ -349,7 +349,7 @@ def plot_event_posterior(posterior, simulation, metapopulation=0):
     )
 
     ax[1][1].plot(
-        np.cumsum(posterior["samples/events"][idx, :, metapopulation, 1].T, axis=0),
+        np.cumsum(posterior["samples/events"][idx, metapopulation, :, 1].T, axis=0),
         color="lightblue",
         alpha=0.1,
     )

@@ -106,11 +106,7 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step, stoichiom
     def fn(elems):
         return hazard_fn(*elems)
 
-    rates = tf.map_fn(
-        fn=fn,
-        elems=[tf.range(num_times), tms_timeseries],
-        fn_output_signature=[tms_timeseries.dtype] * num_events,
-    )
+    rates = tf.vectorized_map(fn=fn, elems=[tf.range(num_times), tms_timeseries])
     rate_matrix = make_transition_matrix(
         rates, [[0, 1], [1, 2], [2, 3]], tms_timeseries.shape
     )
