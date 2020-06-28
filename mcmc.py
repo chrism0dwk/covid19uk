@@ -27,7 +27,7 @@ tfb = tfp.bijectors
 
 DTYPE = config.floatX
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 if tf.test.gpu_device_name():
     print("Using GPU")
@@ -97,7 +97,7 @@ def logp(par, events):
         event_tensor = make_transition_matrix(
             events, [[0, 1], [1, 2], [2, 3]], [num_meta, num_times, 4]
         )
-        y_logp = tf.reduce_sum(model.log_prob(event_tensor, p, state_init))
+        y_logp = model.log_prob(event_tensor, p, state_init)
     logp = beta1_logp + gamma_logp + y_logp
     return logp
 
@@ -158,7 +158,7 @@ def forward_results(prev_results, next_results):
     return next_results._replace(accepted_results=accepted_results)
 
 
-# @tf.function(autograph=False, experimental_compile=True)
+@tf.function(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, par_scale):
     with tf.name_scope("main_mcmc_sample_loop"):
         init_state = init_state.copy()
@@ -227,7 +227,7 @@ def sample(n_samples, init_state, par_scale):
 ##################
 
 # MCMC Control
-NUM_LOOP_ITERATIONS = 1000
+NUM_LOOP_ITERATIONS = 100
 NUM_LOOP_SAMPLES = 100
 
 # RNG stuff
