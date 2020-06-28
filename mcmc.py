@@ -122,9 +122,9 @@ def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
             target_event_id=target_event_id,
             prev_event_id=prev_event_id,
             next_event_id=next_event_id,
-            dmax=2,
-            mmax=1,
-            nmax=10,
+            dmax=10,
+            mmax=3,
+            nmax=15,
             initial_state=state_init,
         )
 
