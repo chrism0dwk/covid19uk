@@ -96,29 +96,28 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step, stoichiom
     """
     num_meta = events.shape[-3]
     num_times = events.shape[-2]
+    num_events = events.shape[-1]
     num_states = stoichiometry.shape[-1]
 
     state_timeseries = compute_state(init_state, events, stoichiometry)  # MxTxS
 
-    probs = tf.TensorArray(dtype=events.dtype, size=num_times)
+    tms_timeseries = tf.transpose(state_timeseries, perm=(1, 0, 2))
 
-    def body(t, prob_accum):
-        state_t = tf.gather(state_timeseries, indices=t, axis=-2)  # Gather time slice
-        rate_matrix = hazard_fn(t, state_t)
-        prob_matrix = approx_expm(rate_matrix * time_step)
-        return t + 1, prob_accum.write(t, prob_matrix)
+    def fn(elems):
+        return hazard_fn(*elems)
 
-    def cond(i, _):
-        return i < num_times
-
-    # Todo This loop tries to avoid batching issues in the rate calculations.  Maybe a
-    # bottleneck if the computations within the rates themselves are trivial.
-    _, probs = tf.while_loop(
-        cond, body, loop_vars=(0, probs), parallel_iterations=num_times
+    rates = tf.map_fn(
+        fn=fn,
+        elems=[tf.range(num_times), tms_timeseries],
+        fn_output_signature=[tms_timeseries.dtype] * num_events,
     )
+    rate_matrix = make_transition_matrix(
+        rates, [[0, 1], [1, 2], [2, 3]], tms_timeseries.shape
+    )
+    probs = approx_expm(rate_matrix * time_step)
 
     # [T, M, S, S] to [M, T, S, S]
-    probs = tf.transpose(probs.stack(), perm=(1, 0, 2, 3))
+    probs = tf.transpose(probs, perm=(1, 0, 2, 3))
     event_matrix = make_transition_matrix(
         events, [[0, 1], [1, 2], [2, 3]], [num_meta, num_times, num_states]
     )
