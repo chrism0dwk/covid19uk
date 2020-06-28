@@ -88,9 +88,9 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step):
     """
     num_times = events.shape[-3]
 
-    logp_parts = tf.TensorArray(dtype=events.dtype, size=num_times)
+    logp = tf.constant(0.0, dtype=events.dtype)
 
-    def log_prob_t(t, state, log_prob_parts):
+    def log_prob_t(t, state, log_prob_accum):
         # Calculate transition rate matrix
         # Todo ideally this should be batched, not iterated
         events_t = tf.gather(events, indices=t, axis=-3)  # Gather time slice
@@ -100,17 +100,22 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step):
         event_matrix = tf.linalg.set_diag(
             events_t, state - tf.reduce_sum(events_t, axis=-1)
         )
-        logp = tfd.Multinomial(state, probs=markov_transition).log_prob(event_matrix)
+        logp = tfd.Multinomial(
+            tf.cast(state, tf.float32),
+            probs=tf.cast(markov_transition, tf.float32),
+            name="log_prob",
+        ).log_prob(tf.cast(event_matrix, tf.float32))
+        logp = tf.cast(tf.reduce_sum(logp), state.dtype)
         new_state = tf.reduce_sum(event_matrix, axis=-2)
-        return t + 1, new_state, log_prob_parts.write(t, logp)
+        return t + 1, new_state, log_prob_accum + logp
 
     def cond(i, _1, _2):
         return i < num_times
 
     # Todo This loop tries to avoid batching issues in the rate calculations.  Maybe a bottleneck if
     #   the computations within the rates themselves are trivial.
-    _, _, logp_parts = tf.while_loop(cond, log_prob_t, (0, init_state, logp_parts))
-    return logp_parts.stack()
+    _, _, logp = tf.while_loop(cond, log_prob_t, (0, init_state, logp))
+    return logp
 
 
 def events_to_full_transitions(events, initial_state):
