@@ -120,11 +120,13 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step, stoichiom
     event_matrix = tf.linalg.set_diag(
         event_matrix, state_timeseries - tf.reduce_sum(event_matrix, axis=-1)
     )
-    logp = tfd.Multinomial(state_timeseries, probs=probs, name="log_prob",).log_prob(
-        event_matrix
-    )
+    logp = tfd.Multinomial(
+        tf.cast(state_timeseries, dtype=tf.float32),
+        probs=tf.cast(probs, dtype=tf.float32),
+        name="log_prob",
+    ).log_prob(tf.cast(event_matrix, dtype=tf.float32))
 
-    return tf.reduce_sum(logp)
+    return tf.cast(tf.reduce_sum(logp), dtype=events.dtype)
 
 
 def events_to_full_transitions(events, initial_state):
