@@ -2,6 +2,8 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+from covid.impl.util import compute_state, make_transition_matrix
+
 tfd = tfp.distributions
 
 
@@ -19,9 +21,10 @@ def approx_expm(rates):
 def chain_binomial_propagate(h, time_step, seed=None):
     """Propagates the state of a population according to discrete time dynamics.
 
-    :param h: a hazard rate function returning the non-row-normalised Markov transition rate matrix
-              This function should return a tensor of dimension [ns, ns, nc] where ns is the number of
-              states, and nc is the number of strata within the population.
+    :param h: a hazard rate function returning the non-row-normalised Markov transition
+              rate matrix.  This function should return a tensor of dimension
+              [ns, ns, nc] where ns is the number of states, and nc is the number of
+              strata within the population.
     :param time_step: the time step
     :returns : a function that propagate `state[t]` -> `state[t+time_step]`
     """
@@ -78,44 +81,55 @@ def discrete_markov_simulation(hazard_fn, state, start, end, time_step, seed=Non
     return times, output.stack()
 
 
-def discrete_markov_log_prob(events, init_state, hazard_fn, time_step):
+def discrete_markov_log_prob(events, init_state, hazard_fn, time_step, stoichiometry):
     """Calculates an unnormalised log_prob function for a discrete time epidemic model.
-    :param events: a [M, T, S, S] batch of transition events for metapopulation M, times T,
-                   and states S
-    :param init_state: a vector of shape [M, S] the initial state of the epidemic for M 
-                       metapopulations and S states
-    :param hazard_fn: a function that takes a state and returns a matrix of transition rates
+    :param events: a `[M, T, X]` batch of transition events for metapopulation M,
+                   times `T`, and transitions `X`.
+    :param init_state: a vector of shape `[M, S]` the initial state of the epidemic for
+                       `M` metapopulations and `S` states
+    :param hazard_fn: a function that takes a state and returns a matrix of transition
+                      rates.
+    :param time_step: the size of the time step.
+    :param stoichiometry: a `[X, S]` matrix describing the state update for each
+                          transition.
+    :return: a scalar log probability for the epidemic.
     """
-    num_times = events.shape[-3]
+    num_meta = events.shape[-3]
+    num_times = events.shape[-2]
+    num_states = stoichiometry.shape[-1]
 
-    logp = tf.constant(0.0, dtype=events.dtype)
+    state_timeseries = compute_state(init_state, events, stoichiometry)  # MxTxS
 
-    def log_prob_t(t, state, log_prob_accum):
-        # Calculate transition rate matrix
-        # Todo ideally this should be batched, not iterated
-        events_t = tf.gather(events, indices=t, axis=-3)  # Gather time slice
-        rate_matrix = hazard_fn(t, state)
-        markov_transition = approx_expm(rate_matrix * time_step)
-        # Calculate event matrix
-        event_matrix = tf.linalg.set_diag(
-            events_t, state - tf.reduce_sum(events_t, axis=-1)
-        )
-        logp = tfd.Multinomial(
-            tf.cast(state, tf.float32),
-            probs=tf.cast(markov_transition, tf.float32),
-            name="log_prob",
-        ).log_prob(tf.cast(event_matrix, tf.float32))
-        logp = tf.cast(tf.reduce_sum(logp), state.dtype)
-        new_state = tf.reduce_sum(event_matrix, axis=-2)
-        return t + 1, new_state, log_prob_accum + logp
+    probs = tf.TensorArray(dtype=events.dtype, size=num_times)
 
-    def cond(i, _1, _2):
+    def body(t, prob_accum):
+        state_t = tf.gather(state_timeseries, indices=t, axis=-2)  # Gather time slice
+        rate_matrix = hazard_fn(t, state_t)
+        prob_matrix = approx_expm(rate_matrix * time_step)
+        return t + 1, prob_accum.write(t, prob_matrix)
+
+    def cond(i, _):
         return i < num_times
 
-    # Todo This loop tries to avoid batching issues in the rate calculations.  Maybe a bottleneck if
-    #   the computations within the rates themselves are trivial.
-    _, _, logp = tf.while_loop(cond, log_prob_t, (0, init_state, logp))
-    return logp
+    # Todo This loop tries to avoid batching issues in the rate calculations.  Maybe a
+    # bottleneck if the computations within the rates themselves are trivial.
+    _, probs = tf.while_loop(
+        cond, body, loop_vars=(0, probs), parallel_iterations=num_times
+    )
+
+    # [T, M, S, S] to [M, T, S, S]
+    probs = tf.transpose(probs.stack(), perm=(1, 0, 2, 3))
+    event_matrix = make_transition_matrix(
+        events, [[0, 1], [1, 2], [2, 3]], [num_meta, num_times, num_states]
+    )
+    event_matrix = tf.linalg.set_diag(
+        event_matrix, state_timeseries - tf.reduce_sum(event_matrix, axis=-1)
+    )
+    logp = tfd.Multinomial(state_timeseries, probs=probs, name="log_prob",).log_prob(
+        event_matrix
+    )
+
+    return tf.reduce_sum(logp)
 
 
 def events_to_full_transitions(events, initial_state):

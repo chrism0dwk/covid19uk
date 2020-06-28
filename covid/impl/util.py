@@ -47,3 +47,20 @@ def make_transition_matrix(rates, rate_coords, state_shape):
         indices=indices, updates=rates, shape=output_shape, name="build_markov_matrix"
     )
     return rate_tensor
+
+
+def compute_state(initial_state, events, stoichiometry):
+    """Computes a state tensor from initial state and event tensor
+
+    :param initial_state: a tensor of shape [M, S]
+    :param events: a tensor of shape [M, T, X]
+    :param stoichiometry: a stoichiometry matrix of shape [X, S] describing
+                          how transitions update the state.
+    :return: a tensor of shape [M, T, S] describing the state of the
+             system for each batch M at time T.
+    """
+    increments = tf.tensordot(events, stoichiometry, axes=[[-1], [-2]])  # mtx,xs->mts
+    cum_increments = tf.cumsum(increments, axis=-2, exclusive=True)
+    state = cum_increments + tf.expand_dims(initial_state, axis=-2)
+
+    return state

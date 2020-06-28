@@ -18,9 +18,9 @@ from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 from covid.impl.event_time_mh import EventTimesUpdate
 
 
-#############
-## TF Bits ##
-#############
+###########
+# TF Bits #
+###########
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
@@ -28,6 +28,7 @@ tfb = tfp.bijectors
 DTYPE = config.floatX
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# os.environ["XLA_FLAGS"] = '--xla_dump_to=xla_dump --xla_dump_hlo_pass_re=".*"'
 
 if tf.test.gpu_device_name():
     print("Using GPU")
@@ -71,9 +72,9 @@ ei_events = event_tensor[:, :, 1, 2]
 ir_events = event_tensor[:, :, 2, 3]
 
 
-############################
-## Log p and MCMC kernels ##
-############################
+##########################
+# Log p and MCMC kernels #
+##########################
 
 
 def logp(par, events):
@@ -94,10 +95,7 @@ def logp(par, events):
         rate=tf.constant(400.0, dtype=DTYPE),
     ).log_prob(p["gamma"])
     with tf.name_scope("epidemic_log_posterior"):
-        event_tensor = make_transition_matrix(
-            events, [[0, 1], [1, 2], [2, 3]], [num_meta, num_times, 4]
-        )
-        y_logp = model.log_prob(event_tensor, p, state_init)
+        y_logp = model.log_prob(events, p, state_init)
     logp = beta1_logp + gamma_logp + y_logp
     return logp
 
@@ -227,8 +225,8 @@ def sample(n_samples, init_state, par_scale):
 ##################
 
 # MCMC Control
-NUM_LOOP_ITERATIONS = 100
-NUM_LOOP_SAMPLES = 100
+NUM_LOOP_ITERATIONS = 50
+NUM_LOOP_SAMPLES = 200
 
 # RNG stuff
 tf.random.set_seed(2)
