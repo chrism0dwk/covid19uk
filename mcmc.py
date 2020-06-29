@@ -122,9 +122,9 @@ def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
             target_event_id=target_event_id,
             prev_event_id=prev_event_id,
             next_event_id=next_event_id,
-            dmax=10,
-            mmax=3,
-            nmax=15,
+            dmax=config["mcmc"]["dmax"],
+            mmax=config["mcmc"]["m"],
+            nmax=config["mcmc"]["nmax"],
             initial_state=state_init,
         )
 
@@ -225,8 +225,8 @@ def sample(n_samples, init_state, par_scale):
 ##################
 
 # MCMC Control
-NUM_LOOP_ITERATIONS = 50
-NUM_LOOP_SAMPLES = 200
+NUM_BURSTS = config["mcmc"]["num_bursts"]
+NUM_BURST_SAMPLES = config["mcmc"]["num_burst_samples"]
 
 # RNG stuff
 tf.random.set_seed(2)
@@ -240,24 +240,24 @@ current_state = [
 
 # Output Files
 posterior = h5py.File(os.path.expandvars(config["output"]["posterior"]), "w")
-event_size = [NUM_LOOP_ITERATIONS * NUM_LOOP_SAMPLES] + list(current_state[1].shape)
+event_size = [NUM_BURSTS * NUM_BURST_SAMPLES] + list(current_state[1].shape)
 par_samples = posterior.create_dataset(
     "samples/parameter",
-    [NUM_LOOP_ITERATIONS * NUM_LOOP_SAMPLES, current_state[0].shape[0]],
+    [NUM_BURSTS * NUM_BURST_SAMPLES, current_state[0].shape[0]],
     dtype=np.float64,
 )
 se_samples = posterior.create_dataset("samples/events", event_size, dtype=DTYPE)
 par_results = posterior.create_dataset(
-    "acceptance/parameter", (NUM_LOOP_ITERATIONS * NUM_LOOP_SAMPLES, 3), dtype=DTYPE,
+    "acceptance/parameter", (NUM_BURSTS * NUM_BURST_SAMPLES, 3), dtype=DTYPE,
 )
 se_results = posterior.create_dataset(
     "acceptance/S->E",
-    (NUM_LOOP_ITERATIONS * NUM_LOOP_SAMPLES, 3 + model.N.shape[0]),
+    (NUM_BURSTS * NUM_BURST_SAMPLES, 3 + model.N.shape[0]),
     dtype=DTYPE,
 )
 ei_results = posterior.create_dataset(
     "acceptance/E->I",
-    (NUM_LOOP_ITERATIONS * NUM_LOOP_SAMPLES, 3 + model.N.shape[0]),
+    (NUM_BURSTS * NUM_BURST_SAMPLES, 3 + model.N.shape[0]),
     dtype=DTYPE,
 )
 
@@ -270,15 +270,15 @@ par_scale = tf.linalg.diag(
 # We loop over successive calls to sample because we have to dump results
 #   to disc, or else end OOM (even on a 32GB system).
 # with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
-for i in tqdm.tqdm(range(NUM_LOOP_ITERATIONS), unit_scale=NUM_LOOP_SAMPLES):
+for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
     samples, results = sample(
-        NUM_LOOP_SAMPLES, init_state=current_state, par_scale=par_scale
+        NUM_BURST_SAMPLES, init_state=current_state, par_scale=par_scale
     )
     current_state = [s[-1] for s in samples]
-    s = slice(i * NUM_LOOP_SAMPLES, i * NUM_LOOP_SAMPLES + NUM_LOOP_SAMPLES)
+    s = slice(i * NUM_BURST_SAMPLES, i * NUM_BURST_SAMPLES + NUM_BURST_SAMPLES)
     par_samples[s, ...] = samples[0].numpy()
     cov = np.cov(
-        np.log(par_samples[: (i * NUM_LOOP_SAMPLES + NUM_LOOP_SAMPLES), ...]),
+        np.log(par_samples[: (i * NUM_BURST_SAMPLES + NUM_BURST_SAMPLES), ...]),
         rowvar=False,
     )
     print(current_state[0].numpy())

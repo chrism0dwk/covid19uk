@@ -34,12 +34,12 @@ settings:
     - 2020-08-01
 
 mcmc:
-  dmax: 25
-  nmax: 15
-  m: 3
+  dmax: %DMAX%
+  nmax: %NMAX%
+  m: %M%
   num_bursts: 100
   num_burst_samples: 100
 
 output:
-  posterior: posterior_medium2.h5
+  posterior: tuning/%OUTPUTFILE%
   simulation: covid_ode.hd5
