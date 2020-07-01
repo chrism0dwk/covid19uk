@@ -276,8 +276,8 @@ def initialise_previous_events(events, rate):
 
 def squared_jumping_distance(chain):
     diff = chain[1:] - chain[:-1]
-    cumdiff = np.cumsum(diff, axis=2)
-    sqjumpdist = np.sum(cumdiff, axis=2) ** 2
+    cumdiff = np.cumsum(diff, axis=-1)
+    sqjumpdist = np.sum(cumdiff, axis=-1) ** 2
     return sqjumpdist
 
 
