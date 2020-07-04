@@ -1,5 +1,5 @@
 """MCMC Test Rig for COVID-19 UK model"""
-
+import optparse
 import os
 import pickle as pkl
 
@@ -35,11 +35,23 @@ if tf.test.gpu_device_name():
 else:
     print("Using CPU")
 
+# Read in settings
+parser = optparse.OptionParser()
+parser.add_option(
+    "--config",
+    "-c",
+    dest="config",
+    default="ode_config.yaml",
+    help="configuration file",
+    )
+options, args = parser.parse_args()
+print("Loading config file:", options.config)
 
-# Random moves of events.  What invalidates an epidemic, how can we test for it?
-with open("ode_config.yaml", "r") as f:
+with open(options.config, "r") as f:
     config = yaml.load(f)
 
+print("Config:",config)
+    
 param = sanitise_parameter(config["parameter"])
 param = {k: tf.constant(v, dtype=DTYPE) for k, v in param.items()}
 
