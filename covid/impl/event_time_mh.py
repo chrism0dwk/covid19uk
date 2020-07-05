@@ -50,83 +50,6 @@ def _move_events(event_tensor, event_id, m, from_t, to_t, n_move):
     return new_state
 
 
-class EventTimesUpdate(tfp.mcmc.TransitionKernel):
-    def __init__(
-        self,
-        target_log_prob_fn,
-        target_event_id,
-        prev_event_id,
-        next_event_id,
-        initial_state,
-        dmax,
-        mmax,
-        nmax,
-        seed=None,
-        name=None,
-    ):
-        """A random walk Metropolis Hastings for event times.
-        :param target_log_prob_fn: the log density of the target distribution
-        :param target_event_id: the position in the first dimension of the events tensor that we wish to move
-        :param prev_event_id: the position of the previous event in the events tensor
-        :param next_event_id: the position of the next event in the events tensor
-        :param initial_state: the initial state tensor
-        :param dmax: maximum distance to move in time
-        :param mmax: number of metapopulations to move
-        :param nmax: max number of events to move
-        :param seed: a random seed
-        :param name: the name of the update step
-        """
-        self._seed_stream = SeedStream(seed, salt="EventTimesUpdate")
-        self._impl = tfp.mcmc.MetropolisHastings(
-            inner_kernel=UncalibratedEventTimesUpdate(
-                target_log_prob_fn=target_log_prob_fn,
-                target_event_id=target_event_id,
-                prev_event_id=prev_event_id,
-                next_event_id=next_event_id,
-                dmax=dmax,
-                mmax=mmax,
-                nmax=nmax,
-                initial_state=initial_state,
-            )
-        )
-        self._parameters = self._impl.inner_kernel.parameters.copy()
-        self._parameters["seed"] = seed
-
-    @property
-    def target_log_prob_fn(self):
-        return self._impl.inner_kernel.target_log_prob_fn
-
-    @property
-    def name(self):
-        return self._impl.inner_kernel.name
-
-    @property
-    def parameters(self):
-        """Return `dict` of ``__init__`` arguments and their values."""
-        return self._parameters
-
-    @property
-    def is_calibrated(self):
-        return True
-
-    def one_step(self, current_state, previous_kernel_results):
-        """Performs one step of an event times update.
-        :param current_state: the current state tensor [TxMxX]
-        :param previous_kernel_results: a named tuple of results.
-        :returns: (next_state, kernel_results)
-        """
-        with tf.name_scope("EventTimesUpdate/one_step"):
-            next_state, kernel_results = self._impl.one_step(
-                current_state, previous_kernel_results
-            )
-            return next_state, kernel_results
-
-    def bootstrap_results(self, init_state):
-        with tf.name_scope("EventTimesUpdate/bootstrap_results"):
-            kernel_results = self._impl.bootstrap_results(init_state)
-            return kernel_results
-
-
 def _reverse_move(move):
     move["t"] = move["t"] + move["delta_t"]
     move["delta_t"] = -move["delta_t"]
@@ -151,7 +74,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
     ):
         """An uncalibrated random walk for event times.
         :param target_log_prob_fn: the log density of the target distribution
-        :param target_event_id: the position in the first dimension of the events 
+        :param target_event_id: the position in the first dimension of the events
                                 tensor that we wish to move
         :param prev_event_id: the position of the previous event in the events tensor
         :param next_event_id: the position of the next event in the events tensor

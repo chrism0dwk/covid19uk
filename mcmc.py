@@ -13,9 +13,8 @@ import yaml
 from covid import config
 from covid.model import load_data, CovidUKStochastic
 from covid.util import sanitise_parameter, sanitise_settings
-from covid.impl.util import make_transition_matrix
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
-from covid.impl.event_time_mh import EventTimesUpdate
+from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
 
 
 ###########
@@ -129,25 +128,31 @@ def make_parameter_kernel(scale, bounded_convergence):
 
 def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
     def kernel_func(logp):
-        return EventTimesUpdate(
-            target_log_prob_fn=logp,
-            target_event_id=target_event_id,
-            prev_event_id=prev_event_id,
-            next_event_id=next_event_id,
-            dmax=config["mcmc"]["dmax"],
-            mmax=config["mcmc"]["m"],
-            nmax=config["mcmc"]["nmax"],
-            initial_state=state_init,
+        return tfp.mcmc.MetropolisHastings(
+            inner_kernel=UncalibratedEventTimesUpdate(
+                target_log_prob_fn=logp,
+                target_event_id=target_event_id,
+                prev_event_id=prev_event_id,
+                next_event_id=next_event_id,
+                initial_state=state_init,
+                dmax=config["mcmc"]["dmax"],
+                mmax=config["mcmc"]["m"],
+                nmax=config["mcmc"]["nmax"],
+            ),
+            name="event_update",
         )
 
     return kernel_func
 
 
+def make_occults_step():
+    pass
+
+
 def is_accepted(result):
     if hasattr(result, "is_accepted"):
         return tf.cast(result.is_accepted, DTYPE)
-    else:
-        return is_accepted(result.inner_results)
+    return is_accepted(result.inner_results)
 
 
 def trace_results_fn(results):
