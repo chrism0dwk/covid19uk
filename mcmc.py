@@ -88,7 +88,7 @@ ir_events = event_tensor[:, :, 2, 3]
 ##########################
 
 
-def logp(par, events):
+def logp(par, events, occult_events):
     p = param
     p["beta1"] = tf.convert_to_tensor(par[0], dtype=DTYPE)
     # p['beta2'] = tf.convert_to_tensor(par[1], dtype=DTYPE)
@@ -106,7 +106,7 @@ def logp(par, events):
         rate=tf.constant(400.0, dtype=DTYPE),
     ).log_prob(p["gamma"])
     with tf.name_scope("epidemic_log_posterior"):
-        y_logp = model.log_prob(events, p, state_init)
+        y_logp = model.log_prob(events + occult_events, p, state_init)
     logp = beta1_logp + gamma_logp + y_logp
     return logp
 
@@ -162,8 +162,7 @@ def trace_results_fn(results):
     if hasattr(results.proposed_results, "extra"):
         proposed = results.proposed_results.extra
         return tf.concat([[log_prob], [accepted], [q_ratio], proposed], axis=0)
-    else:
-        return tf.concat([[log_prob], [accepted], [q_ratio]], axis=0)
+    return tf.concat([[log_prob], [accepted], [q_ratio]], axis=0)
 
 
 def forward_results(prev_results, next_results):
@@ -183,15 +182,15 @@ def sample(n_samples, init_state, par_scale, num_event_updates):
 
         # Based on Gibbs idea posted by Pavel Sountsov
         # https://github.com/tensorflow/probability/issues/495
-        par_results = par_func(lambda p: logp(p, init_state[1])).bootstrap_results(
-            init_state[0]
-        )
-        se_results = se_func(lambda s: logp(init_state[0], s)).bootstrap_results(
-            init_state[1]
-        )
-        ei_results = ei_func(lambda s: logp(init_state[0], s)).bootstrap_results(
-            init_state[1]
-        )
+        par_results = par_func(
+            lambda p: logp(p, init_state[1], init_state[2])
+        ).bootstrap_results(init_state[0])
+        se_results = se_func(
+            lambda s: logp(init_state[0], s, init_state[2])
+        ).bootstrap_results(init_state[1])
+        ei_results = ei_func(
+            lambda s: logp(init_state[0], s, init_state[2])
+        ).bootstrap_results(init_state[1])
         results = [par_results, se_results, ei_results]
 
         samples_arr = [tf.TensorArray(s.dtype, size=n_samples) for s in init_state]
@@ -265,10 +264,10 @@ NUM_EVENT_TIME_UPDATES = config["mcmc"]["num_event_time_updates"]
 tf.random.set_seed(2)
 
 # Initial state.  NB [M, T, X] layout for events.
-current_state = [
-    np.array([0.6, 0.25], dtype=DTYPE),
-    tf.transpose(tf.stack([se_events, ei_events, ir_events], axis=-1), perm=(1, 0, 2)),
-]
+events = tf.transpose(
+    tf.stack([se_events, ei_events, ir_events], axis=-1), perm=(1, 0, 2)
+)
+current_state = [np.array([0.6, 0.25], dtype=DTYPE), events, tf.zeros_like(events)]
 
 
 # Output Files
