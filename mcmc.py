@@ -271,14 +271,25 @@ current_state = [np.array([0.6, 0.25], dtype=DTYPE), events, tf.zeros_like(event
 
 
 # Output Files
-posterior = h5py.File(os.path.expandvars(config["output"]["posterior"]), "w")
+posterior = h5py.File(
+    os.path.expandvars(config["output"]["posterior"]), "w", rdcc_nbytes=1024 ** 3 * 2,
+)
 event_size = [NUM_BURSTS * NUM_BURST_SAMPLES] + list(current_state[1].shape)
+# event_chunk = (10, 1, 1, 1)
+# print("Event chunk size:", event_chunk)
 par_samples = posterior.create_dataset(
     "samples/parameter",
     [NUM_BURSTS * NUM_BURST_SAMPLES, current_state[0].shape[0]],
     dtype=np.float64,
 )
-se_samples = posterior.create_dataset("samples/events", event_size, dtype=DTYPE)
+se_samples = posterior.create_dataset(
+    "samples/events",
+    event_size,
+    dtype=DTYPE,
+    chunks=(1000,) + tuple(event_size[1:]),
+    compression="gzip",
+    compression_opts=1,
+)
 par_results = posterior.create_dataset(
     "acceptance/parameter", (NUM_BURSTS * NUM_BURST_SAMPLES, 3), dtype=DTYPE,
 )
