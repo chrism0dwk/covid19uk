@@ -30,7 +30,10 @@ def chain_binomial_propagate(h, time_step, seed=None):
     """
 
     def propagate_fn(t, state):
-        rate_matrix = h(t, state)
+        rates = h(t, state)
+        rate_matrix = make_transition_matrix(
+            rates, [[0, 1], [1, 2], [2, 3]], state.shape
+        )
         # Set diagonal to be the negative of the sum of other elements in each row
         markov_transition = approx_expm(rate_matrix * time_step)
         num_states = markov_transition.shape[-1]
