@@ -34,13 +34,14 @@ settings:
     - 2020-08-01
 
 mcmc:
-  dmax: 32
+  dmax: 16
   nmax: 160
   m: 1
-  num_event_time_updates: 1
+  occult_nmax: 250
+  num_event_time_updates: 100
   num_bursts: 100
   num_burst_samples: 100
 
 output:
-  posterior: posterior_medium_upd1.h5
+  posterior: posterior_medium_xla.h5
   simulation: covid_ode.hd5

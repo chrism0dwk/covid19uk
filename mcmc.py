@@ -2,6 +2,7 @@
 import optparse
 import os
 import pickle as pkl
+from collections import OrderedDict
 
 import h5py
 import numpy as np
@@ -15,7 +16,7 @@ from covid.model import load_data, CovidUKStochastic
 from covid.util import sanitise_parameter, sanitise_settings
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
-
+from covid.impl.occult_events_mh import UncalibratedOccultUpdate
 
 ###########
 # TF Bits #
@@ -75,13 +76,19 @@ with open("stochastic_sim_covid.pkl", "rb") as f:
     example_sim = pkl.load(f)
 
 event_tensor = example_sim["events"]  # shape [T, M, S, S]
+event_tensor = event_tensor[:80, ...]
 num_times = event_tensor.shape[0]
 num_meta = event_tensor.shape[1]
 state_init = example_sim["state_init"]
-se_events = event_tensor[:, :, 0, 1]
-ei_events = event_tensor[:, :, 1, 2]
-ir_events = event_tensor[:, :, 2, 3]
+se_events = event_tensor[:, :, 0, 1]  # [T, M, X]
+ei_events = event_tensor[:, :, 1, 2]  # [T, M, X]
+ir_events = event_tensor[:, :, 2, 3]  # [T, M, X]
 
+ir_events = np.pad(ir_events, ((4, 0), (0, 0)), mode="constant", constant_values=0.0)
+ei_events = np.roll(ir_events, shift=-2, axis=0)
+se_events = np.roll(ir_events, shift=-4, axis=0)
+ei_events[-2:, ...] = 0.0
+se_events[-4:, ...] = 0.0
 
 ##########################
 # Log p and MCMC kernels #
@@ -145,8 +152,18 @@ def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
     return kernel_func
 
 
-def make_occults_step():
-    pass
+def make_occults_step(target_event_id):
+    def kernel_func(logp):
+        return tfp.mcmc.MetropolisHastings(
+            inner_kernel=UncalibratedOccultUpdate(
+                target_log_prob_fn=logp,
+                target_event_id=target_event_id,
+                nmax=config["mcmc"]["occult_nmax"],
+            ),
+            name="occult_update",
+        )
+
+    return kernel_func
 
 
 def is_accepted(result):
@@ -160,7 +177,7 @@ def trace_results_fn(results):
     accepted = is_accepted(results)
     q_ratio = results.proposed_results.log_acceptance_correction
     if hasattr(results.proposed_results, "extra"):
-        proposed = results.proposed_results.extra
+        proposed = tf.cast(results.proposed_results.extra, log_prob.dtype)
         return tf.concat([[log_prob], [accepted], [q_ratio], proposed], axis=0)
     return tf.concat([[log_prob], [accepted], [q_ratio]], axis=0)
 
@@ -179,22 +196,31 @@ def sample(n_samples, init_state, par_scale, num_event_updates):
         par_func = make_parameter_kernel(par_scale, 0.95)
         se_func = make_events_step(0, None, 1)
         ei_func = make_events_step(1, 0, 2)
+        se_occult = make_occults_step(0)
+        ei_occult = make_occults_step(1)
 
         # Based on Gibbs idea posted by Pavel Sountsov
         # https://github.com/tensorflow/probability/issues/495
-        par_results = par_func(
-            lambda p: logp(p, init_state[1], init_state[2])
-        ).bootstrap_results(init_state[0])
-        se_results = se_func(
-            lambda s: logp(init_state[0], s, init_state[2])
-        ).bootstrap_results(init_state[1])
-        ei_results = ei_func(
-            lambda s: logp(init_state[0], s, init_state[2])
-        ).bootstrap_results(init_state[1])
-        results = [par_results, se_results, ei_results]
+        results = [
+            par_func(lambda p: logp(p, init_state[1], init_state[2])).bootstrap_results(
+                init_state[0]
+            ),
+            se_func(lambda s: logp(init_state[0], s, init_state[2])).bootstrap_results(
+                init_state[1]
+            ),
+            ei_func(lambda s: logp(init_state[0], s, init_state[2])).bootstrap_results(
+                init_state[1]
+            ),
+            se_occult(
+                lambda s: logp(init_state[0], init_state[1], s)
+            ).bootstrap_results(init_state[2]),
+            ei_occult(
+                lambda s: logp(init_state[0], init_state[1], s)
+            ).bootstrap_results(init_state[2]),
+        ]
 
         samples_arr = [tf.TensorArray(s.dtype, size=n_samples) for s in init_state]
-        results_arr = [tf.TensorArray(DTYPE, size=n_samples) for r in range(3)]
+        results_arr = [tf.TensorArray(DTYPE, size=n_samples) for r in range(5)]
 
         def body(i, state, results, sample_accum, results_accum):
             # Parameters
@@ -207,19 +233,31 @@ def sample(n_samples, init_state, par_scale, num_event_updates):
             )
 
             # States
-            results[2] = forward_results(results[0], results[2])
+            results[4] = forward_results(results[0], results[4])
 
             def infec_body(j, state, results):
                 def state_logp(event_state):
                     state[1] = event_state
                     return logp(*state)
 
+                def occult_logp(occult_state):
+                    state[2] = occult_state
+                    return logp(*state)
+
                 state[1], results[1] = se_func(state_logp).one_step(
-                    state[1], forward_results(results[2], results[1])
+                    state[1], forward_results(results[4], results[1])
                 )
                 state[1], results[2] = ei_func(state_logp).one_step(
                     state[1], forward_results(results[1], results[2])
                 )
+                state[2], results[3] = se_occult(occult_logp).one_step(
+                    state[2], forward_results(results[2], results[3])
+                )
+                # results[3] = forward_results(results[2], results[3])
+                state[2], results[4] = ei_occult(occult_logp).one_step(
+                    state[2], forward_results(results[3], results[4])
+                )
+                # results[4] = forward_results(results[3], results[4])
                 j += 1
                 return j, state, results
 
@@ -282,32 +320,48 @@ par_samples = posterior.create_dataset(
     [NUM_BURSTS * NUM_BURST_SAMPLES, current_state[0].shape[0]],
     dtype=np.float64,
 )
-se_samples = posterior.create_dataset(
+event_samples = posterior.create_dataset(
     "samples/events",
     event_size,
     dtype=DTYPE,
-    chunks=(1000,) + tuple(event_size[1:]),
+    chunks=(min(NUM_BURSTS * NUM_BURST_SAMPLES, 1000),) + tuple(event_size[1:]),
     compression="gzip",
     compression_opts=1,
 )
-par_results = posterior.create_dataset(
-    "acceptance/parameter", (NUM_BURSTS * NUM_BURST_SAMPLES, 3), dtype=DTYPE,
-)
-se_results = posterior.create_dataset(
-    "acceptance/S->E",
-    (NUM_BURSTS * NUM_BURST_SAMPLES, 3 + model.N.shape[0]),
+occult_samples = posterior.create_dataset(
+    "samples/occults",
+    event_size,
     dtype=DTYPE,
-)
-ei_results = posterior.create_dataset(
-    "acceptance/E->I",
-    (NUM_BURSTS * NUM_BURST_SAMPLES, 3 + model.N.shape[0]),
-    dtype=DTYPE,
+    chunks=(min(NUM_BURSTS * NUM_BURST_SAMPLES, 1000),) + tuple(event_size[1:]),
+    compression="gzip",
+    compression_opts=1,
 )
 
+output_results = [
+    posterior.create_dataset(
+        "results/parameter", (NUM_BURSTS * NUM_BURST_SAMPLES, 3), dtype=DTYPE,
+    ),
+    posterior.create_dataset(
+        "results/move/S->E",
+        (NUM_BURSTS * NUM_BURST_SAMPLES, 3 + model.N.shape[0]),
+        dtype=DTYPE,
+    ),
+    posterior.create_dataset(
+        "results/move/E->I",
+        (NUM_BURSTS * NUM_BURST_SAMPLES, 3 + model.N.shape[0]),
+        dtype=DTYPE,
+    ),
+    posterior.create_dataset(
+        "results/occult/S->E", (NUM_BURSTS * NUM_BURST_SAMPLES, 6), dtype=DTYPE
+    ),
+    posterior.create_dataset(
+        "results/occult/E->I", (NUM_BURSTS * NUM_BURST_SAMPLES, 6), dtype=DTYPE
+    ),
+]
 
 print("Initial logpi:", logp(*current_state))
 par_scale = tf.linalg.diag(
-    tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1
+    tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.0000001
 )
 
 # We loop over successive calls to sample because we have to dump results
@@ -328,21 +382,34 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
         rowvar=False,
     )
     print(current_state[0].numpy())
+
     print(cov)
     if np.all(np.isfinite(cov)):
         par_scale = 2.0 ** 2 * cov / 2.0
 
-    se_samples[s, ...] = samples[1].numpy()
-    par_results[s, ...] = results[0].numpy()
-    se_results[s, ...] = results[1].numpy()
-    ei_results[s, ...] = results[2].numpy()
+    event_samples[s, ...] = samples[1].numpy()
+    occult_samples[s, ...] = samples[2].numpy()
+    for i, ro in enumerate(output_results):
+        ro[s, ...] = results[i]
 
-    print("Acceptance0:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
-    print("Acceptance1:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32)))
-    print("Acceptance2:", tf.reduce_mean(tf.cast(results[2][:, 1], tf.float32)))
+    print("Acceptance par:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
+    print(
+        "Acceptance move S->E:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32))
+    )
+    print(
+        "Acceptance move E->I:", tf.reduce_mean(tf.cast(results[2][:, 1], tf.float32))
+    )
+    print(
+        "Acceptance occult S->E:", tf.reduce_mean(tf.cast(results[3][:, 1], tf.float32))
+    )
+    print(
+        "Acceptance occult E->I:", tf.reduce_mean(tf.cast(results[4][:, 1], tf.float32))
+    )
 
-print(f"Acceptance param: {par_results[:, 1].mean()}")
-print(f"Acceptance S->E: {se_results[:, 1].mean()}")
-print(f"Acceptance E->I: {ei_results[:, 1].mean()}")
+print(f"Acceptance param: {output_results[0][:, 1].mean()}")
+print(f"Acceptance move S->E: {output_results[1][:, 1].mean()}")
+print(f"Acceptance move E->I: {output_results[2][:, 1].mean()}")
+print(f"Acceptance occult S->E: {output_results[3][:, 1].mean()}")
+print(f"Acceptance occult E->I: {output_results[4][:, 1].mean()}")
 
 posterior.close()

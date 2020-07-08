@@ -155,7 +155,7 @@ class CovidUKStochastic(CovidUK):
                 * commute_volume
                 * tf.linalg.matvec(self.C, state[..., 2] / self.N)
             )
-            infec_rate = infec_rate / self.N  # + 1.0e-6  # Vector of length nc
+            infec_rate = infec_rate / self.N  # Vector of length nc
 
             ei = tf.broadcast_to(
                 [param["nu"]], shape=[state.shape[0]]

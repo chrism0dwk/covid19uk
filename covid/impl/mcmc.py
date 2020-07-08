@@ -39,7 +39,7 @@ def random_walk_mvnorm_fn(covariance, p_u=0.95, name=None):
 
             def proposal():
                 rv = tf.stack([rv_fix.sample(), rv_adapt.sample()])
-                uv = u.sample()
+                uv = u.sample(seed=seed)
                 return tf.gather(rv, uv)
 
             new_state_parts = [proposal() + state_part for state_part in state_parts]
