@@ -7,7 +7,10 @@ from covid.impl.Categorical2 import Categorical2
 tfd = tfp.distributions
 
 
-def AddOccultProposal(events, n_max, dtype=tf.int32, name=None):
+def AddOccultProposal(events, n_max, t_range=None, dtype=tf.int32, name=None):
+    if t_range is None:
+        t_range = [0, events.shape[-2]]
+
     def m():
         """Select a metapopulation"""
         with tf.name_scope("m"):
@@ -16,7 +19,7 @@ def AddOccultProposal(events, n_max, dtype=tf.int32, name=None):
     def t():
         """Select a timepoint"""
         with tf.name_scope("t"):
-            return UniformInteger(low=[0], high=[events.shape[1]], dtype=dtype)
+            return UniformInteger(low=[t_range[0]], high=[t_range[1]], dtype=dtype)
 
     def x_star():
         """Draw num to add"""

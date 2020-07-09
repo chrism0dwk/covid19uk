@@ -5,15 +5,17 @@ import pickle as pkl
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-tfd = tfp.distributions
-tfb = tfp.bijectors
-
 import numpy as np
 import matplotlib.pyplot as plt
 import yaml
 
 from covid.model import CovidUKStochastic, load_data
 from covid.util import sanitise_parameter, sanitise_settings, seed_areas
+
+
+tfd = tfp.distributions
+tfb = tfp.bijectors
+
 
 DTYPE = np.float64
 
@@ -157,81 +159,63 @@ def plot_age_attack_rate(ax, sim, N, label):
     ax.plot(data["age_groups"], attack_rate, "o-", label=label)
 
 
-if __name__ == "__main__":
+# parser = optparse.OptionParser()
+# parser.add_option(
+#     "--config",
+#     "-c",
+#     dest="config",
+#     default="ode_config.yaml",
+#     help="configuration file",
+# )
+# options, args = parser.parse_args([])
+with open("ode_config.yaml", "r") as ymlfile:
+    config = yaml.load(ymlfile)
 
-    parser = optparse.OptionParser()
-    parser.add_option(
-        "--config",
-        "-c",
-        dest="config",
-        default="ode_config.yaml",
-        help="configuration file",
-    )
-    options, args = parser.parse_args()
+param = sanitise_parameter(config["parameter"])
+settings = sanitise_settings(config["settings"])
 
-    with open(options.config, "r") as ymlfile:
-        config = yaml.load(ymlfile)
+data = load_data(config["data"], settings, DTYPE)
+data["pop"] = data["pop"].sum(level=0)
 
-    param = sanitise_parameter(config["parameter"])
-    settings = sanitise_settings(config["settings"])
+model = CovidUKStochastic(
+    C=data["C"],
+    N=data["pop"]["n"].to_numpy(),
+    W=data["W"],
+    date_range=settings["prediction_period"],
+    holidays=settings["holiday"],
+    lockdown=settings["lockdown"],
+    time_step=1.0,
+)
 
-    parser = optparse.OptionParser()
-    parser.add_option(
-        "--config",
-        "-c",
-        dest="config",
-        default="ode_config.yaml",
-        help="configuration file",
-    )
-    options, args = parser.parse_args()
-    with open(options.config, "r") as ymlfile:
-        config = yaml.load(ymlfile)
+# seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
+# seeding = tf.one_hot(tf.squeeze(tf.where(data['pop'].index=='E09000008')), depth=data['pop'].size, dtype=DTYPE)
+seeding = tf.one_hot(58, depth=model.N.shape[0], dtype=DTYPE)  # Manchester
+state_init = model.create_initial_state(init_matrix=seeding)
 
-    param = sanitise_parameter(config["parameter"])
-    settings = sanitise_settings(config["settings"])
+start = time.perf_counter()
+t, sim = model.simulate(param, state_init)
+end = time.perf_counter()
+print(f"Run 1 Complete in {end - start} seconds")
 
-    data = load_data(config["data"], settings, DTYPE)
-    data["pop"] = data["pop"].sum(level=0)
+start = time.perf_counter()
+for i in range(1):
+    t, upd = model.simulate(param, state_init)
+end = time.perf_counter()
+print(f"Run 2 Complete in {(end - start)/1.} seconds")
 
-    model = CovidUKStochastic(
-        C=data["C"],
-        N=data["pop"]["n"].to_numpy(),
-        W=data["W"],
-        date_range=settings["prediction_period"],
-        holidays=settings["holiday"],
-        lockdown=settings["lockdown"],
-        time_step=1.0,
-    )
+# Plotting functions
+fig_uk = plt.figure()
+sim = tf.reduce_sum(upd, axis=-2)
 
-    # seeding = seed_areas(data['pop']['n'].to_numpy(), data['pop']['Area.name.2'])  # Seed 40-44 age group, 30 seeds by popn size
-    # seeding = tf.one_hot(tf.squeeze(tf.where(data['pop'].index=='E09000008')), depth=data['pop'].size, dtype=DTYPE)
-    seeding = tf.one_hot(58, depth=model.N.shape[0], dtype=DTYPE)  # Manchester
-    state_init = model.create_initial_state(init_matrix=seeding)
+# plot_age_attack_rate(fig_attack.gca(), sim, data['pop']['n'].to_numpy(), "Attack Rate")
+# fig_attack.suptitle("Attack Rate")
+# plot_infec_curve(fig_uk.gca(), sim.numpy(), "Infections")
+fig_uk.gca().plot(sim[:, :, 2])
+fig_uk.suptitle("UK Infections")
 
-    start = time.perf_counter()
-    t, sim = model.simulate(param, state_init)
-    end = time.perf_counter()
-    print(f"Run 1 Complete in {end - start} seconds")
+fig_uk.autofmt_xdate()
+fig_uk.gca().grid(True)
+plt.show()
 
-    start = time.perf_counter()
-    for i in range(1):
-        t, upd = model.simulate(param, state_init)
-    end = time.perf_counter()
-    print(f"Run 2 Complete in {(end - start)/1.} seconds")
-
-    # Plotting functions
-    fig_uk = plt.figure()
-    sim = tf.reduce_sum(upd, axis=-2)
-
-    # plot_age_attack_rate(fig_attack.gca(), sim, data['pop']['n'].to_numpy(), "Attack Rate")
-    # fig_attack.suptitle("Attack Rate")
-    # plot_infec_curve(fig_uk.gca(), sim.numpy(), "Infections")
-    fig_uk.gca().plot(sim[:, :, 2])
-    fig_uk.suptitle("UK Infections")
-
-    fig_uk.autofmt_xdate()
-    fig_uk.gca().grid(True)
-    plt.show()
-
-    with open("stochastic_sim_covid.pkl", "wb") as f:
-        pkl.dump({"events": upd.numpy(), "state_init": state_init.numpy()}, f)
+with open("stochastic_sim_covid1.pkl", "wb") as f:
+    pkl.dump({"events": upd.numpy(), "state_init": state_init.numpy()}, f)

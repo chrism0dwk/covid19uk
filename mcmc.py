@@ -72,11 +72,11 @@ model = CovidUKStochastic(
 
 
 # Load data
-with open("stochastic_sim_covid.pkl", "rb") as f:
+with open("stochastic_sim_covid1.pkl", "rb") as f:
     example_sim = pkl.load(f)
 
 event_tensor = example_sim["events"]  # shape [T, M, S, S]
-event_tensor = event_tensor[:80, ...]
+event_tensor = event_tensor[:60, ...]
 num_times = event_tensor.shape[0]
 num_meta = event_tensor.shape[1]
 state_init = example_sim["state_init"]
@@ -159,6 +159,7 @@ def make_occults_step(target_event_id):
                 target_log_prob_fn=logp,
                 target_event_id=target_event_id,
                 nmax=config["mcmc"]["occult_nmax"],
+                t_range=[se_events.shape[0] - 21, se_events.shape[0]],
             ),
             name="occult_update",
         )
@@ -253,7 +254,7 @@ def sample(n_samples, init_state, par_scale, num_event_updates):
                 state[2], results[3] = se_occult(occult_logp).one_step(
                     state[2], forward_results(results[2], results[3])
                 )
-                # results[3] = forward_results(results[2], results[3])
+                #                results[3] = forward_results(results[2], results[3])
                 state[2], results[4] = ei_occult(occult_logp).one_step(
                     state[2], forward_results(results[3], results[4])
                 )
@@ -324,7 +325,7 @@ event_samples = posterior.create_dataset(
     "samples/events",
     event_size,
     dtype=DTYPE,
-    chunks=(min(NUM_BURSTS * NUM_BURST_SAMPLES, 1000),) + tuple(event_size[1:]),
+    chunks=(10,) + tuple(current_state[1].shape),
     compression="gzip",
     compression_opts=1,
 )
@@ -332,7 +333,7 @@ occult_samples = posterior.create_dataset(
     "samples/occults",
     event_size,
     dtype=DTYPE,
-    chunks=(min(NUM_BURSTS * NUM_BURST_SAMPLES, 1000),) + tuple(event_size[1:]),
+    chunks=(10,) + tuple(current_state[1].shape),
     compression="gzip",
     compression_opts=1,
 )
@@ -361,7 +362,7 @@ output_results = [
 
 print("Initial logpi:", logp(*current_state))
 par_scale = tf.linalg.diag(
-    tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.0000001
+    tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 1.0
 )
 
 # We loop over successive calls to sample because we have to dump results

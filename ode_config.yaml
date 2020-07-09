@@ -10,7 +10,7 @@ data:
 
 parameter:
   beta1: 0.6    # R0 2.4
-  beta2: 0.33   # Contact with commuters 1/3rd of the time
+  beta2: 0.5   # Contact with commuters 1/3rd of the time
   beta3: 0.25    # lockdown vs normal
   omega: 1.0    # Non-linearity parameter for commuting volume
   nu: 0.5      # E -> I transition rate
@@ -35,10 +35,10 @@ settings:
 
 mcmc:
   dmax: 16
-  nmax: 160
+  nmax: 20
   m: 1
-  occult_nmax: 250
-  num_event_time_updates: 100
+  occult_nmax: 15
+  num_event_time_updates: 149
   num_bursts: 100
   num_burst_samples: 100
 

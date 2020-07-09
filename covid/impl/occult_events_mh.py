@@ -41,12 +41,20 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
     """UncalibratedEventTimesUpdate"""
 
     def __init__(
-        self, target_log_prob_fn, target_event_id, nmax, seed=None, name=None,
+        self,
+        target_log_prob_fn,
+        target_event_id,
+        nmax,
+        t_range=None,
+        seed=None,
+        name=None,
     ):
         """An uncalibrated random walk for event times.
         :param target_log_prob_fn: the log density of the target distribution
         :param target_event_id: the position in the last dimension of the events
                                 tensor that we wish to move
+        :param t_range: a tuple containing earliest and latest times between which 
+                        to update occults.
         :param seed: a random seed
         :param name: the name of the update step
         """
@@ -57,6 +65,7 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
             target_log_prob_fn=target_log_prob_fn,
             target_event_id=target_event_id,
             nmax=nmax,
+            t_range=t_range,
             seed=seed,
             name=name,
         )
@@ -101,7 +110,9 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
             def true_fn():
                 with tf.name_scope("true_fn"):
                     proposal = AddOccultProposal(
-                        current_events, self.parameters["nmax"]
+                        events=current_events,
+                        n_max=self.parameters["nmax"],
+                        t_range=self.parameters["t_range"],
                     )
                     update = proposal.sample()
                     next_state = _add_events(
@@ -128,7 +139,11 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                         x=[self.tx_topology.target],
                         x_star=tf.cast(-update["x_star"], current_events.dtype),
                     )
-                    reverse = AddOccultProposal(next_state, self.parameters["nmax"])
+                    reverse = AddOccultProposal(
+                        events=next_state,
+                        n_max=self.parameters["nmax"],
+                        t_range=self.parameters["t_range"],
+                    )
                     q_fwd = tf.reduce_sum(proposal.log_prob(update))
                     q_rev = tf.reduce_sum(reverse.log_prob(update))
                     log_acceptance_correction = q_rev - q_fwd
