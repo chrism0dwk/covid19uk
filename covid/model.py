@@ -6,8 +6,8 @@ import numpy as np
 
 from covid import config
 from covid.impl.util import make_transition_matrix
-from covid.rdata import load_mobility_matrix, load_population, load_age_mixing
-from covid.pydata import load_commute_volume, collapse_commute_data, collapse_pop
+from covid.rdata import load_age_mixing
+from covid.pydata import load_commute_volume, load_mobility_matrix, load_population
 from covid.impl.discrete_markov import (
     discrete_markov_simulation,
     discrete_markov_log_prob,
@@ -50,20 +50,20 @@ def load_data(paths, settings, dtype=DTYPE):
     M_tt, age_groups = load_age_mixing(paths["age_mixing_matrix_term"])
     M_hh, _ = load_age_mixing(paths["age_mixing_matrix_hol"])
 
-    C = collapse_commute_data(paths["mobility_matrix"])
+    C = load_mobility_matrix(paths["mobility_matrix"])
     la_names = C.index.to_numpy()
 
     w_period = [settings["inference_period"][0], settings["prediction_period"][1]]
     W = load_commute_volume(paths["commute_volume"], w_period)["percent"]
 
-    pop = collapse_pop(paths["population_size"])
+    pop = load_population(paths["population_size"])
 
     M_tt = M_tt.astype(DTYPE)
     M_hh = M_hh.astype(DTYPE)
     C = C.to_numpy().astype(DTYPE)
     np.fill_diagonal(C, 0.0)
-    W = W.astype(DTYPE)
-    pop["n"] = pop["n"].astype(DTYPE)
+    W = W.to_numpy().astype(DTYPE)
+    pop = pop.to_numpy().astype(DTYPE)
 
     return {
         "M_tt": M_tt,
@@ -155,7 +155,7 @@ class CovidUKStochastic(CovidUK):
                 * commute_volume
                 * tf.linalg.matvec(self.C, state[..., 2] / self.N)
             )
-            infec_rate = infec_rate / self.N + 0.00000001  # Vector of length nc
+            infec_rate = infec_rate / self.N + 0.000000001  # Vector of length nc
 
             ei = tf.broadcast_to(
                 [param["nu"]], shape=[state.shape[0]]

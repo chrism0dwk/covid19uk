@@ -3,6 +3,7 @@ import optparse
 import os
 import pickle as pkl
 from collections import OrderedDict
+from time import perf_counter
 
 import h5py
 import numpy as np
@@ -13,7 +14,8 @@ import yaml
 
 from covid import config
 from covid.model import load_data, CovidUKStochastic
-from covid.util import sanitise_parameter, sanitise_settings
+from covid.pydata import phe_case_data
+from covid.util import sanitise_parameter, sanitise_settings, impute_previous_cases
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
 from covid.impl.occult_events_mh import UncalibratedOccultUpdate
@@ -36,59 +38,44 @@ else:
     print("Using CPU")
 
 # Read in settings
-parser = optparse.OptionParser()
-parser.add_option(
-    "--config",
-    "-c",
-    dest="config",
-    default="ode_config.yaml",
-    help="configuration file",
-)
-options, args = parser.parse_args()
-print("Loading config file:", options.config)
+# parser = optparse.OptionParser()
+# parser.add_option(
+#     "--config",
+#     "-c",
+#     dest="config",
+#     default="ode_config.yaml",
+#     help="configuration file",
+# )
+# options, cmd_args = parser.parse_args()
+# print("Loading config file:", options.config)
 
-with open(options.config, "r") as f:
-    config = yaml.load(f)
+# with open(options.config, "r") as f:
+with open("ode_config.yaml", "r") as f:
+    config = yaml.load(f, Loader=yaml.FullLoader)
 
-print("Config:", config)
+settings = sanitise_settings(config["settings"])
 
 param = sanitise_parameter(config["parameter"])
 param = {k: tf.constant(v, dtype=DTYPE) for k, v in param.items()}
 
-settings = sanitise_settings(config["settings"])
+covar_data = load_data(config["data"], settings, DTYPE)
 
-data = load_data(config["data"], settings, DTYPE)
-data["pop"] = data["pop"].sum(level=0)
+cases = phe_case_data(config["data"]["reported_cases"], settings["inference_period"])
+ei_events, lag_ei = impute_previous_cases(cases, 0.25)
+se_events, lag_se = impute_previous_cases(ei_events, 0.25)
+ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
+ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
+
 
 model = CovidUKStochastic(
-    C=data["C"],
-    N=data["pop"]["n"].to_numpy(),
-    W=data["W"],
+    C=covar_data["C"],
+    N=covar_data["pop"],
+    W=covar_data["W"],
     date_range=settings["inference_period"],
     holidays=settings["holiday"],
     lockdown=settings["lockdown"],
     time_step=1.0,
 )
-
-
-# Load data
-with open("stochastic_sim_covid1.pkl", "rb") as f:
-    example_sim = pkl.load(f)
-
-event_tensor = example_sim["events"]  # shape [T, M, S, S]
-event_tensor = event_tensor[:60, ...]
-num_times = event_tensor.shape[0]
-num_meta = event_tensor.shape[1]
-state_init = example_sim["state_init"]
-se_events = event_tensor[:, :, 0, 1]  # [T, M, X]
-ei_events = event_tensor[:, :, 1, 2]  # [T, M, X]
-ir_events = event_tensor[:, :, 2, 3]  # [T, M, X]
-
-ir_events = np.pad(ir_events, ((4, 0), (0, 0)), mode="constant", constant_values=0.0)
-ei_events = np.roll(ir_events, shift=-2, axis=0)
-se_events = np.roll(ir_events, shift=-4, axis=0)
-ei_events[-2:, ...] = 0.0
-se_events[-4:, ...] = 0.0
 
 ##########################
 # Log p and MCMC kernels #
@@ -159,7 +146,7 @@ def make_occults_step(target_event_id):
                 target_log_prob_fn=logp,
                 target_event_id=target_event_id,
                 nmax=config["mcmc"]["occult_nmax"],
-                t_range=[se_events.shape[0] - 21, se_events.shape[0]],
+                t_range=[se_events.shape[1] - 21, se_events.shape[1]],
             ),
             name="occult_update",
         )
@@ -194,7 +181,7 @@ def forward_results(prev_results, next_results):
 def sample(n_samples, init_state, par_scale, num_event_updates):
     with tf.name_scope("main_mcmc_sample_loop"):
         init_state = init_state.copy()
-        par_func = make_parameter_kernel(par_scale, 0.95)
+        par_func = make_parameter_kernel(par_scale, 0.0)
         se_func = make_events_step(0, None, 1)
         ei_func = make_events_step(1, 0, 2)
         se_occult = make_occults_step(0)
@@ -229,8 +216,9 @@ def sample(n_samples, init_state, par_scale, num_event_updates):
                 state[0] = par_state  # close over state from outer scope
                 return logp(*state)
 
-            state[0], results[0] = par_func(par_logp).one_step(
-                state[0], forward_results(results[2], results[0])
+            par_kernel = par_func(par_logp)
+            state[0], results[0] = par_kernel.one_step(
+                state[0], par_kernel.bootstrap_results(state[0])
             )
 
             # States
@@ -254,7 +242,7 @@ def sample(n_samples, init_state, par_scale, num_event_updates):
                 state[2], results[3] = se_occult(occult_logp).one_step(
                     state[2], forward_results(results[2], results[3])
                 )
-                #                results[3] = forward_results(results[2], results[3])
+                # results[3] = forward_results(results[2], results[3])
                 state[2], results[4] = ei_occult(occult_logp).one_step(
                     state[2], forward_results(results[3], results[4])
                 )
@@ -303,15 +291,21 @@ NUM_EVENT_TIME_UPDATES = config["mcmc"]["num_event_time_updates"]
 tf.random.set_seed(2)
 
 # Initial state.  NB [M, T, X] layout for events.
-events = tf.transpose(
-    tf.stack([se_events, ei_events, ir_events], axis=-1), perm=(1, 0, 2)
-)
-current_state = [np.array([0.6, 0.25], dtype=DTYPE), events, tf.zeros_like(events)]
-
+events = tf.stack([se_events, ei_events, ir_events], axis=-1)
+state_init = tf.concat([model.N[:, tf.newaxis], events[:, 0, :]], axis=-1)
+events = events[:, 1:, :]
+current_state = [
+    np.array([0.85, 0.25], dtype=DTYPE),
+    events,
+    tf.zeros_like(events),
+]
 
 # Output Files
 posterior = h5py.File(
-    os.path.expandvars(config["output"]["posterior"]), "w", rdcc_nbytes=1024 ** 3 * 2,
+    os.path.expandvars(config["output"]["posterior"]),
+    "w",
+    rdcc_nbytes=1024 ** 2 * 400,
+    rdcc_nslots=100000,
 )
 event_size = [NUM_BURSTS * NUM_BURST_SAMPLES] + list(current_state[1].shape)
 # event_chunk = (10, 1, 1, 1)
@@ -325,17 +319,15 @@ event_samples = posterior.create_dataset(
     "samples/events",
     event_size,
     dtype=DTYPE,
-    chunks=(10,) + tuple(current_state[1].shape),
-    compression="gzip",
-    compression_opts=1,
+    chunks=(1024, 64, 64, current_state[1].shape[-1]),
+    compression="lzf",
 )
 occult_samples = posterior.create_dataset(
     "samples/occults",
     event_size,
     dtype=DTYPE,
-    chunks=(10,) + tuple(current_state[1].shape),
-    compression="gzip",
-    compression_opts=1,
+    chunks=(1024, 64, 64, current_state[1].shape[-1]),
+    compression="lzf",
 )
 
 output_results = [
@@ -362,7 +354,7 @@ output_results = [
 
 print("Initial logpi:", logp(*current_state))
 par_scale = tf.linalg.diag(
-    tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 1.0
+    tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1
 )
 
 # We loop over successive calls to sample because we have to dump results
@@ -385,14 +377,18 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
     print(current_state[0].numpy())
 
     print(cov)
-    if np.all(np.isfinite(cov)):
-        par_scale = 2.0 ** 2 * cov / 2.0
+    if (i * NUM_BURST_SAMPLES) > 1000 and np.all(np.isfinite(cov)):
+        par_scale = 2.38 ** 2 * cov / 2.0
 
+    start = perf_counter()
     event_samples[s, ...] = samples[1].numpy()
     occult_samples[s, ...] = samples[2].numpy()
+    end = perf_counter()
+
     for i, ro in enumerate(output_results):
         ro[s, ...] = results[i]
 
+    print("Storage time:", end - start, "seconds")
     print("Acceptance par:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
     print(
         "Acceptance move S->E:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32))

@@ -6,7 +6,7 @@ data:
   mobility_matrix: data/mergedflows.rds
   population_size: data/c2019modagepop.csv
   commute_volume: data/commute_vol_2020-03-27.csv
-  reported_cases: data/DailyConfirmedCases_2020-04-18.csv
+  reported_cases: /home/jewellcp/PycharmProjects/covid19uk/data/Anonymised Combined Line List 20200714.xlsx
 
 parameter:
   beta1: 0.6    # R0 2.4
@@ -34,13 +34,13 @@ settings:
     - 2020-08-01
 
 mcmc:
-  dmax: 16
-  nmax: 20
+  dmax: 21
+  nmax: 50
   m: 1
   occult_nmax: 15
-  num_event_time_updates: 149
+  num_event_time_updates: 35
   num_bursts: 100
-  num_burst_samples: 100
+  num_burst_samples: 1000
 
 output:
   posterior: posterior_medium_xla.h5

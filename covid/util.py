@@ -366,3 +366,63 @@ def plot_event_posterior(posterior, simulation, metapopulation=0):
     ax[1][0].set_ylabel("E->I")
 
     return fig, ax
+
+
+def distribute_geom(events, rate, delta_t=1.0):
+    """Given a tensor `events`, returns a tensor of shape `events.shape + [t]`
+    representing the events distributed over a number of days given geometric
+    waiting times with rate `1-exp(-rate*delta_t)`"""
+
+    events = tf.convert_to_tensor(events)
+    rate = tf.convert_to_tensor(rate, dtype=events.dtype)
+
+    accum = tf.TensorArray(events.dtype, size=0, dynamic_size=True)
+    prob = 1.0 - tf.exp(-rate * delta_t)
+
+    def body(i, events_, accum_):
+        rv = tfd.Binomial(total_count=events_, probs=prob)
+        failures = rv.sample()
+        accum_ = accum_.write(i, failures)
+        i += 1
+        return i, events_ - failures, accum_
+
+    def cond(_1, events_, _2):
+        return tf.reduce_sum(events_) > tf.constant(0, dtype=events.dtype)
+
+    _1, _2, accum = tf.while_loop(cond, body, loop_vars=[1, events, accum])
+
+    return tf.transpose(accum.stack(), perm=(1, 0, 2))
+
+
+def reduce_diagonals(m):
+    def fn(m_):
+        idx = (
+            tf.range(m_.shape[-1])
+            - tf.range(m_.shape[-2])[:, tf.newaxis]
+            + m_.shape[-2]
+            - 1
+        )
+        idx = tf.expand_dims(idx, axis=-1)
+        return tf.scatter_nd(idx, m_, [m_.shape[-2] + m_.shape[-1] - 1])
+
+    return tf.vectorized_map(fn, m)
+
+
+def impute_previous_cases(events, rate, delta_t=1.0):
+    """Imputes previous numbers of cases by using a geometric distribution
+
+    :param events: a [M, T] tensor
+    :param rate: the failure rate per `delta_t`
+    :param delta_t: the size of the time step
+    :returns: a tuple containing the matrix of events and the maximum
+              number of timesteps into the past to allow padding of `events`.
+    """
+    prev_case_distn = distribute_geom(events, rate, delta_t)
+    prev_cases = reduce_diagonals(prev_case_distn)
+
+    # Trim preceding zero days
+    total_events = tf.reduce_sum(prev_cases, axis=-2)
+    num_zero_days = total_events.shape[-1] - tf.math.count_nonzero(
+        tf.cumsum(total_events, axis=-1)
+    )
+    return prev_cases[..., num_zero_days:], prev_case_distn.shape[-2] - num_zero_days
