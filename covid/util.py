@@ -426,3 +426,15 @@ def impute_previous_cases(events, rate, delta_t=1.0):
         tf.cumsum(total_events, axis=-1)
     )
     return prev_cases[..., num_zero_days:], prev_case_distn.shape[-2] - num_zero_days
+
+
+def mean_sojourn(in_events, out_events, init_state):
+    """Calculated the mean sojourn time for individuals in a state
+       within `in_events` and `out_events` given initial state `init_state`"""
+
+    # state.shape = [..., M, T]
+    state = tf.cumsum(in_events - out_events, axis=-1, exclusive=True) + init_state
+    state = tf.reduce_sum(state, axis=(-2, -1))
+    events = tf.reduce_sum(out_events, axis=(-2, -1))
+
+    return 1.0 + state / events
