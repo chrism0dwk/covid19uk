@@ -11,7 +11,7 @@ data:
 parameter:
   beta1: 0.6    # R0 2.4
   beta2: 0.5   # Contact with commuters 1/3rd of the time
-  beta3: 0.25    # lockdown vs normal
+  beta3: 1.0    # lockdown vs normal
   omega: 1.0    # Non-linearity parameter for commuting volume
   nu: 0.5      # E -> I transition rate
   gamma: 0.25   # I -> R transition rate
@@ -22,6 +22,7 @@ settings:
   inference_period:
     - 2020-03-01
     - 2020-07-21
+
   holiday:
     - 2020-03-23
     - 2020-10-01
