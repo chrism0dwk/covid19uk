@@ -11,7 +11,9 @@ import pyreadr as pyr
 
 def load_commute_volume(filename, date_range):
     """Loads commute data and clips or extends date range"""
-    commute_raw = pd.read_csv(filename, index_col="Date")
+    commute_raw = pd.read_excel(
+        filename, index_col="Date", skiprows=5, usecols=["Date", "Cars"]
+    )
     commute_raw.index = pd.to_datetime(commute_raw.index, format="%Y-%m-%d")
     commute_raw.sort_index(axis=0, inplace=True)
     commute = pd.DataFrame(

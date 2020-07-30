@@ -38,19 +38,18 @@ else:
     print("Using CPU")
 
 # Read in settings
-# parser = optparse.OptionParser()
-# parser.add_option(
-#     "--config",
-#     "-c",
-#     dest="config",
-#     default="ode_config.yaml",
-#     help="configuration file",
-# )
-# options, cmd_args = parser.parse_args()
-# print("Loading config file:", options.config)
+parser = optparse.OptionParser()
+parser.add_option(
+    "--config",
+    "-c",
+    dest="config",
+    default="ode_config.yaml",
+    help="configuration file",
+)
+options, cmd_args = parser.parse_args()
+print("Loading config file:", options.config)
 
-# with open(options.config, "r") as f:
-with open("ode_config.yaml", "r") as f:
+with open(options.config, "r") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
 
 settings = sanitise_settings(config["settings"])
@@ -61,8 +60,8 @@ param = {k: tf.constant(v, dtype=DTYPE) for k, v in param.items()}
 covar_data = load_data(config["data"], settings, DTYPE)
 
 cases = phe_case_data(config["data"]["reported_cases"], settings["inference_period"])
-ei_events, lag_ei = impute_previous_cases(cases, 0.25)
-se_events, lag_se = impute_previous_cases(ei_events, 0.25)
+ei_events, lag_ei = impute_previous_cases(cases, 0.44)
+se_events, lag_se = impute_previous_cases(ei_events, 2.0)
 ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
 ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
 
@@ -85,14 +84,14 @@ model = CovidUKStochastic(
 def logp(par, events, occult_events):
     p = param
     p["beta1"] = tf.convert_to_tensor(par[0], dtype=DTYPE)
-    # p['beta2'] = tf.convert_to_tensor(par[1], dtype=DTYPE)
+    p["beta2"] = tf.convert_to_tensor(par[1], dtype=DTYPE)
     # p['beta3'] = tf.convert_to_tensor(par[2], dtype=DTYPE)
-    p["gamma"] = tf.convert_to_tensor(par[1], dtype=DTYPE)
+    p["gamma"] = tf.convert_to_tensor(par[2], dtype=DTYPE)
     beta1_logp = tfd.Gamma(
         concentration=tf.constant(1.0, dtype=DTYPE), rate=tf.constant(1.0, dtype=DTYPE)
     ).log_prob(p["beta1"])
-    # beta2_logp = tfd.Gamma(concentration=tf.constant(1., dtype=DTYPE),
-    #                       rate=tf.constant(1., dtype=DTYPE)).log_prob(p['beta2'])
+    beta2_logp = tfd.Gamma(concentration=tf.constant(3., dtype=DTYPE),
+                           rate=tf.constant(10., dtype=DTYPE)).log_prob(p['beta2'])
     # beta3_logp = tfd.Gamma(concentration=tf.constant(2., dtype=DTYPE),
     #                       rate=tf.constant(2., dtype=DTYPE)).log_prob(p['beta3'])
     gamma_logp = tfd.Gamma(
@@ -101,7 +100,7 @@ def logp(par, events, occult_events):
     ).log_prob(p["gamma"])
     with tf.name_scope("epidemic_log_posterior"):
         y_logp = model.log_prob(events + occult_events, p, state_init)
-    logp = beta1_logp + gamma_logp + y_logp
+    logp = beta1_logp + beta2_logp + gamma_logp + y_logp
     return logp
 
 
@@ -302,6 +301,8 @@ def sample(n_samples, init_state, par_scale, num_event_updates):
 NUM_BURSTS = config["mcmc"]["num_bursts"]
 NUM_BURST_SAMPLES = config["mcmc"]["num_burst_samples"]
 NUM_EVENT_TIME_UPDATES = config["mcmc"]["num_event_time_updates"]
+THIN_BURST_SAMPLES = NUM_BURST_SAMPLES // config["mcmc"]["thin"]
+NUM_SAVED_SAMPLES = THIN_BURST_SAMPLES * NUM_BURSTS
 
 # RNG stuff
 tf.random.set_seed(2)
@@ -311,7 +312,7 @@ events = tf.stack([se_events, ei_events, ir_events], axis=-1)
 state_init = tf.concat([model.N[:, tf.newaxis], events[:, 0, :]], axis=-1)
 events = events[:, 1:, :]
 current_state = [
-    np.array([0.85, 0.25], dtype=DTYPE),
+    np.array([0.85, 0.3, 0.25], dtype=DTYPE),
     events,
     tf.zeros_like(events),
 ]
@@ -323,55 +324,51 @@ posterior = h5py.File(
     rdcc_nbytes=1024 ** 2 * 400,
     rdcc_nslots=100000,
 )
-event_size = [NUM_BURSTS * NUM_BURST_SAMPLES] + list(current_state[1].shape)
-# event_chunk = (10, 1, 1, 1)
-# print("Event chunk size:", event_chunk)
+event_size = [NUM_SAVED_SAMPLES] + list(current_state[1].shape)
+
 par_samples = posterior.create_dataset(
     "samples/parameter",
-    [NUM_BURSTS * NUM_BURST_SAMPLES, current_state[0].shape[0]],
+    [NUM_SAVED_SAMPLES, current_state[0].shape[0]],
     dtype=np.float64,
 )
 event_samples = posterior.create_dataset(
     "samples/events",
     event_size,
     dtype=DTYPE,
-    chunks=(1024, 64, 64, current_state[1].shape[-1]),
-    compression="lzf",
+    chunks=(32, 64, 64, 1),
+    compression="szip",
+    compression_opts=('nn',16),
 )
 occult_samples = posterior.create_dataset(
     "samples/occults",
     event_size,
     dtype=DTYPE,
-    chunks=(1024, 64, 64, current_state[1].shape[-1]),
-    compression="lzf",
+    chunks=(32, 64, 64, 1),
+    compression="szip",
+    compression_opts=('nn', 16),
 )
 
 output_results = [
+    posterior.create_dataset("results/parameter", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,),
     posterior.create_dataset(
-        "results/parameter", (NUM_BURSTS * NUM_BURST_SAMPLES, 3), dtype=DTYPE,
+        "results/move/S->E", (NUM_SAVED_SAMPLES, 3 + model.N.shape[0]), dtype=DTYPE,
     ),
     posterior.create_dataset(
-        "results/move/S->E",
-        (NUM_BURSTS * NUM_BURST_SAMPLES, 3 + model.N.shape[0]),
-        dtype=DTYPE,
+        "results/move/E->I", (NUM_SAVED_SAMPLES, 3 + model.N.shape[0]), dtype=DTYPE,
     ),
     posterior.create_dataset(
-        "results/move/E->I",
-        (NUM_BURSTS * NUM_BURST_SAMPLES, 3 + model.N.shape[0]),
-        dtype=DTYPE,
+        "results/occult/S->E", (NUM_SAVED_SAMPLES, 6), dtype=DTYPE
     ),
     posterior.create_dataset(
-        "results/occult/S->E", (NUM_BURSTS * NUM_BURST_SAMPLES, 6), dtype=DTYPE
-    ),
-    posterior.create_dataset(
-        "results/occult/E->I", (NUM_BURSTS * NUM_BURST_SAMPLES, 6), dtype=DTYPE
+        "results/occult/E->I", (NUM_SAVED_SAMPLES, 6), dtype=DTYPE
     ),
 ]
 
 print("Initial logpi:", logp(*current_state))
-par_scale = tf.linalg.diag(
-    tf.ones(current_state[0].shape, dtype=current_state[0].dtype) * 0.1
-)
+
+par_scale = tf.constant([[0.1, 0., 0.],
+                         [0., 0.8, 0.],
+                         [0., 0., 0.1]], dtype=current_state[0].dtype)
 
 # We loop over successive calls to sample because we have to dump results
 #   to disc, or else end OOM (even on a 32GB system).
@@ -384,25 +381,25 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
         num_event_updates=tf.constant(NUM_EVENT_TIME_UPDATES, tf.int32),
     )
     current_state = [s[-1] for s in samples]
-    s = slice(i * NUM_BURST_SAMPLES, i * NUM_BURST_SAMPLES + NUM_BURST_SAMPLES)
-    par_samples[s, ...] = samples[0].numpy()
+    s = slice(i * THIN_BURST_SAMPLES, i * THIN_BURST_SAMPLES + THIN_BURST_SAMPLES)
+    idx = tf.constant(range(0, NUM_BURST_SAMPLES, config["mcmc"]["thin"]))
+    par_samples[s, ...] = tf.gather(samples[0], idx)
     cov = np.cov(
         np.log(par_samples[: (i * NUM_BURST_SAMPLES + NUM_BURST_SAMPLES), ...]),
         rowvar=False,
     )
-    print(current_state[0].numpy())
-
-    print(cov)
+    print(current_state[0].numpy(), flush=True)
+    print(cov, flush=True)
     if (i * NUM_BURST_SAMPLES) > 1000 and np.all(np.isfinite(cov)):
         par_scale = 2.38 ** 2 * cov / 2.0
 
     start = perf_counter()
-    event_samples[s, ...] = samples[1].numpy()
-    occult_samples[s, ...] = samples[2].numpy()
+    event_samples[s, ...] = tf.gather(samples[1], idx)
+    occult_samples[s, ...] = tf.gather(samples[2], idx)
     end = perf_counter()
 
     for i, ro in enumerate(output_results):
-        ro[s, ...] = results[i]
+        ro[s, ...] = tf.gather(results[i], idx)
 
     print("Storage time:", end - start, "seconds")
     print("Acceptance par:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
