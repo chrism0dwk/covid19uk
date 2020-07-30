@@ -3,7 +3,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 import time
 
-from covid.impl.chainbinom_simulate import chain_binomial_simulate
+from covid.impl.discrete_markov import discrete_markov_simulation
 
 class TestSimulator(unittest.TestCase):
 
@@ -25,7 +25,7 @@ class TestSimulator(unittest.TestCase):
         def simulate_one(param):
             """One realisation of the epidemic process
             :param param: 1d tensor of parameters beta and gamma"""
-            t, sim = chain_binomial_simulate(h(param), state, 0., 365., 1.)
+            t, sim = discrete_markov_simulation(h(param), state, 0., 365., 1.)
             return sim
 
         @tf.function
