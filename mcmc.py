@@ -43,7 +43,7 @@ parser.add_option(
     "--config",
     "-c",
     dest="config",
-    default="ode_config.yaml",
+    default="example_config.yaml",
     help="configuration file",
 )
 options, cmd_args = parser.parse_args()
@@ -90,8 +90,9 @@ def logp(par, events, occult_events):
     beta1_logp = tfd.Gamma(
         concentration=tf.constant(1.0, dtype=DTYPE), rate=tf.constant(1.0, dtype=DTYPE)
     ).log_prob(p["beta1"])
-    beta2_logp = tfd.Gamma(concentration=tf.constant(3., dtype=DTYPE),
-                           rate=tf.constant(10., dtype=DTYPE)).log_prob(p['beta2'])
+    beta2_logp = tfd.Gamma(
+        concentration=tf.constant(3.0, dtype=DTYPE), rate=tf.constant(10.0, dtype=DTYPE)
+    ).log_prob(p["beta2"])
     # beta3_logp = tfd.Gamma(concentration=tf.constant(2., dtype=DTYPE),
     #                       rate=tf.constant(2., dtype=DTYPE)).log_prob(p['beta3'])
     gamma_logp = tfd.Gamma(
@@ -337,7 +338,7 @@ event_samples = posterior.create_dataset(
     dtype=DTYPE,
     chunks=(32, 64, 64, 1),
     compression="szip",
-    compression_opts=('nn',16),
+    compression_opts=("nn", 16),
 )
 occult_samples = posterior.create_dataset(
     "samples/occults",
@@ -345,7 +346,7 @@ occult_samples = posterior.create_dataset(
     dtype=DTYPE,
     chunks=(32, 64, 64, 1),
     compression="szip",
-    compression_opts=('nn', 16),
+    compression_opts=("nn", 16),
 )
 
 output_results = [
@@ -366,9 +367,9 @@ output_results = [
 
 print("Initial logpi:", logp(*current_state))
 
-par_scale = tf.constant([[0.1, 0., 0.],
-                         [0., 0.8, 0.],
-                         [0., 0., 0.1]], dtype=current_state[0].dtype)
+par_scale = tf.constant(
+    [[0.1, 0.0, 0.0], [0.0, 0.8, 0.0], [0.0, 0.0, 0.1]], dtype=current_state[0].dtype
+)
 
 # We loop over successive calls to sample because we have to dump results
 #   to disc, or else end OOM (even on a 32GB system).
