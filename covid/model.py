@@ -84,7 +84,7 @@ class CovidUK:
         N: np.float64,
         date_range: list,
         holidays: list,
-        lockdown: list,
+        xi_freq: int,
         time_step: np.int64,
     ):
         """Represents a CovidUK ODE model
@@ -94,7 +94,7 @@ class CovidUK:
         :param N: a vector of population sizes in each LAD
         :param date_range: a time range [start, end)
         :param holidays: a list of length-2 tuples containing dates of holidays
-        :param lockdown: a length-2 tuple of start and end of lockdown measures
+        :param beta_freq: the frequency at which beta changes
         :param time_step: a time step to use in the discrete time simulation
         """
         dtype = dtype_util.common_dtype([W, C, N], dtype_hint=DTYPE)
@@ -111,10 +111,20 @@ class CovidUK:
             date_range[0], date_range[1], np.timedelta64(int(time_step), "D")
         )
 
-        self.lockdown_select = DTYPE(
-            (self.times >= lockdown[0]) & (self.times < lockdown[1])
-        )
-        self.max_t = self.lockdown_select.shape[0] - 1
+        xi_freq = np.int32(xi_freq)
+        self.xi_select = np.arange(self.times.shape[0], dtype=np.int32) // xi_freq
+        self.xi_freq = xi_freq
+        self.max_t = self.xi_select.shape[0] - 1
+
+    @property
+    def xi_times(self):
+        """Returns the time indices for beta in units of time_step"""
+        return np.unique(self.xi_select) * self.xi_freq
+
+    @property
+    def num_xi(self):
+        """Return the number of distinct betas"""
+        return tf.cast(self.xi_select[-1] + 1, tf.int32)
 
     def create_initial_state(self, init_matrix=None):
         I = tf.convert_to_tensor(init_matrix, dtype=DTYPE)
@@ -146,8 +156,9 @@ class CovidUKStochastic(CovidUK):
             """
             t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
             commute_volume = tf.pow(tf.gather(self.W, t_idx), param["omega"])
-            lockdown = tf.gather(self.lockdown_select, t_idx)
-            beta = param["beta1"] * tf.pow(param["beta3"], lockdown)
+            xi_idx = tf.gather(self.xi_select, t_idx)
+            xi = tf.gather(param["xi"], xi_idx)
+            beta = param["beta1"] * tf.math.exp(xi)
 
             infec_rate = beta * (
                 state[..., 2]

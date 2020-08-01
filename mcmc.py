@@ -72,49 +72,66 @@ model = CovidUKStochastic(
     W=covar_data["W"],
     date_range=settings["inference_period"],
     holidays=settings["holiday"],
-    lockdown=settings["lockdown"],
+    xi_freq=14,
     time_step=1.0,
 )
 
 ##########################
 # Log p and MCMC kernels #
 ##########################
-
-
-def logp(par, events, occult_events):
+def logp(theta, xi, events, occult_events):
     p = param
-    p["beta1"] = tf.convert_to_tensor(par[0], dtype=DTYPE)
-    p["beta2"] = tf.convert_to_tensor(par[1], dtype=DTYPE)
-    # p['beta3'] = tf.convert_to_tensor(par[2], dtype=DTYPE)
-    p["gamma"] = tf.convert_to_tensor(par[2], dtype=DTYPE)
+    p["beta1"] = tf.convert_to_tensor(theta[0], dtype=DTYPE)
+    p["beta2"] = tf.convert_to_tensor(theta[1], dtype=DTYPE)
+    p["gamma"] = tf.convert_to_tensor(theta[2], dtype=DTYPE)
+    p["xi"] = tf.convert_to_tensor(xi, dtype=DTYPE)
+    print("XI: ", p["xi"])
     beta1_logp = tfd.Gamma(
         concentration=tf.constant(1.0, dtype=DTYPE), rate=tf.constant(1.0, dtype=DTYPE)
     ).log_prob(p["beta1"])
-    beta2_logp = tfd.Gamma(
+
+    sigma = tf.constant(0.1, dtype=DTYPE)
+    phi = tf.constant(12.0, dtype=DTYPE)
+    kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
+    xi_logp = tfd.GaussianProcess(
+        kernel, index_points=tf.cast(model.xi_times[:, tf.newaxis], DTYPE)
+    ).log_prob(p["xi"])
+
+    spatial_beta_logp = tfd.Gamma(
         concentration=tf.constant(3.0, dtype=DTYPE), rate=tf.constant(10.0, dtype=DTYPE)
     ).log_prob(p["beta2"])
-    # beta3_logp = tfd.Gamma(concentration=tf.constant(2., dtype=DTYPE),
-    #                       rate=tf.constant(2., dtype=DTYPE)).log_prob(p['beta3'])
+
     gamma_logp = tfd.Gamma(
         concentration=tf.constant(100.0, dtype=DTYPE),
         rate=tf.constant(400.0, dtype=DTYPE),
     ).log_prob(p["gamma"])
     with tf.name_scope("epidemic_log_posterior"):
         y_logp = model.log_prob(events + occult_events, p, state_init)
-    logp = beta1_logp + beta2_logp + gamma_logp + y_logp
+    logp = beta1_logp + spatial_beta_logp + gamma_logp + xi_logp + y_logp
     return logp
 
 
 # Pavel's suggestion for a Gibbs kernel requires
 # kernel factory functions.
-def make_parameter_kernel(scale, bounded_convergence):
+def make_theta_kernel(scale, bounded_convergence):
     def kernel_func(logp):
         return tfp.mcmc.MetropolisHastings(
             inner_kernel=UncalibratedLogRandomWalk(
                 target_log_prob_fn=logp,
                 new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence),
             ),
-            name="parameter_update",
+            name="theta_update",
+        )
+
+    return kernel_func
+
+
+def make_xi_kernel(scale, bounded_convergence):
+    def kernel_func(logp):
+        return tfp.mcmc.RandomWalkMetropolis(
+            target_log_prob_fn=logp,
+            new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence),
+            name="xi_update",
         )
 
     return kernel_func
@@ -188,10 +205,11 @@ def invoke_one_step(kernel, state, previous_results, target_log_prob):
 
 
 @tf.function(autograph=False, experimental_compile=True)
-def sample(n_samples, init_state, par_scale, num_event_updates):
+def sample(n_samples, init_state, theta_scale, xi_scale, num_event_updates):
     with tf.name_scope("main_mcmc_sample_loop"):
         init_state = init_state.copy()
-        par_func = make_parameter_kernel(par_scale, 0.0)
+        theta_func = make_theta_kernel(theta_scale, 0.0)
+        xi_func = make_xi_kernel(xi_scale, 0.0)
         se_func = make_events_step(0, None, 1)
         ei_func = make_events_step(1, 0, 2)
         se_occult = make_occults_step(0)
@@ -200,60 +218,73 @@ def sample(n_samples, init_state, par_scale, num_event_updates):
         # Based on Gibbs idea posted by Pavel Sountsov
         # https://github.com/tensorflow/probability/issues/495
         results = [
-            par_func(lambda p: logp(p, init_state[1], init_state[2])).bootstrap_results(
-                init_state[0]
-            ),
-            se_func(lambda s: logp(init_state[0], s, init_state[2])).bootstrap_results(
-                init_state[1]
-            ),
-            ei_func(lambda s: logp(init_state[0], s, init_state[2])).bootstrap_results(
-                init_state[1]
-            ),
+            theta_func(
+                lambda p: logp(p, init_state[1], init_state[2], init_state[3])
+            ).bootstrap_results(init_state[0]),
+            xi_func(
+                lambda p: logp(init_state[0], p, init_state[2], init_state[3])
+            ).bootstrap_results(init_state[1]),
+            se_func(
+                lambda s: logp(init_state[0], init_state[1], s, init_state[3])
+            ).bootstrap_results(init_state[2]),
+            ei_func(
+                lambda s: logp(init_state[0], init_state[1], s, init_state[3])
+            ).bootstrap_results(init_state[2]),
             se_occult(
-                lambda s: logp(init_state[0], init_state[1], s)
-            ).bootstrap_results(init_state[2]),
+                lambda s: logp(init_state[0], init_state[1], init_state[2], s)
+            ).bootstrap_results(init_state[3]),
             ei_occult(
-                lambda s: logp(init_state[0], init_state[1], s)
-            ).bootstrap_results(init_state[2]),
+                lambda s: logp(init_state[0], init_state[1], init_state[2], s)
+            ).bootstrap_results(init_state[3]),
         ]
 
         samples_arr = [tf.TensorArray(s.dtype, size=n_samples) for s in init_state]
-        results_arr = [tf.TensorArray(DTYPE, size=n_samples) for r in range(5)]
+        results_arr = [
+            tf.TensorArray(DTYPE, size=n_samples) for r in range(len(results))
+        ]
 
         def body(i, state, results, target_log_prob, sample_accum, results_accum):
             # Parameters
 
-            def par_logp(par_state):
+            def theta_logp(par_state):
                 state[0] = par_state  # close over state from outer scope
                 return logp(*state)
 
             state[0], results[0], target_log_prob = invoke_one_step(
-                par_func(par_logp), state[0], results[0], target_log_prob,
+                theta_func(theta_logp), state[0], results[0], target_log_prob,
+            )
+
+            def xi_logp(xi_state):
+                state[1] = xi_state
+                return logp(*state)
+
+            state[1], results[1], target_log_prob = invoke_one_step(
+                xi_func(xi_logp), state[1], results[1], target_log_prob,
             )
 
             def infec_body(j, state, results, target_log_prob):
                 def state_logp(event_state):
-                    state[1] = event_state
+                    state[2] = event_state
                     return logp(*state)
 
                 def occult_logp(occult_state):
-                    state[2] = occult_state
+                    state[3] = occult_state
                     return logp(*state)
 
-                state[1], results[1], target_log_prob = invoke_one_step(
-                    se_func(state_logp), state[1], results[1], target_log_prob
-                )
-
-                state[1], results[2], target_log_prob = invoke_one_step(
-                    ei_func(state_logp), state[1], results[2], target_log_prob
+                state[2], results[2], target_log_prob = invoke_one_step(
+                    se_func(state_logp), state[2], results[2], target_log_prob
                 )
 
                 state[2], results[3], target_log_prob = invoke_one_step(
-                    se_occult(occult_logp), state[2], results[3], target_log_prob
+                    ei_func(state_logp), state[2], results[3], target_log_prob
                 )
 
-                state[2], results[4], target_log_prob = invoke_one_step(
-                    ei_occult(occult_logp), state[2], results[4], target_log_prob
+                state[3], results[4], target_log_prob = invoke_one_step(
+                    se_occult(occult_logp), state[3], results[4], target_log_prob
+                )
+
+                state[3], results[5], target_log_prob = invoke_one_step(
+                    ei_occult(occult_logp), state[3], results[5], target_log_prob
                 )
 
                 j += 1
@@ -314,6 +345,7 @@ state_init = tf.concat([model.N[:, tf.newaxis], events[:, 0, :]], axis=-1)
 events = events[:, 1:, :]
 current_state = [
     np.array([0.85, 0.3, 0.25], dtype=DTYPE),
+    np.zeros(model.num_xi, dtype=DTYPE),
     events,
     tf.zeros_like(events),
 ]
@@ -325,12 +357,13 @@ posterior = h5py.File(
     rdcc_nbytes=1024 ** 2 * 400,
     rdcc_nslots=100000,
 )
-event_size = [NUM_SAVED_SAMPLES] + list(current_state[1].shape)
+event_size = [NUM_SAVED_SAMPLES] + list(current_state[2].shape)
 
-par_samples = posterior.create_dataset(
-    "samples/parameter",
-    [NUM_SAVED_SAMPLES, current_state[0].shape[0]],
-    dtype=np.float64,
+theta_samples = posterior.create_dataset(
+    "samples/theta", [NUM_SAVED_SAMPLES, current_state[0].shape[0]], dtype=np.float64,
+)
+xi_samples = posterior.create_dataset(
+    "samples/xi", [NUM_SAVED_SAMPLES, current_state[1].shape[0]], dtype=np.float64,
 )
 event_samples = posterior.create_dataset(
     "samples/events",
@@ -350,7 +383,8 @@ occult_samples = posterior.create_dataset(
 )
 
 output_results = [
-    posterior.create_dataset("results/parameter", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,),
+    posterior.create_dataset("results/theta", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,),
+    posterior.create_dataset("results/xi", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,),
     posterior.create_dataset(
         "results/move/S->E", (NUM_SAVED_SAMPLES, 3 + model.N.shape[0]), dtype=DTYPE,
     ),
@@ -367,8 +401,11 @@ output_results = [
 
 print("Initial logpi:", logp(*current_state))
 
-par_scale = tf.constant(
+theta_scale = tf.constant(
     [[0.1, 0.0, 0.0], [0.0, 0.8, 0.0], [0.0, 0.0, 0.1]], dtype=current_state[0].dtype
+)
+xi_scale = tf.linalg.diag(
+    tf.constant([0.1] * model.num_xi.numpy(), dtype=current_state[1].dtype)
 )
 
 # We loop over successive calls to sample because we have to dump results
@@ -378,43 +415,46 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
     samples, results = sample(
         NUM_BURST_SAMPLES,
         init_state=current_state,
-        par_scale=par_scale,
+        theta_scale=theta_scale,
+        xi_scale=xi_scale,
         num_event_updates=tf.constant(NUM_EVENT_TIME_UPDATES, tf.int32),
     )
     current_state = [s[-1] for s in samples]
     s = slice(i * THIN_BURST_SAMPLES, i * THIN_BURST_SAMPLES + THIN_BURST_SAMPLES)
     idx = tf.constant(range(0, NUM_BURST_SAMPLES, config["mcmc"]["thin"]))
-    par_samples[s, ...] = tf.gather(samples[0], idx)
+    theta_samples[s, ...] = tf.gather(samples[0], idx)
+    xi_samples[s, ...] = tf.gather(samples[1], idx)
     cov = np.cov(
-        np.log(par_samples[: (i * NUM_BURST_SAMPLES + NUM_BURST_SAMPLES), ...]),
+        np.log(theta_samples[: (i * NUM_BURST_SAMPLES + NUM_BURST_SAMPLES), ...]),
         rowvar=False,
     )
     print(current_state[0].numpy(), flush=True)
     print(cov, flush=True)
     if (i * NUM_BURST_SAMPLES) > 1000 and np.all(np.isfinite(cov)):
-        par_scale = 2.38 ** 2 * cov / 2.0
+        theta_scale = 2.38 ** 2 * cov / 2.0
 
     start = perf_counter()
-    event_samples[s, ...] = tf.gather(samples[1], idx)
-    occult_samples[s, ...] = tf.gather(samples[2], idx)
+    event_samples[s, ...] = tf.gather(samples[2], idx)
+    occult_samples[s, ...] = tf.gather(samples[3], idx)
     end = perf_counter()
 
     for i, ro in enumerate(output_results):
         ro[s, ...] = tf.gather(results[i], idx)
 
     print("Storage time:", end - start, "seconds")
-    print("Acceptance par:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
+    print("Acceptance theta:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
+    print("Acceptance xi:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32)))
     print(
-        "Acceptance move S->E:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32))
+        "Acceptance move S->E:", tf.reduce_mean(tf.cast(results[2][:, 1], tf.float32))
     )
     print(
-        "Acceptance move E->I:", tf.reduce_mean(tf.cast(results[2][:, 1], tf.float32))
+        "Acceptance move E->I:", tf.reduce_mean(tf.cast(results[3][:, 1], tf.float32))
     )
     print(
-        "Acceptance occult S->E:", tf.reduce_mean(tf.cast(results[3][:, 1], tf.float32))
+        "Acceptance occult S->E:", tf.reduce_mean(tf.cast(results[4][:, 1], tf.float32))
     )
     print(
-        "Acceptance occult E->I:", tf.reduce_mean(tf.cast(results[4][:, 1], tf.float32))
+        "Acceptance occult E->I:", tf.reduce_mean(tf.cast(results[5][:, 1], tf.float32))
     )
 
 print(f"Acceptance param: {output_results[0][:, 1].mean()}")

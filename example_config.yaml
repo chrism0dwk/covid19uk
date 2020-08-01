@@ -39,10 +39,11 @@ mcmc:
   nmax: 50
   m: 1
   occult_nmax: 15
-  num_event_time_updates: 35
+  num_event_time_updates: 5
   num_bursts: 100
-  num_burst_samples: 1000
-
+  num_burst_samples: 100
+  thin: 1
+  
 output:
-  posterior: posterior_medium_xla.h5
+  posterior: posterior_xi.h5
   simulation: covid_ode.hd5
