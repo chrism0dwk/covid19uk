@@ -189,14 +189,15 @@ class CovidUKStochastic(CovidUK):
         """
         t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
         commute_volume = tf.pow(tf.gather(self.W, t_idx), param["omega"])
-        lockdown = tf.gather(self.lockdown_select, t_idx)
-        beta = param["beta1"] * tf.pow(param["beta3"], lockdown)
+        xi_idx = tf.gather(self.xi_select, t_idx)
+        xi = tf.gather(param["xi"], xi_idx)
+        beta = param["beta1"] * tf.math.exp(xi)
 
         ngm = beta * (
             tf.eye(self.C.shape[0], dtype=state.dtype)
             + param["beta2"] * commute_volume * self.C / self.N
         )
-        ngm = tf.linalg.matvec(ngm, state[..., 0]) / (self.N * param["gamma"])
+        ngm = ngm * state[..., 0] / (self.N * param["gamma"])
         return ngm
 
     @tf.function(autograph=False, experimental_compile=True)
