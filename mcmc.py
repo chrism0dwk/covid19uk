@@ -19,7 +19,8 @@ from covid.util import sanitise_parameter, sanitise_settings, impute_previous_ca
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
 from covid.impl.occult_events_mh import UncalibratedOccultUpdate
-from covid.impl.gibbs import GibbsKernel, GibbsStep
+from covid.impl.gibbs import DeterministicScanKernel, GibbsStep, flatten_results
+from covid.impl.multi_scan_kernel import MultiScanKernel
 
 ###########
 # TF Bits #
@@ -190,7 +191,12 @@ def trace_results_fn(_, results):
             return tf.concat([[log_prob], [accepted], [q_ratio], proposed], axis=0)
         return tf.concat([[log_prob], [accepted], [q_ratio]], axis=0)
 
-    return [f(result) for result in results]
+    def recurse(f, list_or_atom):
+        if isinstance(list_or_atom, list):
+            return [recurse(f, x) for x in list_or_atom]
+        return f(list_or_atom)
+
+    return recurse(f, results)
 
 
 @tf.function(autograph=False, experimental_compile=True)
@@ -199,14 +205,21 @@ def sample(n_samples, init_state, scale_theta, scale_xi, num_event_updates):
 
         init_state = init_state.copy()
 
-        kernel = GibbsKernel(
+        kernel = DeterministicScanKernel(
             [
                 make_theta_kernel(theta_scale, 0.0),
                 make_xi_kernel(xi_scale, 0.0),
-                make_events_step(0, None, 1),
-                make_events_step(1, 0, 2),
-                make_occults_step(0),
-                make_occults_step(1),
+                MultiScanKernel(
+                    config["mcmc"]["num_event_time_updates"],
+                    DeterministicScanKernel(
+                        [
+                            make_events_step(0, None, 1),
+                            make_events_step(1, 0, 2),
+                            make_occults_step(0),
+                            make_occults_step(1),
+                        ]
+                    ),
+                ),
             ],
             name="gibbs_kernel",
         )
@@ -331,23 +344,30 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
     occult_samples[s, ...] = tf.gather(samples[3], idx)
     end = perf_counter()
 
+    flat_results = flatten_results(results)
     for i, ro in enumerate(output_results):
-        ro[s, ...] = tf.gather(results[i], idx)
+        ro[s, ...] = tf.gather(flat_results[i], idx)
 
     print("Storage time:", end - start, "seconds")
-    print("Acceptance theta:", tf.reduce_mean(tf.cast(results[0][:, 1], tf.float32)))
-    print("Acceptance xi:", tf.reduce_mean(tf.cast(results[1][:, 1], tf.float32)))
     print(
-        "Acceptance move S->E:", tf.reduce_mean(tf.cast(results[2][:, 1], tf.float32))
+        "Acceptance theta:", tf.reduce_mean(tf.cast(flat_results[0][:, 1], tf.float32))
+    )
+    print("Acceptance xi:", tf.reduce_mean(tf.cast(flat_results[1][:, 1], tf.float32)))
+    print(
+        "Acceptance move S->E:",
+        tf.reduce_mean(tf.cast(flat_results[2][:, 1], tf.float32)),
     )
     print(
-        "Acceptance move E->I:", tf.reduce_mean(tf.cast(results[3][:, 1], tf.float32))
+        "Acceptance move E->I:",
+        tf.reduce_mean(tf.cast(flat_results[3][:, 1], tf.float32)),
     )
     print(
-        "Acceptance occult S->E:", tf.reduce_mean(tf.cast(results[4][:, 1], tf.float32))
+        "Acceptance occult S->E:",
+        tf.reduce_mean(tf.cast(flat_results[4][:, 1], tf.float32)),
     )
     print(
-        "Acceptance occult E->I:", tf.reduce_mean(tf.cast(results[5][:, 1], tf.float32))
+        "Acceptance occult E->I:",
+        tf.reduce_mean(tf.cast(flat_results[5][:, 1], tf.float32)),
     )
 
 print(f"Acceptance param: {output_results[0][:, 1].mean()}")
