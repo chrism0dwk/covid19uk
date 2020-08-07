@@ -82,7 +82,6 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         :param seed: a random seed
         :param name: the name of the update step
         """
-        self._target_log_prob_fn = target_log_prob_fn
         self._seed_stream = SeedStream(seed, salt="UncalibratedEventTimesUpdate")
         self._name = name
         self._parameters = dict(
@@ -177,7 +176,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                         n_move=move["x_star"],
                     )
 
-                    next_target_log_prob = self._target_log_prob_fn(next_state)
+                    next_target_log_prob = self.target_log_prob_fn(next_state)
 
                     # Calculate proposal mass ratio
                     rev_move = _reverse_move(move.copy())

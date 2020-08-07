@@ -58,7 +58,6 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
         :param seed: a random seed
         :param name: the name of the update step
         """
-        self._target_log_prob_fn = target_log_prob_fn
         self._seed_stream = SeedStream(seed, salt="UncalibratedOccultUpdate")
         self._name = name
         self._parameters = dict(
@@ -107,7 +106,7 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
         """
         with tf.name_scope("occult_rw/onestep"):
 
-            def true_fn():
+            def add_occult_fn():
                 with tf.name_scope("true_fn"):
                     proposal = AddOccultProposal(
                         events=current_events,
@@ -128,7 +127,7 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                     log_acceptance_correction = q_rev - q_fwd
                 return update, next_state, log_acceptance_correction
 
-            def false_fn():
+            def del_occult_fn():
                 with tf.name_scope("false_fn"):
                     proposal = DelOccultProposal(current_events, self.tx_topology)
                     update = proposal.sample()
@@ -152,7 +151,13 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
 
             u = tfd.Uniform().sample()
             delta, next_state, log_acceptance_correction = tf.cond(
-                u < 0.5, true_fn, false_fn
+                (u < 0.5)
+                & (
+                    tf.math.count_nonzero(current_events[..., self.tx_topology.target])
+                    > 0
+                ),
+                del_occult_fn,
+                add_occult_fn,
             )
             # tf.debugging.assert_non_negative(
             #     next_state, message="Negative occults occurred"

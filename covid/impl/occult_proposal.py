@@ -23,7 +23,7 @@ def AddOccultProposal(events, n_max, t_range=None, dtype=tf.int32, name=None):
 
     def x_star():
         """Draw num to add"""
-        return UniformInteger(low=[0], high=[n_max + 1], dtype=dtype)
+        return UniformInteger(low=[1], high=[n_max + 1], dtype=dtype)
 
     return tfd.JointDistributionNamed(dict(m=m, t=t, x_star=x_star), name=name)
 
