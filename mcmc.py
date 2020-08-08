@@ -67,7 +67,6 @@ se_events, lag_se = impute_previous_cases(ei_events, 2.0)
 ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
 ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
 
-
 model = CovidUKStochastic(
     C=covar_data["C"],
     N=covar_data["pop"],
@@ -115,7 +114,7 @@ def logp(theta, xi, events, occult_events):
 
 # Pavel's suggestion for a Gibbs kernel requires
 # kernel factory functions.
-def make_theta_kernel(scale, bounded_convergence):
+def make_theta_kernel(scale, bounded_convergence, name):
     return GibbsStep(
         0,
         tfp.mcmc.MetropolisHastings(
@@ -124,22 +123,24 @@ def make_theta_kernel(scale, bounded_convergence):
                 new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence),
             )
         ),
-        name="update_theta",
+        name=name,
     )
 
 
-def make_xi_kernel(scale, bounded_convergence):
+def make_xi_kernel(scale, bounded_convergence, name):
     return GibbsStep(
         1,
         tfp.mcmc.RandomWalkMetropolis(
             target_log_prob_fn=logp,
             new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence),
         ),
-        name="xi_update",
+        name=name,
     )
 
 
-def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
+def make_events_step(
+    target_event_id, prev_event_id=None, next_event_id=None, name=None
+):
     return GibbsStep(
         2,
         tfp.mcmc.MetropolisHastings(
@@ -154,11 +155,11 @@ def make_events_step(target_event_id, prev_event_id=None, next_event_id=None):
                 nmax=config["mcmc"]["nmax"],
             )
         ),
-        name="event_update",
+        name=name,
     )
 
 
-def make_occults_step(target_event_id):
+def make_occults_step(target_event_id, name):
     return GibbsStep(
         3,
         tfp.mcmc.MetropolisHastings(
@@ -169,7 +170,7 @@ def make_occults_step(target_event_id):
                 t_range=(se_events.shape[1] - 22, se_events.shape[1] - 1),
             )
         ),
-        name="occult_update",
+        name=name,
     )
 
 
@@ -200,23 +201,23 @@ def trace_results_fn(_, results):
 
 
 @tf.function(autograph=False, experimental_compile=True)
-def sample(n_samples, init_state, scale_theta, scale_xi, num_event_updates):
+def sample(n_samples, init_state, sigma_theta, sigma_xi, num_event_updates):
     with tf.name_scope("main_mcmc_sample_loop"):
 
         init_state = init_state.copy()
 
         kernel = DeterministicScanKernel(
             [
-                make_theta_kernel(theta_scale, 0.0),
-                make_xi_kernel(xi_scale, 0.0),
+                make_theta_kernel(sigma_theta, 1.0, "theta_kernel"),
+                make_xi_kernel(sigma_xi, 1.0, "xi_kernel"),
                 MultiScanKernel(
                     config["mcmc"]["num_event_time_updates"],
                     DeterministicScanKernel(
                         [
-                            make_events_step(0, None, 1),
-                            make_events_step(1, 0, 2),
-                            make_occults_step(0),
-                            make_occults_step(1),
+                            make_events_step(0, None, 1, "se_events"),
+                            make_events_step(1, 0, 2, "ei_events"),
+                            make_occults_step(0, "se_occults"),
+                            make_occults_step(1, "ei_occults"),
                         ]
                     ),
                 ),
@@ -249,11 +250,12 @@ tf.random.set_seed(2)
 events = tf.stack([se_events, ei_events, ir_events], axis=-1)
 state_init = tf.concat([model.N[:, tf.newaxis], events[:, 0, :]], axis=-1)
 events = events[:, 1:, :]
+occults = tf.zeros_like(events)
 current_state = [
     np.array([0.85, 0.3, 0.25], dtype=DTYPE),
     np.zeros(model.num_xi, dtype=DTYPE),
     events,
-    tf.zeros_like(events),
+    occults,
 ]
 
 # Output Files
@@ -308,11 +310,27 @@ output_results = [
 print("Initial logpi:", logp(*current_state))
 
 theta_scale = tf.constant(
-    [[0.1, 0.0, 0.0], [0.0, 0.8, 0.0], [0.0, 0.0, 0.1]], dtype=current_state[0].dtype
+    [
+        [1.12e-3, 1.67e-4, 1.61e-4],
+        [1.67e-4, 7.41e-4, 4.68e-5],
+        [1.61e-4, 4.68e-5, 1.28e-4],
+    ],
+    dtype=DTYPE,
 )
-xi_scale = tf.linalg.diag(
-    tf.constant([0.1] * model.num_xi.numpy(), dtype=current_state[1].dtype)
+theta_scale = theta_scale * 0.2 / theta_scale.shape[0]
+
+xi_scale = tf.constant(
+    [
+        [0.01016837, 0.00193396, 0.0001019, 0.00159731, 0.00097058, 0.00117811],
+        [0.00193396, 0.00127756, 0.00091812, 0.00103492, 0.00100952, 0.00098106],
+        [0.0001019, 0.00091812, 0.00119703, 0.00082736, 0.00101673, 0.00080592],
+        [0.00159731, 0.00103492, 0.00082736, 0.00107595, 0.00087641, 0.00085964],
+        [0.00097058, 0.00100952, 0.00101673, 0.00087641, 0.00110894, 0.00083649],
+        [0.00117811, 0.00098106, 0.00080592, 0.00085964, 0.00083649, 0.00090818],
+    ],
+    dtype=DTYPE,
 )
+xi_scale = xi_scale * 0.4 / xi_scale.shape[0]
 
 # We loop over successive calls to sample because we have to dump results
 #   to disc, or else end OOM (even on a 32GB system).
@@ -321,8 +339,8 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
     samples, results = sample(
         NUM_BURST_SAMPLES,
         init_state=current_state,
-        scale_theta=theta_scale,
-        scale_xi=xi_scale,
+        sigma_theta=theta_scale,
+        sigma_xi=xi_scale,
         num_event_updates=tf.constant(NUM_EVENT_TIME_UPDATES, tf.int32),
     )
     current_state = [s[-1] for s in samples]
@@ -330,14 +348,14 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
     idx = tf.constant(range(0, NUM_BURST_SAMPLES, config["mcmc"]["thin"]))
     theta_samples[s, ...] = tf.gather(samples[0], idx)
     xi_samples[s, ...] = tf.gather(samples[1], idx)
-    cov = np.cov(
-        np.log(theta_samples[: (i * NUM_BURST_SAMPLES + NUM_BURST_SAMPLES), ...]),
-        rowvar=False,
-    )
+    # cov = np.cov(
+    #     np.log(theta_samples[: (i * NUM_BURST_SAMPLES + NUM_BURST_SAMPLES), ...]),
+    #     rowvar=False,
+    # )
     print(current_state[0].numpy(), flush=True)
-    print(cov, flush=True)
-    if (i * NUM_BURST_SAMPLES) > 1000 and np.all(np.isfinite(cov)):
-        theta_scale = 2.38 ** 2 * cov / 2.0
+    # print(cov, flush=True)
+    # if (i * NUM_BURST_SAMPLES) > 1000 and np.all(np.isfinite(cov)):
+    #     theta_scale = 2.38 ** 2 * cov / 2.0
 
     start = perf_counter()
     event_samples[s, ...] = tf.gather(samples[2], idx)

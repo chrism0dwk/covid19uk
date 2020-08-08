@@ -90,6 +90,10 @@ class GibbsStep(mcmc.TransitionKernel):
     def target_log_prob_fn(self):
         return self._parameters["target_log_prob_fn"]
 
+    @property
+    def name(self):
+        return self._parameters["name"]
+
     def conditional_target_log_prob(self, state):
         """Closes over `state`, returning a function to
         calculate the conditional log prob for `state[state_elem]
