@@ -438,3 +438,42 @@ def mean_sojourn(in_events, out_events, init_state):
     events = tf.reduce_sum(out_events, axis=(-2, -1))
 
     return 1.0 + state / events
+
+
+def regularize_occults(events, occults, init_state, stoichiometry):
+    """Trims an occult matrix such that counting
+    processes are valid"""
+
+    from covid.impl.util import compute_state
+
+    def body(state_, occults_):
+        state_t1 = tf.roll(state_, shift=-1, axis=-2)
+        neg_state_idx = tf.where(state_t1 < 0)
+
+        first_neg_state_idx = tf.gather(
+            neg_state_idx,
+            tf.concat(
+                [[[0]], tf.where(neg_state_idx[:-1, 0] - neg_state_idx[1:, 0]) + 1],
+                axis=0,
+            ),
+        )
+        # first_neg_state_idx = tf.squeeze(first_neg_state_idx)
+
+        mask = tf.scatter_nd(
+            first_neg_state_idx,
+            tf.ones([first_neg_state_idx.shape[0], 1], dtype=state_t1.dtype),
+            state_t1.shape,
+        )
+        delta_occults = tf.einsum("mts,xs->mtx", state_t1 * mask, stoichiometry)
+        new_occults = occults_ - delta_occults
+        new_state = compute_state(init_state, events + new_occults, stoichiometry)
+        return new_state, new_occults
+
+    def cond(state_, _):
+        tf.print("Num neg:", tf.math.count_nonzero(state_ < 0))
+        return tf.reduce_any(state_ < 0)
+
+    state = compute_state(init_state, events + occults, stoichiometry)
+    new_state, new_occults = tf.while_loop(cond, body, (state, occults))
+
+    return new_state, new_occults
