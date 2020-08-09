@@ -464,7 +464,6 @@ def regularize_occults(events, occults, init_state, stoichiometry):
                 axis=0,
             ),
         )
-        # first_neg_state_idx = tf.squeeze(first_neg_state_idx)
 
         mask = tf.scatter_nd(
             first_neg_state_idx,
@@ -472,12 +471,13 @@ def regularize_occults(events, occults, init_state, stoichiometry):
             state_t1.shape,
         )
         delta_occults = tf.einsum("mts,xs->mtx", state_t1 * mask, stoichiometry)
-        new_occults = occults_ - delta_occults
+        new_occults = tf.clip_by_value(
+            occults_ - delta_occults, clip_value_min=0.0, clip_value_max=1.0e6
+        )
         new_state = compute_state(init_state, events + new_occults, stoichiometry)
         return new_state, new_occults
 
     def cond(state_, _):
-        tf.print("Num neg:", tf.math.count_nonzero(state_ < 0))
         return tf.reduce_any(state_ < 0)
 
     state = compute_state(init_state, events + occults, stoichiometry)
