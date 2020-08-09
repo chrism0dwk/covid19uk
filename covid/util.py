@@ -441,8 +441,15 @@ def mean_sojourn(in_events, out_events, init_state):
 
 
 def regularize_occults(events, occults, init_state, stoichiometry):
-    """Trims an occult matrix such that counting
-    processes are valid"""
+    """Regularizes an occult matrix such that counting
+    processes are valid
+
+    :param events: a [M, T, X] events tensor
+    :param occults: a [M, T, X] occults tensor
+    :param init_state: a [M, S] initial state tensor
+    :param stoichiometry: a [X, S] stoichiometry matrix
+    :returns: an tuple containing updated (state, occults) tensors
+    """
 
     from covid.impl.util import compute_state
 
