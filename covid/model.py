@@ -195,9 +195,13 @@ class CovidUKStochastic(CovidUK):
 
         ngm = beta * (
             tf.eye(self.C.shape[0], dtype=state.dtype)
-            + param["beta2"] * commute_volume * self.C / self.N
+            + param["beta2"] * commute_volume * self.C / self.N[tf.newaxis, :]
         )
-        ngm = ngm * state[..., 0] / (self.N * param["gamma"])
+        ngm = (
+            ngm
+            * state[..., 0][..., tf.newaxis]
+            / (self.N[:, tf.newaxis] * param["gamma"])
+        )
         return ngm
 
     @tf.function(autograph=False, experimental_compile=True)
