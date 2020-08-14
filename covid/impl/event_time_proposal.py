@@ -126,9 +126,8 @@ def EventTimeProposal(
 
     def delta_t():
         with tf.name_scope("delta_t"):
-            outcomes = tf.concat([tf.range(-d_max, 0), tf.range(1, d_max + 1)], axis=0)
-            logits = tf.ones([events.shape[-3]] + outcomes.shape, dtype=tf.float64)
-            return tfd.FiniteDiscrete(outcomes=outcomes, logits=logits, name="delta_t")
+            d_max_bcast = tf.broadcast_to(d_max, [events.shape[-3]])
+            return UniformInteger(low=-d_max_bcast, high=d_max_bcast + 1)
 
     def t():
         with tf.name_scope("t"):
