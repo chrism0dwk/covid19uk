@@ -53,7 +53,7 @@ def load_data(paths, settings, dtype=DTYPE):
     C = load_mobility_matrix(paths["mobility_matrix"])
     la_names = C.index.to_numpy()
 
-    w_period = [settings["inference_period"][0], settings["prediction_period"][1]]
+    w_period = [settings["inference_period"][0], settings["inference_period"][1]]
     W = load_commute_volume(paths["commute_volume"], w_period)["percent"]
 
     pop = load_population(paths["population_size"])

@@ -1,8 +1,6 @@
 """MCMC Test Rig for COVID-19 UK model"""
 import optparse
 import os
-import pickle as pkl
-from collections import OrderedDict
 from time import perf_counter
 
 import h5py
@@ -59,13 +57,19 @@ settings = sanitise_settings(config["settings"])
 param = sanitise_parameter(config["parameter"])
 param = {k: tf.constant(v, dtype=DTYPE) for k, v in param.items()}
 
-covar_data = load_data(config["data"], settings, DTYPE)
-
+# We load in cases and impute missing infections first, since this sets the
+# time epoch which we are analysing.
 cases = phe_case_data(config["data"]["reported_cases"], settings["inference_period"])
 ei_events, lag_ei = impute_previous_cases(cases, 0.44)
 se_events, lag_se = impute_previous_cases(ei_events, 2.0)
 ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
 ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
+
+# Reset the data range for new imputed cases
+settings["inference_period"][0] = settings["inference_period"][1] - ei_events.shape[1]
+
+# Now load in covariate data across the updated timeperiod
+covar_data = load_data(config["data"], settings, DTYPE)
 
 model = CovidUKStochastic(
     C=covar_data["C"],
@@ -264,6 +268,7 @@ posterior = h5py.File(
     "w",
     rdcc_nbytes=1024 ** 2 * 400,
     rdcc_nslots=100000,
+    libver="latest",
 )
 event_size = [NUM_SAVED_SAMPLES] + list(current_state[2].shape)
 
@@ -306,6 +311,7 @@ output_results = [
         "results/occult/E->I", (NUM_SAVED_SAMPLES, 6), dtype=DTYPE
     ),
 ]
+posterior.swmr_mode = True
 
 print("Initial logpi:", logp(*current_state))
 
