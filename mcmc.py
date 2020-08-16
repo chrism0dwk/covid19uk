@@ -16,7 +16,7 @@ from covid.pydata import phe_case_data
 from covid.util import sanitise_parameter, sanitise_settings, impute_previous_cases
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
-from covid.impl.occult_events_mh import UncalibratedOccultUpdate
+from covid.impl.occult_events_mh import UncalibratedOccultUpdate, TransitionTopology
 from covid.impl.gibbs import DeterministicScanKernel, GibbsStep, flatten_results
 from covid.impl.multi_scan_kernel import MultiScanKernel
 
@@ -84,7 +84,7 @@ model = CovidUKStochastic(
 ##########################
 # Log p and MCMC kernels #
 ##########################
-def logp(theta, xi, events, occult_events):
+def logp(theta, xi, events):
     p = param
     p["beta1"] = tf.convert_to_tensor(theta[0], dtype=DTYPE)
     p["beta2"] = tf.convert_to_tensor(theta[1], dtype=DTYPE)
@@ -111,7 +111,7 @@ def logp(theta, xi, events, occult_events):
         rate=tf.constant(400.0, dtype=DTYPE),
     ).log_prob(p["gamma"])
     with tf.name_scope("epidemic_log_posterior"):
-        y_logp = model.log_prob(events + occult_events, p, state_init)
+        y_logp = model.log_prob(events, p, state_init)
     logp = beta1_logp + spatial_beta_logp + gamma_logp + xi_logp + y_logp
     return logp
 
@@ -163,15 +163,18 @@ def make_events_step(
     )
 
 
-def make_occults_step(target_event_id, name):
+def make_occults_step(prev_event_id, target_event_id, next_event_id, name):
     return GibbsStep(
-        3,
+        2,
         tfp.mcmc.MetropolisHastings(
             inner_kernel=UncalibratedOccultUpdate(
                 target_log_prob_fn=logp,
-                target_event_id=target_event_id,
+                topology=TransitionTopology(
+                    prev_event_id, target_event_id, next_event_id
+                ),
                 nmax=config["mcmc"]["occult_nmax"],
                 t_range=(se_events.shape[1] - 22, se_events.shape[1] - 1),
+                name=name,
             )
         ),
         name=name,
@@ -220,8 +223,8 @@ def sample(n_samples, init_state, sigma_theta, sigma_xi, num_event_updates):
                         [
                             make_events_step(0, None, 1, "se_events"),
                             make_events_step(1, 0, 2, "ei_events"),
-                            make_occults_step(0, "se_occults"),
-                            make_occults_step(1, "ei_occults"),
+                            make_occults_step(None, 0, 1, "se_occults"),
+                            make_occults_step(0, 1, 2, "ei_occults"),
                         ]
                     ),
                 ),
@@ -254,12 +257,10 @@ tf.random.set_seed(2)
 events = tf.stack([se_events, ei_events, ir_events], axis=-1)
 state_init = tf.concat([model.N[:, tf.newaxis], events[:, 0, :]], axis=-1)
 events = events[:, 1:, :]
-occults = tf.zeros_like(events)
 current_state = [
     np.array([0.85, 0.3, 0.25], dtype=DTYPE),
     np.zeros(model.num_xi, dtype=DTYPE),
     events,
-    occults,
 ]
 
 # Output Files
@@ -280,14 +281,6 @@ xi_samples = posterior.create_dataset(
 )
 event_samples = posterior.create_dataset(
     "samples/events",
-    event_size,
-    dtype=DTYPE,
-    chunks=(32, 64, 64, 1),
-    compression="szip",
-    compression_opts=("nn", 16),
-)
-occult_samples = posterior.create_dataset(
-    "samples/occults",
     event_size,
     dtype=DTYPE,
     chunks=(32, 64, 64, 1),
@@ -325,18 +318,8 @@ theta_scale = tf.constant(
 )
 theta_scale = theta_scale * 0.2 / theta_scale.shape[0]
 
-xi_scale = tf.constant(
-    [
-        [0.01016837, 0.00193396, 0.0001019, 0.00159731, 0.00097058, 0.00117811],
-        [0.00193396, 0.00127756, 0.00091812, 0.00103492, 0.00100952, 0.00098106],
-        [0.0001019, 0.00091812, 0.00119703, 0.00082736, 0.00101673, 0.00080592],
-        [0.00159731, 0.00103492, 0.00082736, 0.00107595, 0.00087641, 0.00085964],
-        [0.00097058, 0.00100952, 0.00101673, 0.00087641, 0.00110894, 0.00083649],
-        [0.00117811, 0.00098106, 0.00080592, 0.00085964, 0.00083649, 0.00090818],
-    ],
-    dtype=DTYPE,
-)
-xi_scale = xi_scale * 0.4 / xi_scale.shape[0]
+xi_scale = tf.eye(model.num_xi, dtype=DTYPE)
+xi_scale = xi_scale * 0.0001 / xi_scale.shape[0]
 
 # We loop over successive calls to sample because we have to dump results
 #   to disc, or else end OOM (even on a 32GB system).
@@ -365,7 +348,6 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
 
     start = perf_counter()
     event_samples[s, ...] = tf.gather(samples[2], idx)
-    occult_samples[s, ...] = tf.gather(samples[3], idx)
     end = perf_counter()
 
     flat_results = flatten_results(results)

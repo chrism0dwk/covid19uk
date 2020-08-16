@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -7,7 +8,7 @@ from covid.impl.Categorical2 import Categorical2
 tfd = tfp.distributions
 
 
-def AddOccultProposal(events, n_max, t_range=None, dtype=tf.int32, name=None):
+def AddOccultProposal(events, topology, n_max, t_range=None, dtype=tf.int32, name=None):
     if t_range is None:
         t_range = [0, events.shape[-2]]
 
@@ -21,9 +22,24 @@ def AddOccultProposal(events, n_max, t_range=None, dtype=tf.int32, name=None):
         with tf.name_scope("t"):
             return UniformInteger(low=[t_range[0]], high=[t_range[1]], dtype=dtype)
 
-    def x_star():
-        """Draw num to add"""
-        return UniformInteger(low=[1], high=[n_max + 1], dtype=dtype)
+    def x_star(m, t):
+        """Draw num to add bounded by counting process contraint"""
+        if topology.prev is not None:
+            mask = (  # Mask out times prior to t
+                tf.cast(tf.range(events.shape[-2]) < t[0], events.dtype)
+                * events.dtype.max
+            )
+            m_events = tf.gather(events, m, axis=-3)
+
+            diff = m_events[..., topology.prev] - m_events[..., topology.target]
+            diff = tf.cumsum(diff, axis=-1)
+            diff = diff + mask
+            bound = tf.cast(tf.reduce_min(diff, axis=-1), dtype=tf.int32)
+            bound = tf.minimum(n_max, bound)
+        else:
+            bound = tf.broadcast_to(n_max, m.shape)
+
+        return UniformInteger(low=0, high=bound, dtype=dtype)
 
     return tfd.JointDistributionNamed(dict(m=m, t=t, x_star=x_star), name=name)
 

@@ -41,13 +41,7 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
     """UncalibratedEventTimesUpdate"""
 
     def __init__(
-        self,
-        target_log_prob_fn,
-        target_event_id,
-        nmax,
-        t_range=None,
-        seed=None,
-        name=None,
+        self, target_log_prob_fn, topology, nmax, t_range=None, seed=None, name=None,
     ):
         """An uncalibrated random walk for event times.
         :param target_log_prob_fn: the log density of the target distribution
@@ -62,13 +56,13 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
         self._name = name
         self._parameters = dict(
             target_log_prob_fn=target_log_prob_fn,
-            target_event_id=target_event_id,
+            topology=topology,
             nmax=nmax,
             t_range=t_range,
             seed=seed,
             name=name,
         )
-        self.tx_topology = TransitionTopology(None, target_event_id, None)
+        self.tx_topology = topology
 
     @property
     def target_log_prob_fn(self):
@@ -76,7 +70,7 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
 
     @property
     def target_event_id(self):
-        return self._parameters["target_event_id"]
+        return self._parameters["topology"]["target_transition"]
 
     @property
     def seed(self):
@@ -110,8 +104,10 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                 with tf.name_scope("true_fn"):
                     proposal = AddOccultProposal(
                         events=current_events,
+                        topology=self.tx_topology,
                         n_max=self.parameters["nmax"],
                         t_range=self.parameters["t_range"],
+                        name=self.name,
                     )
                     update = proposal.sample()
                     next_state = _add_events(
@@ -140,8 +136,10 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                     )
                     reverse = AddOccultProposal(
                         events=next_state,
+                        topology=self.tx_topology,
                         n_max=self.parameters["nmax"],
                         t_range=self.parameters["t_range"],
+                        name=self.name + "rev",
                     )
                     q_fwd = tf.reduce_sum(proposal.log_prob(update))
                     q_rev = tf.reduce_sum(reverse.log_prob(update))
