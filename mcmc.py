@@ -173,7 +173,7 @@ def make_occults_step(prev_event_id, target_event_id, next_event_id, name):
                     prev_event_id, target_event_id, next_event_id
                 ),
                 nmax=config["mcmc"]["occult_nmax"],
-                t_range=(se_events.shape[1] - 22, se_events.shape[1] - 1),
+                t_range=(se_events.shape[1] - 21, se_events.shape[1]),
                 name=name,
             )
         ),
@@ -319,7 +319,7 @@ theta_scale = tf.constant(
 theta_scale = theta_scale * 0.2 / theta_scale.shape[0]
 
 xi_scale = tf.eye(model.num_xi, dtype=DTYPE)
-xi_scale = xi_scale * 0.0001 / xi_scale.shape[0]
+xi_scale = xi_scale * 0.001 / xi_scale.shape[0]
 
 # We loop over successive calls to sample because we have to dump results
 #   to disc, or else end OOM (even on a 32GB system).
@@ -376,10 +376,11 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
         tf.reduce_mean(tf.cast(flat_results[5][:, 1], tf.float32)),
     )
 
-print(f"Acceptance param: {output_results[0][:, 1].mean()}")
-print(f"Acceptance move S->E: {output_results[1][:, 1].mean()}")
-print(f"Acceptance move E->I: {output_results[2][:, 1].mean()}")
-print(f"Acceptance occult S->E: {output_results[3][:, 1].mean()}")
-print(f"Acceptance occult E->I: {output_results[4][:, 1].mean()}")
+print(f"Acceptance theta: {output_results[0][:, 1].mean()}")
+print(f"Acceptance xi: {output_results[1][:, 1].mean()}")
+print(f"Acceptance move S->E: {output_results[2][:, 1].mean()}")
+print(f"Acceptance move E->I: {output_results[3][:, 1].mean()}")
+print(f"Acceptance occult S->E: {output_results[4][:, 1].mean()}")
+print(f"Acceptance occult E->I: {output_results[5][:, 1].mean()}")
 
 posterior.close()

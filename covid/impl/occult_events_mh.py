@@ -117,7 +117,12 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                         x=self.tx_topology.target,
                         x_star=tf.cast(update["x_star"], current_events.dtype),
                     )
-                    reverse = DelOccultProposal(next_state, self.tx_topology)
+                    reverse = DelOccultProposal(
+                        events=next_state,
+                        topology=self.tx_topology,
+                        t_range=self.parameters["t_range"],
+                        n_max=self.parameters["nmax"],
+                    )
                     q_fwd = tf.reduce_sum(proposal.log_prob(update))
                     q_rev = tf.reduce_sum(reverse.log_prob(update))
                     log_acceptance_correction = q_rev - q_fwd
@@ -125,7 +130,12 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
 
             def del_occult_fn():
                 with tf.name_scope("false_fn"):
-                    proposal = DelOccultProposal(current_events, self.tx_topology)
+                    proposal = DelOccultProposal(
+                        events=current_events,
+                        topology=self.tx_topology,
+                        t_range=self.parameters["t_range"],
+                        n_max=self.parameters["nmax"],
+                    )
                     update = proposal.sample()
                     next_state = _add_events(
                         events=current_events,
