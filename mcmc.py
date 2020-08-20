@@ -354,6 +354,7 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
     for i, ro in enumerate(output_results):
         ro[s, ...] = tf.gather(flat_results[i], idx)
 
+    posterior.flush()
     print("Storage time:", end - start, "seconds")
     print(
         "Acceptance theta:", tf.reduce_mean(tf.cast(flat_results[0][:, 1], tf.float32))
