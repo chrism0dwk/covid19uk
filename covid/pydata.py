@@ -87,9 +87,11 @@ def linelist2timeseries(date, region_code, date_range=None):
     return case_counts
 
 
-def phe_case_data(linelisting_file, date_range=None):
+def phe_case_data(linelisting_file, date_range=None, pillar=None):
 
     ll = pd.read_excel(linelisting_file)
+    if pillar is not None:
+        ll = ll.loc[ll['pillar'] == pillar]
     date = ll["specimen_date"]
     ltla_region = ll["LTLA_code"]
 
