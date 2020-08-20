@@ -33,9 +33,9 @@ def power_iteration(A, tol=1e-3):
 
 
 def rayleigh_quotient(A, b):
-    b = tf.reshape(b, [b.shape[0], 1])
-    numerator = tf.matmul(tf.transpose(b), tf.matmul(A, b))
-    denominator = tf.matmul(tf.transpose(b), b)
+    b = tf.squeeze(b)
+    numerator = tf.einsum("...i,...i->...", b, tf.linalg.matvec(A, b))
+    denominator = tf.einsum("...i,...i->...", b, b)
     return numerator / denominator
 
 
@@ -180,7 +180,7 @@ class CovidUKStochastic(CovidUK):
         return h
 
     def ngm(self, t, state, param):
-        """Computes a next generation matrix
+        """Computes a next generation matrix -- pressure from i to j is G_{ij}
         :param t: the time step
         :param state: a tensor of shape [M, S] for S states and M population strata.
                       States are S, E, I, R.
