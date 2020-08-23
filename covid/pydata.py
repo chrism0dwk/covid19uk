@@ -58,7 +58,7 @@ def linelist2timeseries(date, region_code, date_range=None):
     # 1. clip dates
     if date_range is not None:
         linelist = linelist[
-            (date_range[0] <= linelist["date"]) & (linelist["date"] <= date_range[1])
+            (date_range[0] <= linelist["date"]) & (linelist["date"] < date_range[1])
         ]
     raw_len = linelist.shape[0]
 
@@ -75,9 +75,7 @@ def linelist2timeseries(date, region_code, date_range=None):
 
     # 4. Reindex by day
     one_day = np.timedelta64(1, "D")
-    full_dates = pd.date_range(
-        case_counts.index.levels[0].min(), case_counts.index.levels[0].max() + one_day,
-    )
+    full_dates = pd.date_range(date_range[0], date_range[1] - one_day)
     index = pd.MultiIndex.from_product(
         [full_dates, case_counts.index.levels[1]], names=["date", "region_code"]
     )
@@ -91,7 +89,7 @@ def phe_case_data(linelisting_file, date_range=None, pillar=None):
 
     ll = pd.read_excel(linelisting_file)
     if pillar is not None:
-        ll = ll.loc[ll['pillar'] == pillar]
+        ll = ll.loc[ll["pillar"] == pillar]
     date = ll["specimen_date"]
     ltla_region = ll["LTLA_code"]
 

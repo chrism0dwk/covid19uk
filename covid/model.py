@@ -83,7 +83,6 @@ class CovidUK:
         C: np.float64,
         N: np.float64,
         date_range: list,
-        holidays: list,
         xi_freq: int,
         time_step: np.int64,
     ):
@@ -93,7 +92,6 @@ class CovidUK:
         :param C: a n_ladsxn_lads matrix of inter-LAD commuting
         :param N: a vector of population sizes in each LAD
         :param date_range: a time range [start, end)
-        :param holidays: a list of length-2 tuples containing dates of holidays
         :param beta_freq: the frequency at which beta changes
         :param time_step: a time step to use in the discrete time simulation
         """
@@ -204,8 +202,7 @@ class CovidUKStochastic(CovidUK):
         )
         return ngm
 
-    @tf.function(autograph=False, experimental_compile=True)
-    def simulate(self, param, state_init):
+    def simulate(self, param, state_init, date_range: np.datetime64 = None):
         """Runs a simulation from the epidemic model
 
         :param param: a dictionary of model parameters
@@ -214,12 +211,16 @@ class CovidUKStochastic(CovidUK):
         """
         param = {k: tf.convert_to_tensor(v, dtype=tf.float64) for k, v in param.items()}
         hazard = self.make_h(param)
+        if date_range is not None:
+            start = DTYPE(date_range[0] - self.times[0])
+            end = DTYPE(date_range[1] - self.times[0])
+            print(start)
+            print(end)
+        else:
+            start = DTYPE(self.times[0] - self.times[0])
+            end = DTYPE(self.times[-1] - self.times[0])
         t, sim = discrete_markov_simulation(
-            hazard,
-            state_init,
-            DTYPE(0.0),
-            np.float64(self.times.shape[0]),
-            self.time_step,
+            hazard, state_init, start, end, self.time_step,
         )
         return t, sim
 

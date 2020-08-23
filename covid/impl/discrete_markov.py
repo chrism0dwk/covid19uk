@@ -76,7 +76,7 @@ def discrete_markov_simulation(hazard_fn, state, start, end, time_step, seed=Non
     cond = lambda i, *_: i < times.shape[0]
 
     def body(i, state, output):
-        update, state = propagate(i, state)
+        update, state = propagate(times[i], state)
         output = output.write(i, update)
         return i + 1, state, output
 

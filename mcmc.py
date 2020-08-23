@@ -65,18 +65,25 @@ se_events, lag_se = impute_previous_cases(ei_events, 2.0)
 ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
 ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
 
-# Reset the data range for new imputed cases
-settings["inference_period"][0] = settings["inference_period"][1] - ei_events.shape[1]
+events = tf.stack([se_events, ei_events, ir_events], axis=-1)
+
+# Reset the data range for new imputed cases - +1 is because we assume events[:, 1, :]
+# is the initial state.
+settings["inference_period"][0] = settings["inference_period"][1] - events.shape[1] + 1
 
 # Now load in covariate data across the updated timeperiod
 covar_data = load_data(config["data"], settings, DTYPE)
 
+# Create initial state, truncate events
+initial_state = tf.concat([covar_data["pop"][:, tf.newaxis], events[:, 0, :]], axis=-1)
+events = events[:, 1:, :]
+
+# Create the model
 model = CovidUKStochastic(
     C=covar_data["C"],
     N=covar_data["pop"],
     W=covar_data["W"],
     date_range=settings["inference_period"],
-    holidays=settings["holiday"],
     xi_freq=14,
     time_step=1.0,
 )
@@ -111,7 +118,7 @@ def logp(theta, xi, events):
         rate=tf.constant(400.0, dtype=DTYPE),
     ).log_prob(p["gamma"])
     with tf.name_scope("epidemic_log_posterior"):
-        y_logp = model.log_prob(events, p, state_init)
+        y_logp = model.log_prob(events, p, initial_state)
     logp = beta1_logp + spatial_beta_logp + gamma_logp + xi_logp + y_logp
     return logp
 
@@ -153,7 +160,7 @@ def make_events_step(
                 target_event_id=target_event_id,
                 prev_event_id=prev_event_id,
                 next_event_id=next_event_id,
-                initial_state=state_init,
+                initial_state=initial_state,
                 dmax=config["mcmc"]["dmax"],
                 mmax=config["mcmc"]["m"],
                 nmax=config["mcmc"]["nmax"],
@@ -253,10 +260,6 @@ NUM_SAVED_SAMPLES = THIN_BURST_SAMPLES * NUM_BURSTS
 # RNG stuff
 tf.random.set_seed(2)
 
-# Initial state.  NB [M, T, X] layout for events.
-events = tf.stack([se_events, ei_events, ir_events], axis=-1)
-state_init = tf.concat([model.N[:, tf.newaxis], events[:, 0, :]], axis=-1)
-events = events[:, 1:, :]
 current_state = [
     np.array([0.85, 0.3, 0.25], dtype=DTYPE),
     np.zeros(model.num_xi, dtype=DTYPE),
@@ -273,6 +276,10 @@ posterior = h5py.File(
 )
 event_size = [NUM_SAVED_SAMPLES] + list(current_state[2].shape)
 
+posterior.create_dataset("initial_state", data=initial_state)
+posterior.create_dataset(
+    "inference_period", data=settings["inference_period"].astype("S")
+).attrs["description"] = "inference period [start, end)"
 theta_samples = posterior.create_dataset(
     "samples/theta", [NUM_SAVED_SAMPLES, current_state[0].shape[0]], dtype=np.float64,
 )
