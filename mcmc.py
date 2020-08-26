@@ -14,6 +14,7 @@ from covid import config
 from covid.model import load_data, CovidUKStochastic
 from covid.pydata import phe_case_data
 from covid.util import sanitise_parameter, sanitise_settings, impute_previous_cases
+from covid.impl.util import compute_state
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
 from covid.impl.occult_events_mh import UncalibratedOccultUpdate, TransitionTopology
@@ -64,19 +65,27 @@ ei_events, lag_ei = impute_previous_cases(cases, 0.44)
 se_events, lag_se = impute_previous_cases(ei_events, 2.0)
 ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
 ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
-
 events = tf.stack([se_events, ei_events, ir_events], axis=-1)
 
-# Reset the data range for new imputed cases - +1 is because we assume events[:, 1, :]
+# Reset the data range for new imputed cases - +1 is because we assume events[:, 0, :]
 # is the initial state.
-settings["inference_period"][0] = settings["inference_period"][1] - events.shape[1] + 1
+state = compute_state(
+    initial_state=tf.concat(
+        [covar_data["pop"][:, tf.newaxis], events[:, 0, :]], axis=-1
+    ),
+    events=events[:, 1:, :],
+    stoichiometry=[[-1, 1, 0, 0], [0, -1, -1, 0], [0, 0, -1, 1]],
+)
+
+initial_state = state[:, state.shape[1] - cases.shape[1], :]
+events = events[:, state.shape[1] - cases.shape[1], :]
 
 # Now load in covariate data across the updated timeperiod
 covar_data = load_data(config["data"], settings, DTYPE)
 
 # Create initial state, truncate events
-initial_state = tf.concat([covar_data["pop"][:, tf.newaxis], events[:, 0, :]], axis=-1)
-events = events[:, 1:, :]
+# initial_state = tf.concat([covar_data["pop"][:, tf.newaxis], events[:, 0, :]], axis=-1)
+# events = events[:, 1:, :]
 
 # Create the model
 model = CovidUKStochastic(
@@ -87,6 +96,7 @@ model = CovidUKStochastic(
     xi_freq=14,
     time_step=1.0,
 )
+print("Xi_select:", model.xi_select, flush=True)
 
 ##########################
 # Log p and MCMC kernels #
@@ -102,7 +112,7 @@ def logp(theta, xi, events):
         concentration=tf.constant(1.0, dtype=DTYPE), rate=tf.constant(1.0, dtype=DTYPE)
     ).log_prob(p["beta1"])
 
-    sigma = tf.constant(0.1, dtype=DTYPE)
+    sigma = tf.constant(1.0, dtype=DTYPE)
     phi = tf.constant(12.0, dtype=DTYPE)
     kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
     xi_logp = tfd.GaussianProcess(
