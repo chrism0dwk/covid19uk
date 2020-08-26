@@ -79,6 +79,7 @@ def load_data(paths, settings, dtype=DTYPE):
 class CovidUK:
     def __init__(
         self,
+        initial_state: np.float64,
         W: np.float64,
         C: np.float64,
         N: np.float64,
@@ -95,7 +96,10 @@ class CovidUK:
         :param beta_freq: the frequency at which beta changes
         :param time_step: a time step to use in the discrete time simulation
         """
-        dtype = dtype_util.common_dtype([W, C, N], dtype_hint=DTYPE)
+
+        self.initial_state = initial_state
+
+        dtype = dtype_util.common_dtype([W, C, N, initial_state], dtype_hint=DTYPE)
         self.n_lads = C.shape[0]
 
         C = tf.convert_to_tensor(C, dtype=dtype)

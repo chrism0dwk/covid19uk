@@ -58,6 +58,10 @@ settings = sanitise_settings(config["settings"])
 param = sanitise_parameter(config["parameter"])
 param = {k: tf.constant(v, dtype=DTYPE) for k, v in param.items()}
 
+# Load in covariate data
+covar_data = load_data(config["data"], settings, DTYPE)
+
+
 # We load in cases and impute missing infections first, since this sets the
 # time epoch which we are analysing.
 cases = phe_case_data(config["data"]["reported_cases"], settings["inference_period"])
@@ -67,21 +71,21 @@ ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
 ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
 events = tf.stack([se_events, ei_events, ir_events], axis=-1)
 
-# Reset the data range for new imputed cases - +1 is because we assume events[:, 0, :]
-# is the initial state.
+# Initial conditions are calculated by calculating the state
+# at the beginning of the inference period
 state = compute_state(
     initial_state=tf.concat(
-        [covar_data["pop"][:, tf.newaxis], events[:, 0, :]], axis=-1
+        [covar_data["pop"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])], axis=-1
     ),
-    events=events[:, 1:, :],
-    stoichiometry=[[-1, 1, 0, 0], [0, -1, -1, 0], [0, 0, -1, 1]],
+    events=events,  # [:, 1:, :],
+    stoichiometry=tf.constant(
+        [[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]], dtype=DTYPE
+    ),
 )
+start_time = state.shape[1] - cases.shape[1]
+initial_state = state[:, start_time, :]
+events = events[:, start_time:, :]
 
-initial_state = state[:, state.shape[1] - cases.shape[1], :]
-events = events[:, state.shape[1] - cases.shape[1], :]
-
-# Now load in covariate data across the updated timeperiod
-covar_data = load_data(config["data"], settings, DTYPE)
 
 # Create initial state, truncate events
 # initial_state = tf.concat([covar_data["pop"][:, tf.newaxis], events[:, 0, :]], axis=-1)
@@ -94,6 +98,7 @@ model = CovidUKStochastic(
     W=covar_data["W"],
     date_range=settings["inference_period"],
     xi_freq=14,
+    initial_state=initial_state,
     time_step=1.0,
 )
 print("Xi_select:", model.xi_select, flush=True)
