@@ -117,7 +117,7 @@ def logp(theta, xi, events):
         concentration=tf.constant(1.0, dtype=DTYPE), rate=tf.constant(1.0, dtype=DTYPE)
     ).log_prob(p["beta1"])
 
-    sigma = tf.constant(1.0, dtype=DTYPE)
+    sigma = tf.constant(0.1, dtype=DTYPE)
     phi = tf.constant(12.0, dtype=DTYPE)
     kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
     xi_logp = tfd.GaussianProcess(
@@ -195,7 +195,7 @@ def make_occults_step(prev_event_id, target_event_id, next_event_id, name):
                     prev_event_id, target_event_id, next_event_id
                 ),
                 nmax=config["mcmc"]["occult_nmax"],
-                t_range=(se_events.shape[1] - 21, se_events.shape[1]),
+                t_range=(events.shape[1] - 21, events.shape[1]),
                 name=name,
             )
         ),
