@@ -119,7 +119,6 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                         name=self.name,
                     )
                     update = proposal.sample()
-                    tf.print(f"<{self._name}> Add update:", update)
                     next_state = _add_events(
                         events=current_events,
                         m=update["m"],
@@ -149,7 +148,6 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                         n_max=self.parameters["nmax"],
                     )
                     update = proposal.sample()
-                    tf.print(f"<{self._name}> Del update:", update)
                     next_state = _add_events(
                         events=current_events,
                         m=update["m"],
