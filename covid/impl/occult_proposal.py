@@ -97,9 +97,6 @@ def DelOccultProposal(
                 diff = tf.gather(m_inits, topology.next, axis=-1) + tf.cumsum(
                     diff, axis=-1
                 )
-                tf.debugging.assert_greater_equal(
-                    diff, tf.constant(0.0, dtype=diff.dtype)
-                )
                 diff = diff + mask
                 bound = tf.cast(tf.reduce_min(diff, axis=-1), dtype=tf.int32)
                 # bound = tf.maximum(0, bound)
