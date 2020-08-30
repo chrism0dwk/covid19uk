@@ -194,6 +194,7 @@ def make_occults_step(prev_event_id, target_event_id, next_event_id, name):
                 topology=TransitionTopology(
                     prev_event_id, target_event_id, next_event_id
                 ),
+                cumulative_event_offset=initial_state,
                 nmax=config["mcmc"]["occult_nmax"],
                 t_range=(events.shape[1] - 21, events.shape[1]),
                 name=name,

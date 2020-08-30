@@ -41,7 +41,14 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
     """UncalibratedEventTimesUpdate"""
 
     def __init__(
-        self, target_log_prob_fn, topology, nmax, t_range=None, seed=None, name=None,
+        self,
+        target_log_prob_fn,
+        topology,
+        cumulative_event_offset,
+        nmax,
+        t_range=None,
+        seed=None,
+        name=None,
     ):
         """An uncalibrated random walk for event times.
         :param target_log_prob_fn: the log density of the target distribution
@@ -63,6 +70,7 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
             name=name,
         )
         self.tx_topology = topology
+        self.initial_state = cumulative_event_offset
 
     @property
     def target_log_prob_fn(self):
@@ -105,11 +113,13 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                     proposal = AddOccultProposal(
                         events=current_events,
                         topology=self.tx_topology,
+                        initial_state=self.initial_state,
                         n_max=self.parameters["nmax"],
                         t_range=self.parameters["t_range"],
                         name=self.name,
                     )
                     update = proposal.sample()
+                    tf.print(f"<{self._name}> Add update:", update)
                     next_state = _add_events(
                         events=current_events,
                         m=update["m"],
@@ -120,6 +130,7 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                     reverse = DelOccultProposal(
                         events=next_state,
                         topology=self.tx_topology,
+                        initial_state=self.initial_state,
                         t_range=self.parameters["t_range"],
                         n_max=self.parameters["nmax"],
                     )
@@ -133,10 +144,12 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                     proposal = DelOccultProposal(
                         events=current_events,
                         topology=self.tx_topology,
+                        initial_state=self.initial_state,
                         t_range=self.parameters["t_range"],
                         n_max=self.parameters["nmax"],
                     )
                     update = proposal.sample()
+                    tf.print(f"<{self._name}> Del update:", update)
                     next_state = _add_events(
                         events=current_events,
                         m=update["m"],
@@ -147,6 +160,7 @@ class UncalibratedOccultUpdate(tfp.mcmc.TransitionKernel):
                     reverse = AddOccultProposal(
                         events=next_state,
                         topology=self.tx_topology,
+                        initial_state=self.initial_state,
                         n_max=self.parameters["nmax"],
                         t_range=self.parameters["t_range"],
                         name=self.name + "rev",

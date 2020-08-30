@@ -8,7 +8,9 @@ from covid.impl.Categorical2 import Categorical2
 tfd = tfp.distributions
 
 
-def AddOccultProposal(events, topology, n_max, t_range=None, dtype=tf.int32, name=None):
+def AddOccultProposal(
+    events, topology, initial_state, n_max, t_range=None, dtype=tf.int32, name=None
+):
     if t_range is None:
         t_range = [0, events.shape[-2]]
 
@@ -30,11 +32,14 @@ def AddOccultProposal(events, topology, n_max, t_range=None, dtype=tf.int32, nam
                 * events.dtype.max
             )
             m_events = tf.gather(events, m, axis=-3)
-
+            m_inits = tf.gather(initial_state, m, axis=-2)
             diff = m_events[..., topology.prev] - m_events[..., topology.target]
-            diff = tf.cumsum(diff, axis=-1)
+            diff = tf.gather(m_inits, topology.target, axis=-1) + tf.cumsum(
+                diff, axis=-1
+            )
             diff = diff + mask
             bound = tf.cast(tf.reduce_min(diff, axis=-1), dtype=tf.int32)
+            # bound = tf.maximum(0, bound)
             bound = tf.minimum(n_max, bound)
         else:
             bound = tf.broadcast_to(n_max, m.shape)
@@ -44,7 +49,9 @@ def AddOccultProposal(events, topology, n_max, t_range=None, dtype=tf.int32, nam
     return tfd.JointDistributionNamed(dict(m=m, t=t, x_star=x_star), name=name)
 
 
-def DelOccultProposal(events, topology, n_max, t_range=None, dtype=tf.int32, name=None):
+def DelOccultProposal(
+    events, topology, initial_state, n_max, t_range=None, dtype=tf.int32, name=None
+):
     if t_range is None:
         t_range = [0, events.shape[-2]]
 
@@ -84,11 +91,18 @@ def DelOccultProposal(events, topology, n_max, t_range=None, dtype=tf.int32, nam
                     * events.dtype.max
                 )
                 m_events = tf.gather(events, m, axis=-3)
-
+                m_inits = tf.gather(initial_state, m, axis=-2)
+                # calc offset[target] + N_{target}(t) - N_{next} bound
                 diff = m_events[..., topology.target] - m_events[..., topology.next]
-                diff = tf.cumsum(diff, axis=-1)
+                diff = tf.gather(m_inits, topology.next, axis=-1) + tf.cumsum(
+                    diff, axis=-1
+                )
+                tf.debugging.assert_greater_equal(
+                    diff, tf.constant(0.0, dtype=diff.dtype)
+                )
                 diff = diff + mask
                 bound = tf.cast(tf.reduce_min(diff, axis=-1), dtype=tf.int32)
+                # bound = tf.maximum(0, bound)
                 bound = tf.minimum(n_max, bound)
             else:
                 bound = tf.broadcast_to(n_max, m.shape)
