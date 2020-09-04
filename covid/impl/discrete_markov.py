@@ -68,7 +68,7 @@ def discrete_markov_simulation(hazard_fn, state, start, end, time_step, seed=Non
     """Simulates from a discrete time Markov state transition model using multinomial sampling
     across rows of the """
     propagate = chain_binomial_propagate(hazard_fn, time_step, seed=seed)
-    times = tf.range(start, end, time_step)
+    times = tf.range(start, end, time_step, dtype=state.dtype)
     state = tf.convert_to_tensor(state)
 
     output = tf.TensorArray(state.dtype, size=times.shape[0])

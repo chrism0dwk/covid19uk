@@ -79,13 +79,15 @@ def load_data(paths, settings, dtype=DTYPE):
 class CovidUK:
     def __init__(
         self,
-        initial_state: np.float64,
         W: np.float64,
         C: np.float64,
         N: np.float64,
-        date_range: list,
         xi_freq: int,
+        params: dict,
+        initial_state: np.float64,
+        initial_time: np.float64,
         time_step: np.int64,
+        num_steps: np.int64,
     ):
         """Represents a CovidUK ODE model
 
@@ -97,9 +99,10 @@ class CovidUK:
         :param time_step: a time step to use in the discrete time simulation
         """
 
-        self.initial_state = initial_state
-
         dtype = dtype_util.common_dtype([W, C, N, initial_state], dtype_hint=DTYPE)
+
+        self.initial_state = tf.convert_to_tensor(initial_state, dtype=dtype)
+        self.initial_time = initial_time
         self.n_lads = C.shape[0]
 
         C = tf.convert_to_tensor(C, dtype=dtype)
@@ -109,24 +112,15 @@ class CovidUK:
         self.N = tf.constant(N, dtype=dtype)
 
         self.time_step = time_step
-        self.times = np.arange(
-            date_range[0], date_range[1], np.timedelta64(int(time_step), "D")
-        )
+        self.num_steps = num_steps
 
-        xi_freq = np.int32(xi_freq)
-        self.xi_select = np.arange(self.times.shape[0], dtype=np.int32) // xi_freq
-        self.xi_freq = xi_freq
+        self.params = {
+            k: tf.convert_to_tensor(v, dtype=dtype) for k, v in params.items()
+        }
+
+        self.xi_freq = np.int32(xi_freq)
+        self.xi_select = np.arange(self.num_steps, dtype=np.int32) // self.xi_freq
         self.max_t = self.xi_select.shape[0] - 1
-
-    @property
-    def xi_times(self):
-        """Returns the time indices for beta in units of time_step"""
-        return np.unique(self.xi_select) * self.xi_freq
-
-    @property
-    def num_xi(self):
-        """Return the number of distinct betas"""
-        return tf.cast(self.xi_select[-1] + 1, tf.int32)
 
     def create_initial_state(self, init_matrix=None):
         I = tf.convert_to_tensor(init_matrix, dtype=DTYPE)
@@ -137,16 +131,21 @@ class CovidUK:
 
 
 class CovidUKStochastic(CovidUK):
+
+    stoichiometry = tf.constant(
+        [[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]], dtype=DTYPE
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.stoichiometry = tf.constant(
-            [[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]], dtype=DTYPE
-        )
 
-    def make_h(self, param):
+    def make_h(self, param=None):
         """Constructs a function that takes `state` and outputs a
         transition rate matrix (with 0 diagonal).
         """
+
+        if param is None:
+            param = self.params
 
         def h(t, state):
             """Computes a transition rate matrix
@@ -156,25 +155,28 @@ class CovidUKStochastic(CovidUK):
               contiguously in memory for fast calculation below.
             :return a tensor of shape [M, M, S] containing transition matric for each i=0,...,(c-1)
             """
-            t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
-            commute_volume = tf.pow(tf.gather(self.W, t_idx), param["omega"])
-            xi_idx = tf.gather(self.xi_select, t_idx)
-            xi = tf.gather(param["xi"], xi_idx)
-            beta = param["beta1"] * tf.math.exp(xi)
+            w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.W.shape[0])
+            commute_volume = tf.gather(self.W, w_idx)
+            xi_idx = tf.cast(
+                tf.clip_by_value(t // self.xi_freq, 0, self.params["xi"].shape[0] - 1),
+                dtype=tf.int64,
+            )
+            xi = tf.gather(self.params["xi"], xi_idx)
+            beta = self.params["beta1"] * tf.math.exp(xi)
 
             infec_rate = beta * (
                 state[..., 2]
-                + param["beta2"]
+                + self.params["beta2"]
                 * commute_volume
                 * tf.linalg.matvec(self.C, state[..., 2] / self.N)
             )
             infec_rate = infec_rate / self.N + 0.000000001  # Vector of length nc
 
             ei = tf.broadcast_to(
-                [param["nu"]], shape=[state.shape[0]]
+                [self.params["nu"]], shape=[state.shape[0]]
             )  # Vector of length nc
             ir = tf.broadcast_to(
-                [param["gamma"]], shape=[state.shape[0]]
+                [self.params["gamma"]], shape=[state.shape[0]]
             )  # Vector of length nc
 
             return [infec_rate, ei, ir]
@@ -206,40 +208,37 @@ class CovidUKStochastic(CovidUK):
         )
         return ngm
 
-    def simulate(self, param, state_init, date_range: np.datetime64 = None):
+    def sample(self, seed=None):
         """Runs a simulation from the epidemic model
 
         :param param: a dictionary of model parameters
         :param state_init: the initial state
         :returns: a tuple of times and simulated states.
         """
-        param = {k: tf.convert_to_tensor(v, dtype=tf.float64) for k, v in param.items()}
-        hazard = self.make_h(param)
-        if date_range is not None:
-            start = DTYPE(date_range[0] - self.times[0])
-            end = DTYPE(date_range[1] - self.times[0])
-            print(start)
-            print(end)
-        else:
-            start = DTYPE(self.times[0] - self.times[0])
-            end = DTYPE(self.times[-1] - self.times[0])
+        hazard = self.make_h()
         t, sim = discrete_markov_simulation(
-            hazard, state_init, start, end, self.time_step,
+            hazard_fn=hazard,
+            state=self.initial_state,
+            start=self.initial_time,
+            end=self.initial_time + self.num_steps * self.time_step,
+            time_step=self.time_step,
+            seed=seed,
         )
         return t, sim
 
-    def log_prob(self, y, param, state_init):
+    def log_prob(self, y):
         """Calculates the log probability of observing epidemic events y
         :param y: a list of tensors.  The first is of shape [n_times] containing times,
                   the second is of shape [n_times, n_states, n_states] containing event matrices.
         :param param: a list of parameters
         :returns: a scalar giving the log probability of the epidemic
         """
-        dtype = dtype = dtype_util.common_dtype([y, state_init], dtype_hint=DTYPE)
+        dtype = dtype = dtype_util.common_dtype(
+            [y, self.initial_state], dtype_hint=DTYPE
+        )
         y = tf.convert_to_tensor(y, dtype)
-        state_init = tf.convert_to_tensor(state_init, dtype)
         with tf.name_scope("CovidUKStochastic.log_prob"):
-            hazard = self.make_h(param)
+            hazard = self.make_h()
             return discrete_markov_log_prob(
-                y, state_init, hazard, self.time_step, self.stoichiometry
+                y, self.initial_state, hazard, self.time_step, self.stoichiometry
             )

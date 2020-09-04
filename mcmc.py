@@ -77,31 +77,31 @@ state = compute_state(
     initial_state=tf.concat(
         [covar_data["pop"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])], axis=-1
     ),
-    events=events,  # [:, 1:, :],
-    stoichiometry=tf.constant(
-        [[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]], dtype=DTYPE
-    ),
+    events=events,
+    stoichiometry=CovidUKStochastic.stoichiometry,
 )
 start_time = state.shape[1] - cases.shape[1]
 initial_state = state[:, start_time, :]
 events = events[:, start_time:, :]
+xi_freq = 14
+num_xi = events.shape[1] // xi_freq
+num_metapop = covar_data["pop"].shape[0]
 
-
-# Create initial state, truncate events
-# initial_state = tf.concat([covar_data["pop"][:, tf.newaxis], events[:, 0, :]], axis=-1)
-# events = events[:, 1:, :]
 
 # Create the model
-model = CovidUKStochastic(
-    C=covar_data["C"],
-    N=covar_data["pop"],
-    W=covar_data["W"],
-    date_range=settings["inference_period"],
-    xi_freq=14,
-    initial_state=initial_state,
-    time_step=1.0,
-)
-print("Xi_select:", model.xi_select, flush=True)
+def build_epidemic(param):
+    return CovidUKStochastic(
+        C=covar_data["C"],
+        N=covar_data["pop"],
+        W=covar_data["W"],
+        xi_freq=xi_freq,
+        params=param,
+        initial_state=initial_state,
+        initial_time=0.0,
+        time_step=1.0,
+        num_steps=events.shape[1],
+    )
+
 
 ##########################
 # Log p and MCMC kernels #
@@ -113,29 +113,35 @@ def logp(theta, xi, events):
     p["gamma"] = tf.convert_to_tensor(theta[2], dtype=DTYPE)
     p["xi"] = tf.convert_to_tensor(xi, dtype=DTYPE)
 
-    beta1_logp = tfd.Gamma(
+    beta1 = tfd.Gamma(
         concentration=tf.constant(1.0, dtype=DTYPE), rate=tf.constant(1.0, dtype=DTYPE)
-    ).log_prob(p["beta1"])
+    )
 
     sigma = tf.constant(0.1, dtype=DTYPE)
     phi = tf.constant(12.0, dtype=DTYPE)
     kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
-    xi_logp = tfd.GaussianProcess(
-        kernel, index_points=tf.cast(model.xi_times[:, tf.newaxis], DTYPE)
-    ).log_prob(p["xi"])
+    idx_pts = tf.cast(tf.range(events.shape[1] // xi_freq) * xi_freq, dtype=DTYPE)
+    xi = tfd.GaussianProcess(kernel, index_points=idx_pts[:, tf.newaxis])
 
-    spatial_beta_logp = tfd.Gamma(
+    spatial_beta = tfd.Gamma(
         concentration=tf.constant(3.0, dtype=DTYPE), rate=tf.constant(10.0, dtype=DTYPE)
-    ).log_prob(p["beta2"])
+    )
 
-    gamma_logp = tfd.Gamma(
+    gamma = tfd.Gamma(
         concentration=tf.constant(100.0, dtype=DTYPE),
         rate=tf.constant(400.0, dtype=DTYPE),
-    ).log_prob(p["gamma"])
+    )
+
     with tf.name_scope("epidemic_log_posterior"):
-        y_logp = model.log_prob(events, p, initial_state)
-    logp = beta1_logp + spatial_beta_logp + gamma_logp + xi_logp + y_logp
-    return logp
+        seir = build_epidemic(p)
+
+    return (
+        beta1.log_prob(p["beta1"])
+        + xi.log_prob(p["xi"])
+        + spatial_beta.log_prob(p["beta2"])
+        + gamma.log_prob(p["gamma"])
+        + seir.log_prob(events)
+    )
 
 
 # Pavel's suggestion for a Gibbs kernel requires
@@ -230,7 +236,7 @@ def trace_results_fn(_, results):
     return recurse(f, results)
 
 
-@tf.function(autograph=False, experimental_compile=True)
+@tf.function  # (autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, sigma_theta, sigma_xi, num_event_updates):
     with tf.name_scope("main_mcmc_sample_loop"):
 
@@ -278,7 +284,7 @@ tf.random.set_seed(2)
 
 current_state = [
     np.array([0.85, 0.3, 0.25], dtype=DTYPE),
-    np.zeros(model.num_xi, dtype=DTYPE),
+    np.zeros(num_xi, dtype=DTYPE),
     events,
 ]
 
@@ -315,10 +321,10 @@ output_results = [
     posterior.create_dataset("results/theta", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,),
     posterior.create_dataset("results/xi", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,),
     posterior.create_dataset(
-        "results/move/S->E", (NUM_SAVED_SAMPLES, 3 + model.N.shape[0]), dtype=DTYPE,
+        "results/move/S->E", (NUM_SAVED_SAMPLES, 3 + num_metapop), dtype=DTYPE,
     ),
     posterior.create_dataset(
-        "results/move/E->I", (NUM_SAVED_SAMPLES, 3 + model.N.shape[0]), dtype=DTYPE,
+        "results/move/E->I", (NUM_SAVED_SAMPLES, 3 + num_metapop), dtype=DTYPE,
     ),
     posterior.create_dataset(
         "results/occult/S->E", (NUM_SAVED_SAMPLES, 6), dtype=DTYPE
@@ -341,7 +347,7 @@ theta_scale = tf.constant(
 )
 theta_scale = theta_scale * 0.2 / theta_scale.shape[0]
 
-xi_scale = tf.eye(model.num_xi, dtype=DTYPE)
+xi_scale = tf.eye(current_state[1].shape[0], dtype=DTYPE)
 xi_scale = xi_scale * 0.001 / xi_scale.shape[0]
 
 # We loop over successive calls to sample because we have to dump results
