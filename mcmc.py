@@ -236,7 +236,7 @@ def trace_results_fn(_, results):
     return recurse(f, results)
 
 
-@tf.function  # (autograph=False, experimental_compile=True)
+@tf.function(autograph=False, experimental_compile=True)
 def sample(n_samples, init_state, sigma_theta, sigma_xi, num_event_updates):
     with tf.name_scope("main_mcmc_sample_loop"):
 
