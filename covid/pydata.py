@@ -1,9 +1,8 @@
 """Python-based data munging"""
 
-import os
+import re
 from warnings import warn
 
-import geopandas as gp
 import numpy as np
 import pandas as pd
 import pyreadr as pyr
@@ -87,7 +86,19 @@ def linelist2timeseries(date, region_code, date_range=None):
 
 def phe_case_data(linelisting_file, date_range=None, pillar=None):
 
-    ll = pd.read_excel(linelisting_file)
+    read_file = dict(csv=pd.read_csv, xlsx=pd.read_excel)
+
+    match_extension = re.match(r"(.*)\.(.*)$", linelisting_file)
+    if match_extension is None:
+        raise ValueError(
+            f"Linelisting filename '{linelisting_file}' is not in name.extension format"
+        )
+    filetype = match_extension.group(2)
+    try:
+        ll = read_file[filetype](linelisting_file)
+    except KeyError:
+        raise ValueError(f"No handler implemented for file type '{filetype}'")
+
     if pillar is not None:
         ll = ll.loc[ll["pillar"] == pillar]
     date = ll["specimen_date"]
