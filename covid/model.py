@@ -155,7 +155,7 @@ class CovidUKStochastic(CovidUK):
               contiguously in memory for fast calculation below.
             :return a tensor of shape [M, M, S] containing transition matric for each i=0,...,(c-1)
             """
-            w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.W.shape[0])
+            w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.W.shape[0] - 1)
             commute_volume = tf.gather(self.W, w_idx)
             xi_idx = tf.cast(
                 tf.clip_by_value(t // self.xi_freq, 0, self.params["xi"].shape[0] - 1),
