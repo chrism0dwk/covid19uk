@@ -85,7 +85,7 @@ def linelist2timeseries(date, region_code, date_range=None):
 
 
 def _read_csv(filename, date_format="%m/%d/%Y"):
-    data = pd.read_csv(filename)
+    data = pd.read_csv(filename, low_memory=False)
     data["specimen_date"] = pd.to_datetime(data["specimen_date"], format=date_format)
     return data
 
@@ -104,7 +104,6 @@ def phe_case_data(linelisting_file, date_range=None, pillar=None):
         ll = read_file[filetype](linelisting_file)
     except KeyError:
         raise ValueError(f"No handler implemented for file type '{filetype}'")
-    return ll
 
     if pillar is not None:
         ll = ll.loc[ll["pillar"] == pillar]
