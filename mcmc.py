@@ -29,6 +29,7 @@ tfd = tfp.distributions
 tfb = tfp.bijectors
 
 DTYPE = config.floatX
+STOICHIOMETRY = tf.constant([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]], dtype=DTYPE)
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 # os.environ["XLA_FLAGS"] = '--xla_dump_to=xla_dump --xla_dump_hlo_pass_re=".*"'
@@ -78,7 +79,7 @@ state = compute_state(
         [covar_data["pop"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])], axis=-1
     ),
     events=events,
-    stoichiometry=CovidUKStochastic.stoichiometry,
+    stoichiometry=STOICHIOMETRY,
 )
 start_time = state.shape[1] - cases.shape[1]
 initial_state = state[:, start_time, :]
@@ -88,17 +89,44 @@ num_xi = events.shape[1] // xi_freq
 num_metapop = covar_data["pop"].shape[0]
 
 
-# Create the model
+# Create the epidemic model given parameters
 def build_epidemic(param):
+    def transition_rates(t, state):
+
+        C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
+        C = tf.linalg.set_diag(C + tf.transpose(C), tf.zeros(C.shape[0], dtype=DTYPE))
+        W = tf.constant(covar_data["W"], dtype=DTYPE)
+        N = tf.constant(covar_data["pop"], dtype=DTYPE)
+
+        w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
+        commute_volume = tf.gather(W, w_idx)
+        xi_idx = tf.cast(
+            tf.clip_by_value(t // 14, 0, param["xi"].shape[0] - 1), dtype=tf.int64,
+        )
+        xi = tf.gather(param["xi"], xi_idx)
+        beta = param["beta1"] * tf.math.exp(xi)
+
+        infec_rate = beta * (
+            state[..., 2]
+            + param["beta2"] * commute_volume * tf.linalg.matvec(C, state[..., 2] / N)
+        )
+        infec_rate = infec_rate / N + 0.000000001  # Vector of length nc
+
+        ei = tf.broadcast_to(
+            [param["nu"]], shape=[state.shape[0]]
+        )  # Vector of length nc
+        ir = tf.broadcast_to(
+            [param["gamma"]], shape=[state.shape[0]]
+        )  # Vector of length nc
+
+        return [infec_rate, ei, ir]
+
     return CovidUKStochastic(
-        C=covar_data["C"],
-        N=covar_data["pop"],
-        W=covar_data["W"],
-        xi_freq=xi_freq,
-        params=param,
+        transition_rates=transition_rates,
+        stoichiometry=STOICHIOMETRY,
         initial_state=initial_state,
-        initial_time=0.0,
-        time_step=1.0,
+        initial_step=0,
+        time_delta=1.0,
         num_steps=events.shape[1],
     )
 
@@ -237,7 +265,7 @@ def trace_results_fn(_, results):
 
 
 @tf.function(autograph=False, experimental_compile=True)
-def sample(n_samples, init_state, sigma_theta, sigma_xi, num_event_updates):
+def sample(n_samples, init_state, sigma_theta, sigma_xi):
     with tf.name_scope("main_mcmc_sample_loop"):
 
         init_state = init_state.copy()
@@ -359,7 +387,6 @@ for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
         init_state=current_state,
         sigma_theta=theta_scale,
         sigma_xi=xi_scale,
-        num_event_updates=tf.constant(NUM_EVENT_TIME_UPDATES, tf.int32),
     )
     current_state = [s[-1] for s in samples]
     s = slice(i * THIN_BURST_SAMPLES, i * THIN_BURST_SAMPLES + THIN_BURST_SAMPLES)
