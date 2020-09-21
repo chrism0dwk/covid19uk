@@ -191,10 +191,13 @@ class CovidUKStochastic(CovidUK):
         :return: a tensor of shape [M, M] giving the expected number of new cases of
                  disease individuals in each metapopulation give rise to.
         """
-        t_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.max_t)
-        commute_volume = tf.pow(tf.gather(self.W, t_idx), param["omega"])
-        xi_idx = tf.gather(self.xi_select, t_idx)
-        xi = tf.gather(param["xi"], xi_idx)
+        w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.W.shape[0] - 1)
+        commute_volume = tf.gather(self.W, w_idx)
+        xi_idx = tf.cast(
+            tf.clip_by_value(t // self.xi_freq, 0, self.params["xi"].shape[0] - 1),
+            dtype=tf.int64,
+        )
+        xi = tf.gather(self.params["xi"], xi_idx)
         beta = param["beta1"] * tf.math.exp(xi)
 
         ngm = beta * (
