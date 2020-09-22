@@ -93,7 +93,6 @@ def _read_csv(filename, date_format="%m/%d/%Y"):
 def phe_case_data(linelisting_file, date_range=None, pillar=None):
 
     read_file = dict(csv=_read_csv, xlsx=pd.read_excel)
-
     match_extension = re.match(r"(.*)\.(.*)$", linelisting_file)
     if match_extension is None:
         raise ValueError(

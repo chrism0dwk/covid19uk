@@ -76,112 +76,32 @@ def load_data(paths, settings, dtype=DTYPE):
     }
 
 
-class CovidUK:
+class CovidUKStochastic:
     def __init__(
         self,
-        W: np.float64,
-        C: np.float64,
-        N: np.float64,
-        xi_freq: int,
-        params: dict,
-        initial_state: np.float64,
-        initial_time: np.float64,
-        time_step: np.int64,
-        num_steps: np.int64,
+        transition_rates,
+        stoichiometry,
+        initial_state,
+        initial_step,
+        time_delta,
+        num_steps,
     ):
-        """Represents a CovidUK ODE model
+        """Implements a discrete-time Markov jump process for a state transition model.
 
-        :param W: Commuting volume
-        :param C: a n_ladsxn_lads matrix of inter-LAD commuting
-        :param N: a vector of population sizes in each LAD
-        :param date_range: a time range [start, end)
-        :param beta_freq: the frequency at which beta changes
-        :param time_step: a time step to use in the discrete time simulation
+        :param transition_rates: a function of the form `fn(t, state)` taking the current time `t` and state tensor `state`.  This function returns a tensor which broadcasts to the first dimension of `stoichiometry`.
+        :param stoichiometry: the stochiometry matrix for the state transition model, with rows representing transitions and columns representing states.
+        :param initial_state: an initial state tensor with inner dimension equal to the first dimension of `stoichiometry`.
+        :param initial_step: an offset giving the time `t` of the first timestep in the model.
+        :param time_delta: the size of the time step to be used.
+        :param num_steps: the number of time steps across which the model runs.
         """
 
-        dtype = dtype_util.common_dtype([W, C, N, initial_state], dtype_hint=DTYPE)
-
-        self.initial_state = tf.convert_to_tensor(initial_state, dtype=dtype)
-        self.initial_time = initial_time
-        self.n_lads = C.shape[0]
-
-        C = tf.convert_to_tensor(C, dtype=dtype)
-        self.C = C + tf.transpose(C)
-        self.C = tf.linalg.set_diag(self.C, tf.zeros(self.C.shape[0], dtype=dtype))
-        self.W = tf.constant(W, dtype=dtype)
-        self.N = tf.constant(N, dtype=dtype)
-
-        self.time_step = time_step
+        self.transition_rates = transition_rates
+        self.stoichiometry = stoichiometry
+        self.initial_state = initial_state
+        self.initial_step = initial_step
+        self.time_delta = time_delta
         self.num_steps = num_steps
-
-        self.params = {
-            k: tf.convert_to_tensor(v, dtype=dtype) for k, v in params.items()
-        }
-
-        self.xi_freq = np.int32(xi_freq)
-        self.xi_select = np.arange(self.num_steps, dtype=np.int32) // self.xi_freq
-        self.max_t = self.xi_select.shape[0] - 1
-
-    def create_initial_state(self, init_matrix=None):
-        I = tf.convert_to_tensor(init_matrix, dtype=DTYPE)
-        S = self.N - I
-        E = tf.zeros(self.N.shape, dtype=DTYPE)
-        R = tf.zeros(self.N.shape, dtype=DTYPE)
-        return tf.stack([S, E, I, R], axis=-1)
-
-
-class CovidUKStochastic(CovidUK):
-
-    stoichiometry = tf.constant(
-        [[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]], dtype=DTYPE
-    )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def make_h(self, param=None):
-        """Constructs a function that takes `state` and outputs a
-        transition rate matrix (with 0 diagonal).
-        """
-
-        if param is None:
-            param = self.params
-
-        def h(t, state):
-            """Computes a transition rate matrix
-
-            :param state: a tensor of shape [M, S] for S states and M population strata. States
-              are S, E, I, R.  We arrange the state like this because the state vectors are then arranged
-              contiguously in memory for fast calculation below.
-            :return a tensor of shape [M, M, S] containing transition matric for each i=0,...,(c-1)
-            """
-            w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.W.shape[0] - 1)
-            commute_volume = tf.gather(self.W, w_idx)
-            xi_idx = tf.cast(
-                tf.clip_by_value(t // self.xi_freq, 0, self.params["xi"].shape[0] - 1),
-                dtype=tf.int64,
-            )
-            xi = tf.gather(self.params["xi"], xi_idx)
-            beta = self.params["beta1"] * tf.math.exp(xi)
-
-            infec_rate = beta * (
-                state[..., 2]
-                + self.params["beta2"]
-                * commute_volume
-                * tf.linalg.matvec(self.C, state[..., 2] / self.N)
-            )
-            infec_rate = infec_rate / self.N + 0.000000001  # Vector of length nc
-
-            ei = tf.broadcast_to(
-                [self.params["nu"]], shape=[state.shape[0]]
-            )  # Vector of length nc
-            ir = tf.broadcast_to(
-                [self.params["gamma"]], shape=[state.shape[0]]
-            )  # Vector of length nc
-
-            return [infec_rate, ei, ir]
-
-        return h
 
     def ngm(self, t, state, param):
         """Computes a next generation matrix -- pressure from i to j is G_{ij}
@@ -218,13 +138,12 @@ class CovidUKStochastic(CovidUK):
         :param state_init: the initial state
         :returns: a tuple of times and simulated states.
         """
-        hazard = self.make_h()
         t, sim = discrete_markov_simulation(
-            hazard_fn=hazard,
+            hazard_fn=self.transition_rates,
             state=self.initial_state,
-            start=self.initial_time,
-            end=self.initial_time + self.num_steps * self.time_step,
-            time_step=self.time_step,
+            start=self.initial_step,
+            end=self.initial_step + self.num_steps * self.time_delta,
+            time_step=self.time_delta,
             seed=seed,
         )
         return t, sim
@@ -241,7 +160,7 @@ class CovidUKStochastic(CovidUK):
         )
         y = tf.convert_to_tensor(y, dtype)
         with tf.name_scope("CovidUKStochastic.log_prob"):
-            hazard = self.make_h()
+            hazard = self.transition_rates
             return discrete_markov_log_prob(
-                y, self.initial_state, hazard, self.time_step, self.stoichiometry
+                y, self.initial_state, hazard, self.time_delta, self.stoichiometry
             )
