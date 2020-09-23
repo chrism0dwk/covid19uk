@@ -65,7 +65,7 @@ covar_data = load_data(config["data"], settings, DTYPE)
 
 # We load in cases and impute missing infections first, since this sets the
 # time epoch which we are analysing.
-cases = phe_case_data(config["data"]["reported_cases"], settings["inference_period"])
+cases = phe_case_data(config["data"]["reported_cases"], date_range=settings["inference_period"], date_type='report')
 ei_events, lag_ei = impute_previous_cases(cases, 0.44)
 se_events, lag_se = impute_previous_cases(ei_events, 2.0)
 ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
@@ -145,7 +145,7 @@ def logp(theta, xi, events):
         concentration=tf.constant(1.0, dtype=DTYPE), rate=tf.constant(1.0, dtype=DTYPE)
     )
 
-    sigma = tf.constant(0.1, dtype=DTYPE)
+    sigma = tf.constant(0.01, dtype=DTYPE)
     phi = tf.constant(12.0, dtype=DTYPE)
     kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
     idx_pts = tf.cast(tf.range(events.shape[1] // xi_freq) * xi_freq, dtype=DTYPE)
@@ -376,7 +376,7 @@ theta_scale = tf.constant(
 theta_scale = theta_scale * 0.2 / theta_scale.shape[0]
 
 xi_scale = tf.eye(current_state[1].shape[0], dtype=DTYPE)
-xi_scale = xi_scale * 0.001 / xi_scale.shape[0]
+xi_scale = xi_scale * 0.0001 / xi_scale.shape[0]
 
 # We loop over successive calls to sample because we have to dump results
 #   to disc, or else end OOM (even on a 32GB system).
