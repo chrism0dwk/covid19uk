@@ -90,7 +90,7 @@ def _read_csv(filename, date_format="%m/%d/%Y"):
     return data
 
 
-def phe_case_data(linelisting_file, date_range=None, pillar=None):
+def phe_case_data(linelisting_file, date_range=None, date_type='specimen', pillar=None):
 
     read_file = dict(csv=_read_csv, xlsx=pd.read_excel)
     match_extension = re.match(r"(.*)\.(.*)$", linelisting_file)
@@ -106,7 +106,11 @@ def phe_case_data(linelisting_file, date_range=None, pillar=None):
 
     if pillar is not None:
         ll = ll.loc[ll["pillar"] == pillar]
-    date = ll["specimen_date"]
+
+    date_type_map = {'specimen': 'specimen_type',
+                     'report': 'lab_report_date'}
+
+    date = ll[date_type_map[date_type]]
     ltla_region = ll["LTLA_code"]
 
     # Merged regions
