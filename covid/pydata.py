@@ -71,15 +71,8 @@ def linelist2timeseries(date, region_code, date_range=None):
     # 3. Aggregate by date/region and sort on index
     case_counts = linelist.groupby(["date", "region_code"]).size()
     case_counts.sort_index(axis=0, inplace=True)
+    case_counts.name = "count"
 
-    # 4. Reindex by day
-    one_day = np.timedelta64(1, "D")
-    full_dates = pd.date_range(date_range[0], date_range[1] - one_day)
-    index = pd.MultiIndex.from_product(
-        [full_dates, case_counts.index.levels[1]], names=["date", "region_code"]
-    )
-    case_counts = case_counts.reindex(index)
-    case_counts.loc[case_counts.isna()] = 0.0
     case_counts.name = "count"
     return case_counts
 
@@ -87,10 +80,21 @@ def linelist2timeseries(date, region_code, date_range=None):
 def _read_csv(filename, date_format="%m/%d/%Y"):
     data = pd.read_csv(filename, low_memory=False)
     data["specimen_date"] = pd.to_datetime(data["specimen_date"], format=date_format)
+    data["lab_report_date"] = pd.to_datetime(
+        data["lab_report_date"], format=date_format
+    )
     return data
 
 
-def phe_case_data(linelisting_file, date_range=None, date_type='specimen', pillar=None):
+def _merge_ltla(series):
+    london = ["E09000001", "E09000033"]
+    corn_scilly = ["E06000052", "E06000053"]
+    series.loc[series.isin(london)] = ",".join(london)
+    series.loc[series.isin(corn_scilly)] = ",".join(corn_scilly)
+    return series
+
+
+def phe_case_data(linelisting_file, date_range=None, date_type="specimen", pillar=None):
 
     read_file = dict(csv=_read_csv, xlsx=pd.read_excel)
     match_extension = re.match(r"(.*)\.(.*)$", linelisting_file)
@@ -104,20 +108,31 @@ def phe_case_data(linelisting_file, date_range=None, date_type='specimen', pilla
     except KeyError:
         raise ValueError(f"No handler implemented for file type '{filetype}'")
 
+    # Merged regions
+    ll["LTLA_code"] = _merge_ltla(ll["LTLA_code"])
+    all_regions = ll.loc[~ll["LTLA_code"].isna(), "LTLA_code"].sort_values().unique()
+
+    # Choose pillar
     if pillar is not None:
         ll = ll.loc[ll["pillar"] == pillar]
 
-    date_type_map = {'specimen': 'specimen_type',
-                     'report': 'lab_report_date'}
+    date_type_map = {"specimen": "specimen_date", "report": "lab_report_date"}
 
     date = ll[date_type_map[date_type]]
-    ltla_region = ll["LTLA_code"]
 
-    # Merged regions
-    london = ["E09000001", "E09000033"]
-    corn_scilly = ["E06000052", "E06000053"]
-    ltla_region.loc[ltla_region.isin(london)] = ",".join(london)
-    ltla_region.loc[ltla_region.isin(corn_scilly)] = ",".join(corn_scilly)
+    ts = linelist2timeseries(date, ll["LTLA_code"], date_range)
 
-    ts = linelist2timeseries(date, ltla_region, date_range)
-    return ts.reset_index().pivot(index="region_code", columns="date", values="count")
+    # Re-index spatial timeseries
+    # 4. Reindex by day
+    one_day = np.timedelta64(1, "D")
+    full_dates = pd.date_range(date_range[0], date_range[1] - one_day)
+    index = pd.MultiIndex.from_product(
+        [full_dates, all_regions], names=["date", "region_code"]
+    )
+    print(index)
+    case_counts = ts.reindex(index)
+    case_counts.loc[case_counts.isna()] = 0.0
+
+    return case_counts.reset_index().pivot(
+        index="region_code", columns="date", values="count"
+    )
