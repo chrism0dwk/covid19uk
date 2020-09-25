@@ -129,7 +129,6 @@ def phe_case_data(linelisting_file, date_range=None, date_type="specimen", pilla
     index = pd.MultiIndex.from_product(
         [full_dates, all_regions], names=["date", "region_code"]
     )
-    print(index)
     case_counts = ts.reindex(index)
     case_counts.loc[case_counts.isna()] = 0.0
 

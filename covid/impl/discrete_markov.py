@@ -101,7 +101,6 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step, stoichiom
     num_times = events.shape[-2]
     num_events = events.shape[-1]
     num_states = stoichiometry.shape[-1]
-
     state_timeseries = compute_state(init_state, events, stoichiometry)  # MxTxS
 
     tms_timeseries = tf.transpose(state_timeseries, perm=(1, 0, 2))

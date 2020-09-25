@@ -11,7 +11,7 @@ import tqdm
 import yaml
 
 from covid import config
-from covid.model import load_data, CovidUKStochastic
+from covid.model import load_data, DiscreteTimeStateTransitionModel
 from covid.pydata import phe_case_data
 from covid.util import sanitise_parameter, sanitise_settings, impute_previous_cases
 from covid.impl.util import compute_state
@@ -20,6 +20,8 @@ from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
 from covid.impl.occult_events_mh import UncalibratedOccultUpdate, TransitionTopology
 from covid.impl.gibbs import DeterministicScanKernel, GibbsStep, flatten_results
 from covid.impl.multi_scan_kernel import MultiScanKernel
+
+from model_spec import CovidUK
 
 ###########
 # TF Bits #
@@ -65,7 +67,11 @@ covar_data = load_data(config["data"], settings, DTYPE)
 
 # We load in cases and impute missing infections first, since this sets the
 # time epoch which we are analysing.
-cases = phe_case_data(config["data"]["reported_cases"], date_range=settings["inference_period"], date_type='report')
+cases = phe_case_data(
+    config["data"]["reported_cases"],
+    date_range=settings["inference_period"],
+    date_type="report",
+)
 ei_events, lag_ei = impute_previous_cases(cases, 0.44)
 se_events, lag_se = impute_previous_cases(ei_events, 2.0)
 ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
@@ -89,86 +95,28 @@ num_xi = events.shape[1] // xi_freq
 num_metapop = covar_data["pop"].shape[0]
 
 
-# Create the epidemic model given parameters
-def build_epidemic(param):
-    def transition_rates(t, state):
-
-        C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
-        C = tf.linalg.set_diag(C + tf.transpose(C), tf.zeros(C.shape[0], dtype=DTYPE))
-        W = tf.constant(covar_data["W"], dtype=DTYPE)
-        N = tf.constant(covar_data["pop"], dtype=DTYPE)
-
-        w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
-        commute_volume = tf.gather(W, w_idx)
-        xi_idx = tf.cast(
-            tf.clip_by_value(t // 14, 0, param["xi"].shape[0] - 1), dtype=tf.int64,
-        )
-        xi = tf.gather(param["xi"], xi_idx)
-        beta = param["beta1"] * tf.math.exp(xi)
-
-        infec_rate = beta * (
-            state[..., 2]
-            + param["beta2"] * commute_volume * tf.linalg.matvec(C, state[..., 2] / N)
-        )
-        infec_rate = infec_rate / N + 0.000000001  # Vector of length nc
-
-        ei = tf.broadcast_to(
-            [param["nu"]], shape=[state.shape[0]]
-        )  # Vector of length nc
-        ir = tf.broadcast_to(
-            [param["gamma"]], shape=[state.shape[0]]
-        )  # Vector of length nc
-
-        return [infec_rate, ei, ir]
-
-    return CovidUKStochastic(
-        transition_rates=transition_rates,
-        stoichiometry=STOICHIOMETRY,
-        initial_state=initial_state,
-        initial_step=0,
-        time_delta=1.0,
-        num_steps=events.shape[1],
-    )
+model = CovidUK(
+    covariates=covar_data,
+    xi_freq=14,
+    initial_state=initial_state,
+    initial_step=0,
+    num_steps=events.shape[1],
+)
 
 
 ##########################
 # Log p and MCMC kernels #
 ##########################
 def logp(theta, xi, events):
-    p = param
-    p["beta1"] = tf.convert_to_tensor(theta[0], dtype=DTYPE)
-    p["beta2"] = tf.convert_to_tensor(theta[1], dtype=DTYPE)
-    p["gamma"] = tf.convert_to_tensor(theta[2], dtype=DTYPE)
-    p["xi"] = tf.convert_to_tensor(xi, dtype=DTYPE)
-
-    beta1 = tfd.Gamma(
-        concentration=tf.constant(1.0, dtype=DTYPE), rate=tf.constant(1.0, dtype=DTYPE)
-    )
-
-    sigma = tf.constant(0.01, dtype=DTYPE)
-    phi = tf.constant(12.0, dtype=DTYPE)
-    kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
-    idx_pts = tf.cast(tf.range(events.shape[1] // xi_freq) * xi_freq, dtype=DTYPE)
-    xi = tfd.GaussianProcess(kernel, index_points=idx_pts[:, tf.newaxis])
-
-    spatial_beta = tfd.Gamma(
-        concentration=tf.constant(3.0, dtype=DTYPE), rate=tf.constant(10.0, dtype=DTYPE)
-    )
-
-    gamma = tfd.Gamma(
-        concentration=tf.constant(100.0, dtype=DTYPE),
-        rate=tf.constant(400.0, dtype=DTYPE),
-    )
-
-    with tf.name_scope("epidemic_log_posterior"):
-        seir = build_epidemic(p)
-
-    return (
-        beta1.log_prob(p["beta1"])
-        + xi.log_prob(p["xi"])
-        + spatial_beta.log_prob(p["beta2"])
-        + gamma.log_prob(p["gamma"])
-        + seir.log_prob(events)
+    return model.log_prob(
+        dict(
+            beta1=theta[0],
+            beta2=theta[1],
+            gamma=theta[2],
+            xi=xi,
+            nu=param["nu"],
+            seir=events,
+        )
     )
 
 

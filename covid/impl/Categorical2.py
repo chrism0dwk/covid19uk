@@ -17,13 +17,14 @@ class Categorical2(tfd.Categorical):
        https://github.com/tensorflow/tensorflow/issues/40606"""
 
     def _log_prob(self, k):
-        logits = self.logits_parameter()
-        if self.validate_args:
-            k = distribution_util.embed_check_integer_casting_closed(
-                k, target_dtype=self.dtype
+        with tf.name_scope("Cat2log_prob"):
+            logits = self.logits_parameter()
+            if self.validate_args:
+                k = distribution_util.embed_check_integer_casting_closed(
+                    k, target_dtype=self.dtype
+                )
+            k, logits = _broadcast_cat_event_and_params(
+                k, logits, base_dtype=dtype_util.base_dtype(self.dtype)
             )
-        k, logits = _broadcast_cat_event_and_params(
-            k, logits, base_dtype=dtype_util.base_dtype(self.dtype)
-        )
-        logits_normalised = tf.math.log(tf.math.softmax(logits))
-        return tf.gather(logits_normalised, k, batch_dims=1)
+            logits_normalised = tf.math.log(tf.math.softmax(logits))
+            return tf.gather(logits_normalised, k, batch_dims=1)

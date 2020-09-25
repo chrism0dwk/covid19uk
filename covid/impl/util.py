@@ -3,6 +3,7 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow_probability.python.mcmc.internal import util as mcmc_util
+from tensorflow_probability.python.internal import prefer_static as ps
 
 
 def which(predicate):
@@ -59,8 +60,52 @@ def compute_state(initial_state, events, stoichiometry):
     :return: a tensor of shape [M, T, S] describing the state of the
              system for each batch M at time T.
     """
+    stoichiometry = tf.convert_to_tensor(stoichiometry, dtype=events.dtype)
     increments = tf.tensordot(events, stoichiometry, axes=[[-1], [-2]])  # mtx,xs->mts
     cum_increments = tf.cumsum(increments, axis=-2, exclusive=True)
     state = cum_increments + tf.expand_dims(initial_state, axis=-2)
 
     return state
+
+
+def transition_coords(stoichiometry):
+    src = np.where(stoichiometry == -1)[1]
+    dest = np.where(stoichiometry == 1)[1]
+    return np.stack([src, dest], axis=-1)
+
+
+def batch_gather(tensor, indices):
+    """Written by Chris Suter (c) 2020
+       Modified by Chris Jewell, 2020
+    """
+    tensor_shape = ps.shape(tensor)  # B + E
+    tensor_rank = ps.rank(tensor)
+    indices_shape = ps.shape(indices)  # [N, E]
+    num_outputs = indices_shape[0]
+    non_batch_rank = indices_shape[1]  # r(E)
+    batch_rank = tensor_rank - non_batch_rank
+
+    # batch_shape = tf.cast(tensor_shape[:batch_rank], dtype=tf.int64)
+    # batch_size = tf.reduce_prod(batch_shape)
+    # Create indices into batch_shape, of shape [batch_size, batch_rank]
+    # batch_indices = tf.transpose(
+    #    tf.unravel_index(tf.range(batch_size), dims=batch_shape)
+    # )
+
+    batch_shape = tensor_shape[:batch_rank]
+    batch_size = np.prod(batch_shape)
+    batch_indices = np.transpose(
+        np.unravel_index(np.arange(batch_size), dims=batch_shape)
+    )
+
+    # Tile the batch indices num_outputs times
+    batch_indices_tiled = tf.reshape(
+        tf.tile(batch_indices, multiples=[1, num_outputs]),
+        [batch_size * num_outputs, -1],
+    )
+
+    batched_output_indices = tf.tile(indices, multiples=[batch_size, 1])
+    full_indices = tf.concat([batch_indices_tiled, batched_output_indices], axis=-1)
+
+    output_shape = ps.concat([batch_shape, [num_outputs]], axis=0)
+    return tf.reshape(tf.gather_nd(tensor, full_indices), output_shape)
