@@ -103,34 +103,6 @@ class CovidUKStochastic:
         self.time_delta = time_delta
         self.num_steps = num_steps
 
-    def ngm(self, t, state, param):
-        """Computes a next generation matrix -- pressure from i to j is G_{ij}
-        :param t: the time step
-        :param state: a tensor of shape [M, S] for S states and M population strata.
-                      States are S, E, I, R.
-        :return: a tensor of shape [M, M] giving the expected number of new cases of
-                 disease individuals in each metapopulation give rise to.
-        """
-        w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, self.W.shape[0] - 1)
-        commute_volume = tf.gather(self.W, w_idx)
-        xi_idx = tf.cast(
-            tf.clip_by_value(t // self.xi_freq, 0, self.params["xi"].shape[0] - 1),
-            dtype=tf.int64,
-        )
-        xi = tf.gather(self.params["xi"], xi_idx)
-        beta = param["beta1"] * tf.math.exp(xi)
-
-        ngm = beta * (
-            tf.eye(self.C.shape[0], dtype=state.dtype)
-            + param["beta2"] * commute_volume * self.C / self.N[tf.newaxis, :]
-        )
-        ngm = (
-            ngm
-            * state[..., 0][..., tf.newaxis]
-            / (self.N[:, tf.newaxis] * param["gamma"])
-        )
-        return ngm
-
     def sample(self, seed=None):
         """Runs a simulation from the epidemic model
 
@@ -144,6 +116,7 @@ class CovidUKStochastic:
             start=self.initial_step,
             end=self.initial_step + self.num_steps * self.time_delta,
             time_step=self.time_delta,
+            stoichiometry=self.stoichiometry,
             seed=seed,
         )
         return t, sim
@@ -162,5 +135,10 @@ class CovidUKStochastic:
         with tf.name_scope("CovidUKStochastic.log_prob"):
             hazard = self.transition_rates
             return discrete_markov_log_prob(
-                y, self.initial_state, hazard, self.time_delta, self.stoichiometry
+                y,
+                self.initial_state,
+                self.initial_step,
+                self.time_delta,
+                hazard,
+                self.stoichiometry,
             )

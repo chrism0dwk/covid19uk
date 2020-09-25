@@ -64,3 +64,10 @@ def compute_state(initial_state, events, stoichiometry):
     state = cum_increments + tf.expand_dims(initial_state, axis=-2)
 
     return state
+
+
+def transition_coords(stoichiometry):
+    """Returns a matrix of (src, dest) pairs of transitions in a model"""
+    src = np.where(stoichiometry == -1)
+    dest = np.where(stoichiometry == 1)
+    return np.stack([src[1], dest[1]], axis=-1)
