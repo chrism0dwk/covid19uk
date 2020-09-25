@@ -60,11 +60,13 @@ def compute_state(initial_state, events, stoichiometry):
     :return: a tensor of shape [M, T, S] describing the state of the
              system for each batch M at time T.
     """
-    stoichiometry = tf.convert_to_tensor(stoichiometry, dtype=events.dtype)
-    increments = tf.tensordot(events, stoichiometry, axes=[[-1], [-2]])  # mtx,xs->mts
+    if isinstance(stoichiometry, tf.Tensor):
+        stoichiometry_ = tf.cast(stoichiometry, dtype=events.dtype)
+    else:
+        stoichiometry_ = tf.convert_to_tensor(stoichiometry, dtype=events.dtype)
+    increments = tf.tensordot(events, stoichiometry_, axes=[[-1], [-2]])  # mtx,xs->mts
     cum_increments = tf.cumsum(increments, axis=-2, exclusive=True)
     state = cum_increments + tf.expand_dims(initial_state, axis=-2)
-
     return state
 
 
