@@ -5,7 +5,6 @@ from warnings import warn
 
 import numpy as np
 import pandas as pd
-import pyreadr as pyr
 
 
 def load_commute_volume(filename, date_range):
@@ -28,7 +27,7 @@ def load_commute_volume(filename, date_range):
 
 def load_mobility_matrix(flow_file):
     """Loads mobility matrix from rds file"""
-    mobility = list(pyr.read_r(flow_file).values())[0]
+    mobility = pd.read_csv(flow_file)  # list(pyr.read_r(flow_file).values())[0]
     mobility = mobility[
         mobility["From"].str.startswith("E") & mobility["To"].str.startswith("E")
     ]

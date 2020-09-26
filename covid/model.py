@@ -1,14 +1,12 @@
-"""Functions for infection rates"""
+"""Describes a DiscreteTimeStateTransitionModel"""
+import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability.python.internal import dtype_util
 from tensorflow_probability.python.internal import reparameterization
-from tensorflow_probability.python.internal import prefer_static as ps
-import numpy as np
 
 from covid import config
-from covid.impl.util import make_transition_matrix, batch_gather, transition_coords
-from covid.rdata import load_age_mixing
+from covid.impl.util import batch_gather, transition_coords
 from covid.pydata import load_commute_volume, load_mobility_matrix, load_population
 from covid.impl.discrete_markov import (
     discrete_markov_simulation,
@@ -50,9 +48,6 @@ def dense_to_block_diagonal(A, n_blocks):
 
 
 def load_data(paths, settings, dtype=DTYPE):
-    M_tt, age_groups = load_age_mixing(paths["age_mixing_matrix_term"])
-    M_hh, _ = load_age_mixing(paths["age_mixing_matrix_hol"])
-
     C = load_mobility_matrix(paths["mobility_matrix"])
     la_names = C.index.to_numpy()
 
@@ -61,19 +56,14 @@ def load_data(paths, settings, dtype=DTYPE):
 
     pop = load_population(paths["population_size"])
 
-    M_tt = M_tt.astype(DTYPE)
-    M_hh = M_hh.astype(DTYPE)
     C = C.to_numpy().astype(DTYPE)
     np.fill_diagonal(C, 0.0)
     W = W.to_numpy().astype(DTYPE)
     pop = pop.to_numpy().astype(DTYPE)
 
     return {
-        "M_tt": M_tt,
-        "M_hh": M_hh,
         "C": C,
         "la_names": la_names,
-        "age_groups": age_groups,
         "W": W,
         "pop": pop,
     }
