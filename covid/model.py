@@ -163,6 +163,7 @@ class DiscreteTimeStateTransitionModel(tfd.Distribution):
                 start=self.initial_step,
                 end=self.initial_step + self.num_steps * self.time_delta,
                 time_step=self.time_delta,
+                stoichiometry=self.stoichiometry,
                 seed=seed,
             )
             indices = transition_coords(self.stoichiometry)
@@ -182,5 +183,10 @@ class DiscreteTimeStateTransitionModel(tfd.Distribution):
         with tf.name_scope("CovidUKStochastic.log_prob"):
             hazard = self.transition_rates
             return discrete_markov_log_prob(
-                y, self.initial_state, hazard, self.time_delta, self.stoichiometry
+                events=y,
+                init_state=self.initial_state,
+                init_step=self.initial_step,
+                time_delta=self.time_delta,
+                hazard_fn=hazard,
+                stoichiometry=self.stoichiometry,
             )

@@ -87,6 +87,8 @@ def batch_gather(tensor, indices):
     non_batch_rank = indices_shape[1]  # r(E)
     batch_rank = tensor_rank - non_batch_rank
 
+    # The TF way which will work if the shape is dynamic, but not with XLA
+    # due to tf.unravel_index.
     # batch_shape = tf.cast(tensor_shape[:batch_rank], dtype=tf.int64)
     # batch_size = tf.reduce_prod(batch_shape)
     # Create indices into batch_shape, of shape [batch_size, batch_rank]

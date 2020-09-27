@@ -1,5 +1,7 @@
 """Implements the COVID SEIR model as a TFP Joint Distribution"""
 
+import pandas as pd
+import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -11,6 +13,32 @@ DTYPE = floatX
 
 STOICHIOMETRY = tf.constant([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])
 TIME_DELTA = 1.0
+
+
+def read_covariates(paths):
+    """Loads covariate data
+
+    :param paths: a dictionary of paths to data with keys {'mobility_matrix',
+                  'population_size', 'commute_volume'}
+    :returns: a dictionary of covariate information to be consumed by the model
+              {'C': commute_matrix, 'W': traffic_flow, 'N': population_size}
+    """
+    mobility = pd.read_csv(paths["mobility_matrix"], index_col=0)
+    popsize = pd.read_csv(paths["population_size"], index_col=0)
+    commute_volume = pd.read_csv(paths["commute_volume"], index_col=0)
+
+    return dict(
+        C=mobility.to_numpy().astype(DTYPE),
+        W=commute_volume.to_numpy().astype(DTYPE),
+        N=popsize.to_numpy().astype(DTYPE),
+    )
+
+
+def read_cases(path):
+    """Loads case data from CSV file"""
+    cases_tidy = pd.read_csv(path)
+    cases_wide = cases_tidy.pivot(index="lad19cd", columns="date", values="cases")
+    return cases_wide
 
 
 def CovidUK(covariates, xi_freq, initial_state, initial_step, num_steps):
@@ -58,8 +86,8 @@ def CovidUK(covariates, xi_freq, initial_state, initial_step, num_steps):
             C = tf.linalg.set_diag(
                 C + tf.transpose(C), tf.zeros(C.shape[0], dtype=DTYPE)
             )
-            W = tf.constant(covariates["W"], dtype=DTYPE)
-            N = tf.constant(covariates["pop"], dtype=DTYPE)
+            W = tf.constant(np.squeeze(covariates["W"]), dtype=DTYPE)
+            N = tf.constant(np.squeeze(covariates["N"]), dtype=DTYPE)
 
             w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
             commute_volume = tf.gather(W, w_idx)
@@ -71,9 +99,11 @@ def CovidUK(covariates, xi_freq, initial_state, initial_step, num_steps):
 
             infec_rate = beta * (
                 state[..., 2]
-                + beta2 * commute_volume * tf.linalg.matvec(C, state[..., 2] / N)
+                + beta2
+                * commute_volume
+                * tf.linalg.matvec(C, state[..., 2] / tf.squeeze(N))
             )
-            infec_rate = infec_rate / N + 0.000000001  # Vector of length nc
+            infec_rate = infec_rate / tf.squeeze(N) + 0.000000001  # Vector of length nc
 
             ei = tf.broadcast_to([nu], shape=[state.shape[0]])  # Vector of length nc
             ir = tf.broadcast_to([gamma], shape=[state.shape[0]])  # Vector of length nc

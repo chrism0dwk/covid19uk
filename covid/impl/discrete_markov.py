@@ -113,8 +113,7 @@ def discrete_markov_log_prob(
     def fn(elems):
         return hazard_fn(*elems)
 
-    tx_coords = [[0, 1], [1, 2], [2, 3]]  # transition_coords(stoichiometry).tolist()
-    print("tx_coords:", tx_coords)
+    tx_coords = transition_coords(stoichiometry)
     rates = tf.vectorized_map(fn=fn, elems=[tf.range(num_times), tms_timeseries])
     rate_matrix = make_transition_matrix(rates, tx_coords, tms_timeseries.shape)
     probs = approx_expm(rate_matrix * time_delta)

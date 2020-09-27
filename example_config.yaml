@@ -1,38 +1,17 @@
 # Covid_ODE model configuration
 
 data:
-  age_mixing_matrix_term: data/polymod_normal_df.rds
-  age_mixing_matrix_hol: data/polymod_no_school_df.rds
-  mobility_matrix: data/mergedflows.rds
-  population_size: data/c2019modagepop.csv
-  commute_volume: /home/jewellcp/Insync/jewellcp@lancaster.ac.uk/OneDrive Biz - Shared/covid19/data/DfT/2020-07-24/200724_COVID19_road_traffic_national_table.xlsx
-  reported_cases: /home/jewellcp/Insync/jewellcp@lancaster.ac.uk/OneDrive Biz - Shared/covid19/data/PHE/PHE_2020-07-22/Anonymised Combined Line List 20200722.xlsx
+  mobility_matrix: data/example_mobility.csv
+  population_size: data/example_population.csv
+  commute_volume: data/example_traffic_flow.csv
+  reported_cases: data/example_cases.csv
 
 parameter:
   beta1: 0.6    # R0 2.4
   beta2: 0.5   # Contact with commuters 1/3rd of the time
   beta3: 1.0    # lockdown vs normal
-  omega: 1.0    # Non-linearity parameter for commuting volume
   nu: 0.5      # E -> I transition rate
   gamma: 0.25   # I -> R transition rate
-  I0: 4.0       # number of individuals at start of epidemic
-  r: 10.0       # Negative binomial overdispersion parameter
-
-settings:
-  inference_period:
-    - 2020-05-12
-    - 2020-07-30
-
-  holiday:
-    - 2020-03-23
-    - 2020-10-01
-  lockdown:
-    - 2020-03-23
-    - 2020-10-01
-  time_step: 1.
-  prediction_period:
-    - 2020-02-19
-    - 2020-08-01
 
 mcmc:
   dmax: 21
@@ -40,10 +19,10 @@ mcmc:
   m: 1
   occult_nmax: 15
   num_event_time_updates: 5
-  num_bursts: 100
+  num_bursts: 10
   num_burst_samples: 100
   thin: 1
   
 output:
-  posterior: posterior_xi.h5
-  simulation: covid_ode.hd5
+  posterior: example_posterior.h5
+
