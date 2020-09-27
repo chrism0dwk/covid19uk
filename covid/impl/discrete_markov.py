@@ -2,7 +2,7 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from covid.impl.util import compute_state, make_transition_matrix
+from covid.impl.util import compute_state, make_transition_matrix, transition_coords
 
 tfd = tfp.distributions
 
@@ -18,7 +18,7 @@ def approx_expm(rates):
     return tf.linalg.set_diag(mt1, 1.0 - tf.reduce_sum(mt1, axis=-1))
 
 
-def chain_binomial_propagate(h, time_step, seed=None):
+def chain_binomial_propagate(h, time_step, stoichiometry, seed=None):
     """Propagates the state of a population according to discrete time dynamics.
 
     :param h: a hazard rate function returning the non-row-normalised Markov transition
@@ -32,7 +32,7 @@ def chain_binomial_propagate(h, time_step, seed=None):
     def propagate_fn(t, state):
         rates = h(t, state)
         rate_matrix = make_transition_matrix(
-            rates, [[0, 1], [1, 2], [2, 3]], state.shape
+            rates, transition_coords(stoichiometry), state.shape
         )
         # Set diagonal to be the negative of the sum of other elements in each row
         markov_transition = approx_expm(rate_matrix * time_step)
@@ -64,10 +64,12 @@ def chain_binomial_propagate(h, time_step, seed=None):
     return propagate_fn
 
 
-def discrete_markov_simulation(hazard_fn, state, start, end, time_step, seed=None):
+def discrete_markov_simulation(
+    hazard_fn, state, start, end, time_step, stoichiometry, seed=None
+):
     """Simulates from a discrete time Markov state transition model using multinomial sampling
     across rows of the """
-    propagate = chain_binomial_propagate(hazard_fn, time_step, seed=seed)
+    propagate = chain_binomial_propagate(hazard_fn, time_step, stoichiometry, seed=seed)
     times = tf.range(start, end, time_step, dtype=state.dtype)
     state = tf.convert_to_tensor(state)
 
@@ -84,15 +86,18 @@ def discrete_markov_simulation(hazard_fn, state, start, end, time_step, seed=Non
     return times, output.stack()
 
 
-def discrete_markov_log_prob(events, init_state, hazard_fn, time_step, stoichiometry):
+def discrete_markov_log_prob(
+    events, init_state, init_step, time_delta, hazard_fn, stoichiometry
+):
     """Calculates an unnormalised log_prob function for a discrete time epidemic model.
     :param events: a `[M, T, X]` batch of transition events for metapopulation M,
                    times `T`, and transitions `X`.
     :param init_state: a vector of shape `[M, S]` the initial state of the epidemic for
                        `M` metapopulations and `S` states
+    :param init_step: the initial time step, as an offset to `range(events.shape[-2])`
+    :param time_delta: the size of the time step.
     :param hazard_fn: a function that takes a state and returns a matrix of transition
                       rates.
-    :param time_step: the size of the time step.
     :param stoichiometry: a `[X, S]` matrix describing the state update for each
                           transition.
     :return: a scalar log probability for the epidemic.
@@ -108,16 +113,16 @@ def discrete_markov_log_prob(events, init_state, hazard_fn, time_step, stoichiom
     def fn(elems):
         return hazard_fn(*elems)
 
+    tx_coords = [[0, 1], [1, 2], [2, 3]]  # transition_coords(stoichiometry).tolist()
+    print("tx_coords:", tx_coords)
     rates = tf.vectorized_map(fn=fn, elems=[tf.range(num_times), tms_timeseries])
-    rate_matrix = make_transition_matrix(
-        rates, [[0, 1], [1, 2], [2, 3]], tms_timeseries.shape
-    )
-    probs = approx_expm(rate_matrix * time_step)
+    rate_matrix = make_transition_matrix(rates, tx_coords, tms_timeseries.shape)
+    probs = approx_expm(rate_matrix * time_delta)
 
     # [T, M, S, S] to [M, T, S, S]
     probs = tf.transpose(probs, perm=(1, 0, 2, 3))
     event_matrix = make_transition_matrix(
-        events, [[0, 1], [1, 2], [2, 3]], [num_meta, num_times, num_states]
+        events, tx_coords, [num_meta, num_times, num_states]
     )
     event_matrix = tf.linalg.set_diag(
         event_matrix, state_timeseries - tf.reduce_sum(event_matrix, axis=-1)
