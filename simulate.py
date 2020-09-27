@@ -30,31 +30,22 @@ print("Loading config file:", options.config)
 with open(options.config, "r") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
 
-settings = sanitise_settings(config["settings"])
 
 # Load in covariate data
-covar_data = load_data(config["data"], settings, DTYPE)
+covar_data = model_spec.read_covariates(config['data'])
 
 # We load in cases and impute missing infections first, since this sets the
 # time epoch which we are analysing.
-cases = phe_case_data(
-    config["data"]["reported_cases"],
-    date_range=settings["inference_period"],
-    date_type="report",
-)
+cases = model_spec.read_cases(config['data']['reported_cases'])
 
 # Single imputation of censored data
-ei_events, lag_ei = impute_previous_cases(cases, 0.44)
-se_events, lag_se = impute_previous_cases(ei_events, 2.0)
-ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
-ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
-events = tf.stack([se_events, ei_events, ir_events], axis=-1)
+events = model_spec.impute_censored_events(cases)
 
-# Initial conditions are calculated by calculating the state
-# at the beginning of the inference period
+# Initial conditions S(0), E(0), I(0), R(0) are calculated
+# by calculating the state at the beginning of the inference period
 state = compute_state(
     initial_state=tf.concat(
-        [covar_data["pop"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])], axis=-1
+        [covar_data["N"], tf.zeros_like(events[:, 0, :])], axis=-1
     ),
     events=events,
     stoichiometry=model_spec.STOICHIOMETRY,

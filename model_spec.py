@@ -7,6 +7,7 @@ import tensorflow_probability as tfp
 
 from covid.config import floatX
 from covid.model import DiscreteTimeStateTransitionModel
+from covid.util import impute_previous_cases
 
 tfd = tfp.distributions
 DTYPE = floatX
@@ -39,6 +40,27 @@ def read_cases(path):
     cases_tidy = pd.read_csv(path)
     cases_wide = cases_tidy.pivot(index="lad19cd", columns="date", values="cases")
     return cases_wide
+
+
+def impute_censored_events(cases):
+    """Imputes censored S->E and E->I events using geometric
+       sampling algorithm in `impute_previous_cases`
+
+    There are application-specific magic numbers hard-coded below, 
+    which reflect experimentation to get the right lag between EI and
+    IR events, and SE and EI events respectively.  These were chosen
+    by experimentation and examination of the resulting epidemic 
+    trajectories.
+
+    :param cases: a MxT matrix of case numbers (I->R)
+    :returns: a MxTx3 tensor of events where the first two indices of 
+              the right-most dimension contain the imputed event times.
+    """
+    ei_events, lag_ei = impute_previous_cases(cases, 0.44)
+    se_events, lag_se = impute_previous_cases(ei_events, 2.0)
+    ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
+    ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
+    return tf.stack([se_events, ei_events, ir_events], axis=-1)
 
 
 def CovidUK(covariates, xi_freq, initial_state, initial_step, num_steps):
