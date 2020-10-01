@@ -91,14 +91,7 @@ if __name__ == "__main__":
     # $\pi(\theta, \xi, y^{se}, y^{ei} | y^{ir})$
     def logp(theta, xi, events):
         return model.log_prob(
-            dict(
-                beta1=theta[0],
-                beta2=theta[1],
-                gamma=theta[2],
-                xi=xi,
-                nu=0.5,  # Fixed!
-                seir=events,
-            )
+            dict(beta1=theta[0], beta2=theta[1], gamma=theta[2], xi=xi, seir=events,)
         )
 
     # Build Metropolis within Gibbs sampler
@@ -243,7 +236,7 @@ if __name__ == "__main__":
 
     current_state = [
         np.array([0.85, 0.3, 0.25], dtype=DTYPE),
-        np.zeros(model.model['xi']().event_shape[-1], dtype=DTYPE),
+        np.zeros(model.model["xi"]().event_shape[-1], dtype=DTYPE),
         events,
     ]
 
@@ -258,6 +251,10 @@ if __name__ == "__main__":
     event_size = [NUM_SAVED_SAMPLES] + list(current_state[2].shape)
 
     posterior.create_dataset("initial_state", data=initial_state)
+
+    # Ideally we insert the inference period into the posterior file
+    # as this allows us to post-attribute it to the data.  Maybe better
+    # to simply save the data into it as well.
     posterior.create_dataset(
         "inference_period", data=[b"2020-06-16", b"2020-09-08"]
     ).attrs["description"] = "inference period [start, end)"

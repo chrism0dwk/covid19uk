@@ -5,16 +5,17 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from covid.config import floatX
 from covid.model import DiscreteTimeStateTransitionModel
 from covid.util import impute_previous_cases
 
 tfd = tfp.distributions
-DTYPE = floatX
+DTYPE = np.float64
 
 STOICHIOMETRY = tf.constant([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])
 TIME_DELTA = 1.0
-XI_FREQ = 14
+XI_FREQ = 14  # baseline transmission changes every 14 days
+NU = tf.constant(0.5, dtype=DTYPE)  # E->I rate assumed known.
+
 
 def read_covariates(paths):
     """Loads covariate data
@@ -64,7 +65,6 @@ def impute_censored_events(cases):
 
 
 def CovidUK(covariates, initial_state, initial_step, num_steps):
-    
     def beta1():
         return tfd.Gamma(
             concentration=tf.constant(1.0, dtype=DTYPE),
@@ -84,24 +84,17 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         idx_pts = tf.cast(tf.range(num_steps // XI_FREQ) * XI_FREQ, dtype=DTYPE)
         return tfd.GaussianProcess(kernel, index_points=idx_pts[:, tf.newaxis])
 
-    def nu():
-        return tfd.Gamma(
-            concentration=tf.constant(1.0, dtype=DTYPE),
-            rate=tf.constant(1.0, dtype=DTYPE),
-        )
-
     def gamma():
         return tfd.Gamma(
             concentration=tf.constant(100.0, dtype=DTYPE),
             rate=tf.constant(400.0, dtype=DTYPE),
         )
 
-    def seir(beta1, beta2, xi, nu, gamma):
+    def seir(beta1, beta2, xi, gamma):
 
         beta1 = tf.convert_to_tensor(beta1, DTYPE)
         beta2 = tf.convert_to_tensor(beta2, DTYPE)
         xi = tf.convert_to_tensor(xi, DTYPE)
-        nu = tf.convert_to_tensor(nu, DTYPE)
         gamma = tf.convert_to_tensor(gamma, DTYPE)
 
         def transition_rate_fn(t, state):
@@ -128,7 +121,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             )
             infec_rate = infec_rate / tf.squeeze(N) + 0.000000001  # Vector of length nc
 
-            ei = tf.broadcast_to([nu], shape=[state.shape[0]])  # Vector of length nc
+            ei = tf.broadcast_to([NU], shape=[state.shape[0]])  # Vector of length nc
             ir = tf.broadcast_to([gamma], shape=[state.shape[0]])  # Vector of length nc
 
             return [infec_rate, ei, ir]
@@ -143,5 +136,43 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         )
 
     return tfd.JointDistributionNamed(
-        dict(beta1=beta1, beta2=beta2, xi=xi, nu=nu, gamma=gamma, seir=seir)
+        dict(beta1=beta1, beta2=beta2, xi=xi, gamma=gamma, seir=seir)
     )
+
+
+def next_generation_matrix_fn(covar_data, param):
+    """The next generation matrix calculates the force of infection from 
+       individuals in metapopulation i to all other metapopulations j during
+       a typical infectious period (1/gamma). i.e.
+         
+         \[ A_{ij} = S_j * \beta_1 ( 1 + \beta_2 * w_t * C_{ij} / N_i) / N_j / gamma \]
+
+       :param covar_data: a dictionary of covariate data
+       :param param: a dictionary of parameters
+       :returns: a function taking arguments `t` and `state` giving the time and
+                 epidemic state (SEIR) for which the NGM is to be calculated.  This
+                 function in turn returns an MxM next generation matrix.
+    """
+
+    def fn(t, state):
+        C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
+        C = tf.linalg.set_diag(C + tf.transpose(C), tf.zeros(C.shape[0], dtype=DTYPE))
+        W = tf.constant(covar_data["W"], dtype=DTYPE)
+        N = tf.constant(covar_data["N"], dtype=DTYPE)
+
+        w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
+        commute_volume = tf.gather(W, w_idx)
+        xi_idx = tf.cast(
+            tf.clip_by_value(t // XI_FREQ, 0, param["xi"].shape[0] - 1), dtype=tf.int64,
+        )
+        xi = tf.gather(param["xi"], xi_idx)
+        beta = param["beta1"] * tf.math.exp(xi)
+
+        ngm = beta * (
+            tf.eye(C.shape[0], dtype=state.dtype)
+            + param["beta2"] * commute_volume * C / N[tf.newaxis, :]
+        )
+        ngm = ngm * state[..., 0][..., tf.newaxis] / (N[:, tf.newaxis] * param["gamma"])
+        return ngm
+
+    return fn

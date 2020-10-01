@@ -32,11 +32,11 @@ with open(options.config, "r") as f:
 
 
 # Load in covariate data
-covar_data = model_spec.read_covariates(config['data'])
+covar_data = model_spec.read_covariates(config["data"])
 
 # We load in cases and impute missing infections first, since this sets the
 # time epoch which we are analysing.
-cases = model_spec.read_cases(config['data']['reported_cases'])
+cases = model_spec.read_cases(config["data"]["reported_cases"])
 
 # Single imputation of censored data
 events = model_spec.impute_censored_events(cases)
@@ -44,9 +44,7 @@ events = model_spec.impute_censored_events(cases)
 # Initial conditions S(0), E(0), I(0), R(0) are calculated
 # by calculating the state at the beginning of the inference period
 state = compute_state(
-    initial_state=tf.concat(
-        [covar_data["N"], tf.zeros_like(events[:, 0, :])], axis=-1
-    ),
+    initial_state=tf.concat([covar_data["N"], tf.zeros_like(events[:, 0, :])], axis=-1),
     events=events,
     stoichiometry=model_spec.STOICHIOMETRY,
 )
@@ -56,13 +54,9 @@ events = events[:, start_time:, :]
 
 # Build model and sample
 full_probability_model = model_spec.CovidUK(
-    covariates=covar_data,
-    xi_freq=14,
-    initial_state=initial_state,
-    initial_step=0,
-    num_steps=80,
+    covariates=covar_data, initial_state=initial_state, initial_step=0, num_steps=80,
 )
 seir = full_probability_model.model["seir"](
-    beta1=0.35, beta2=0.65, xi=[0.0] * 5, nu=0.5, gamma=0.49
+    beta1=0.35, beta2=0.65, xi=[0.0] * 5, gamma=0.49
 )
 sim = seir.sample()
