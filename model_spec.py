@@ -14,7 +14,7 @@ DTYPE = floatX
 
 STOICHIOMETRY = tf.constant([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])
 TIME_DELTA = 1.0
-
+XI_FREQ = 14
 
 def read_covariates(paths):
     """Loads covariate data
@@ -63,7 +63,8 @@ def impute_censored_events(cases):
     return tf.stack([se_events, ei_events, ir_events], axis=-1)
 
 
-def CovidUK(covariates, xi_freq, initial_state, initial_step, num_steps):
+def CovidUK(covariates, initial_state, initial_step, num_steps):
+    
     def beta1():
         return tfd.Gamma(
             concentration=tf.constant(1.0, dtype=DTYPE),
@@ -78,9 +79,9 @@ def CovidUK(covariates, xi_freq, initial_state, initial_step, num_steps):
 
     def xi():
         sigma = tf.constant(0.01, dtype=DTYPE)
-        phi = tf.constant(12.0, dtype=DTYPE)
+        phi = tf.constant(24.0, dtype=DTYPE)
         kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
-        idx_pts = tf.cast(tf.range(num_steps // xi_freq) * xi_freq, dtype=DTYPE)
+        idx_pts = tf.cast(tf.range(num_steps // XI_FREQ) * XI_FREQ, dtype=DTYPE)
         return tfd.GaussianProcess(kernel, index_points=idx_pts[:, tf.newaxis])
 
     def nu():
@@ -114,7 +115,7 @@ def CovidUK(covariates, xi_freq, initial_state, initial_step, num_steps):
             w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
             commute_volume = tf.gather(W, w_idx)
             xi_idx = tf.cast(
-                tf.clip_by_value(t // 14, 0, xi.shape[0] - 1), dtype=tf.int64,
+                tf.clip_by_value(t // XI_FREQ, 0, xi.shape[0] - 1), dtype=tf.int64,
             )
             xi_ = tf.gather(xi, xi_idx)
             beta = beta1 * tf.math.exp(xi_)

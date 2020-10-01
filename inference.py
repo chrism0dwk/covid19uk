@@ -3,17 +3,14 @@ import optparse
 import os
 from time import perf_counter
 
-import h5py
-import numpy as np
-import pandas as pd
-import tensorflow as tf
-import tensorflow_probability as tfp
 import tqdm
 import yaml
+import h5py
+import numpy as np
+import tensorflow as tf
+import tensorflow_probability as tfp
 
 from covid import config
-from covid.model import load_data, DiscreteTimeStateTransitionModel
-from covid.util import impute_previous_cases
 from covid.impl.util import compute_state
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
@@ -34,28 +31,6 @@ else:
 tfd = tfp.distributions
 tfb = tfp.bijectors
 DTYPE = config.floatX
-STOICHIOMETRY = tf.constant([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]], dtype=DTYPE)
-
-
-def impute_censored_events(cases):
-    """Imputes censored S->E and E->I events using geometric
-       sampling algorithm in `impute_previous_cases`
-
-    There are application-specific magic numbers hard-coded below, 
-    which reflect experimentation to get the right lag between EI and
-    IR events, and SE and EI events respectively.  These were chosen
-    by experimentation and examination of the resulting epidemic 
-    trajectories.
-
-    :param cases: a MxT matrix of case numbers (I->R)
-    :returns: a MxTx3 tensor of events where the first two indices of 
-              the right-most dimension contain the imputed event times.
-    """
-    ei_events, lag_ei = impute_previous_cases(cases, 0.44)
-    se_events, lag_se = impute_previous_cases(ei_events, 2.0)
-    ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
-    ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
-    return tf.stack([se_events, ei_events, ir_events], axis=-1)
 
 
 if __name__ == "__main__":
@@ -82,7 +57,7 @@ if __name__ == "__main__":
     cases = model_spec.read_cases(config["data"]["reported_cases"])
 
     # Impute censored events, return cases
-    events = impute_censored_events(cases)
+    events = model_spec.impute_censored_events(cases)
 
     # Initial conditions are calculated by calculating the state
     # at the beginning of the inference period
@@ -95,13 +70,11 @@ if __name__ == "__main__":
             [covar_data["N"], tf.zeros_like(events[:, 0, :])], axis=-1
         ),
         events=events,
-        stoichiometry=STOICHIOMETRY,
+        stoichiometry=model_spec.STOICHIOMETRY,
     )
     start_time = state.shape[1] - cases.shape[1]
     initial_state = state[:, start_time, :]
     events = events[:, start_time:, :]
-    xi_freq = 14
-    num_xi = events.shape[1] // xi_freq
     num_metapop = covar_data["N"].shape[0]
 
     ########################################################
@@ -109,7 +82,6 @@ if __name__ == "__main__":
     ########################################################
     model = model_spec.CovidUK(
         covariates=covar_data,
-        xi_freq=14,
         initial_state=initial_state,
         initial_step=0,
         num_steps=events.shape[1],
@@ -271,7 +243,7 @@ if __name__ == "__main__":
 
     current_state = [
         np.array([0.85, 0.3, 0.25], dtype=DTYPE),
-        np.zeros(num_xi, dtype=DTYPE),
+        np.zeros(model.model['xi']().event_shape[-1], dtype=DTYPE),
         events,
     ]
 
