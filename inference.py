@@ -1,5 +1,5 @@
 """MCMC Test Rig for COVID-19 UK model"""
-import optparse
+import argparse
 import os
 from time import perf_counter
 
@@ -36,18 +36,14 @@ DTYPE = config.floatX
 if __name__ == "__main__":
 
     # Read in settings
-    parser = optparse.OptionParser()
-    parser.add_option(
-        "--config",
-        "-c",
-        dest="config",
-        default="example_config.yaml",
-        help="configuration file",
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-c", "--config", default="example_config.yaml", help="configuration file",
     )
-    options, cmd_args = parser.parse_args()
-    print("Loading config file:", options.config)
+    args = parser.parse_args()
+    print("Loading config file:", args.config)
 
-    with open(options.config, "r") as f:
+    with open(args.config, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     covar_data = model_spec.read_covariates(config["data"])
