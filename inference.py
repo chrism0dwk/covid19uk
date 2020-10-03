@@ -271,9 +271,7 @@ if __name__ == "__main__":
     # Ideally we insert the inference period into the posterior file
     # as this allows us to post-attribute it to the data.  Maybe better
     # to simply save the data into it as well.
-    posterior.create_dataset(
-        "inference_period", data=[b"2020-06-16", b"2020-09-08"]
-    ).attrs["description"] = "inference period [start, end)"
+    posterior.create_dataset("config", data=yaml.dump(config))
     theta_samples = posterior.create_dataset(
         "samples/theta",
         [NUM_SAVED_SAMPLES, current_state[0].shape[0]],
