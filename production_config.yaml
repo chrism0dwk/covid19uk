@@ -1,0 +1,33 @@
+# Covid_ODE model configuration
+
+data:
+  mobility_matrix: /home/jewellcp/Insync/jewellcp@lancaster.ac.uk/OneDrive Biz - Shared/covid19/data/UK_Commute_2019/mergedflows.csv
+  population_size: /home/jewellcp/Insync/jewellcp@lancaster.ac.uk/OneDrive Biz - Shared/covid19/data/UK_Commute_2019/c2019modagepop.csv
+  commute_volume: /home/jewellcp/Insync/jewellcp@lancaster.ac.uk/OneDrive Biz - Shared/covid19/data/DfT/2020-09-29/200929_OFF_SEN_COVID19_road_traffic_national_table.xlsx
+  reported_cases: /home/jewellcp/Insync/jewellcp@lancaster.ac.uk/OneDrive Biz - Shared/covid19/data/PHE/PHE_2020-10-02/Anonymised Combined Line List 20201002.csv
+
+parameter:
+  beta1: 0.6    # R0 2.4
+  beta2: 0.5   # Contact with commuters 1/3rd of the time
+  beta3: 1.0    # lockdown vs normal
+  nu: 0.5      # E -> I transition rate
+  gamma: 0.25   # I -> R transition rate
+
+settings:
+  inference_period:
+      - 2020-07-06
+      - 2020-09-28
+
+mcmc:
+  dmax: 21
+  nmax: 50
+  m: 1
+  occult_nmax: 15
+  num_event_time_updates: 5
+  num_bursts: 10
+  num_burst_samples: 100
+  thin: 1
+  
+output:
+  posterior: example_posterior.h5
+
