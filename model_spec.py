@@ -64,7 +64,12 @@ def impute_censored_events(cases):
     return tf.stack([se_events, ei_events, ir_events], axis=-1)
 
 
-def CovidUK(covariates, initial_state, initial_step, num_steps):
+def CovidUK(
+    covariates, initial_state, initial_step, num_steps
+):  # pylint: disable=invalid-name
+    """Implements a Bayesian CovidUK model using Tensorflow Probability
+    """
+
     def beta1():
         return tfd.Gamma(
             concentration=tf.constant(1.0, dtype=DTYPE),

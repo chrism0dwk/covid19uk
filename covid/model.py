@@ -5,9 +5,7 @@ import tensorflow_probability as tfp
 from tensorflow_probability.python.internal import dtype_util
 from tensorflow_probability.python.internal import reparameterization
 
-from covid import config
 from covid.impl.util import batch_gather, transition_coords
-from covid.pydata import load_commute_volume, load_mobility_matrix, load_population
 from covid.impl.discrete_markov import (
     discrete_markov_simulation,
     discrete_markov_log_prob,
@@ -15,8 +13,6 @@ from covid.impl.discrete_markov import (
 
 tla = tf.linalg
 tfd = tfp.distributions
-
-DTYPE = config.floatX
 
 
 def power_iteration(A, tol=1e-3):
@@ -47,28 +43,6 @@ def dense_to_block_diagonal(A, n_blocks):
     return A_block
 
 
-def load_data(paths, settings, dtype=DTYPE):
-    C = load_mobility_matrix(paths["mobility_matrix"])
-    la_names = C.index.to_numpy()
-
-    w_period = [settings["inference_period"][0], settings["inference_period"][1]]
-    W = load_commute_volume(paths["commute_volume"], w_period)["percent"]
-
-    pop = load_population(paths["population_size"])
-
-    C = C.to_numpy().astype(DTYPE)
-    np.fill_diagonal(C, 0.0)
-    W = W.to_numpy().astype(DTYPE)
-    pop = pop.to_numpy().astype(DTYPE)
-
-    return {
-        "C": C,
-        "la_names": la_names,
-        "W": W,
-        "pop": pop,
-    }
-
-
 class DiscreteTimeStateTransitionModel(tfd.Distribution):
     def __init__(
         self,
@@ -95,7 +69,9 @@ class DiscreteTimeStateTransitionModel(tfd.Distribution):
         parameters = dict(locals())
         with tf.name_scope(name) as name:
             self._transition_rates = transition_rates
-            self._stoichiometry = np.array(stoichiometry, dtype=DTYPE)
+            self._stoichiometry = np.array(
+                stoichiometry, dtype=initial_state.dtype.as_numpy_dtype
+            )
             self._initial_state = initial_state
             self._initial_step = initial_step
             self._time_delta = time_delta
@@ -109,8 +85,6 @@ class DiscreteTimeStateTransitionModel(tfd.Distribution):
                 parameters=parameters,
                 name=name,
             )
-
-        self.dtype = initial_state.dtype
 
     @property
     def transition_rates(self):
@@ -178,7 +152,7 @@ class DiscreteTimeStateTransitionModel(tfd.Distribution):
         :param param: a list of parameters
         :returns: a scalar giving the log probability of the epidemic
         """
-        dtype = dtype_util.common_dtype([y, self.initial_state], dtype_hint=DTYPE)
+        dtype = dtype_util.common_dtype([y, self.initial_state], dtype_hint=self.dtype)
         y = tf.convert_to_tensor(y, dtype)
         with tf.name_scope("CovidUKStochastic.log_prob"):
             hazard = self.transition_rates
