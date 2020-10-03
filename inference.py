@@ -1,6 +1,13 @@
 """MCMC Test Rig for COVID-19 UK model"""
-import optparse
+# pylint: disable=E402
+
+import argparse
 import os
+
+# Uncomment to block GPU use
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
 from time import perf_counter
 
 import tqdm
@@ -10,18 +17,16 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from covid import config
 from covid.impl.util import compute_state
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
 from covid.impl.occult_events_mh import UncalibratedOccultUpdate, TransitionTopology
 from covid.impl.gibbs import DeterministicScanKernel, GibbsStep, flatten_results
 from covid.impl.multi_scan_kernel import MultiScanKernel
+from covid.data import read_phe_cases
 
 import model_spec
 
-# Uncomment to block GPU use
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 if tf.test.gpu_device_name():
     print("Using GPU")
 else:
@@ -30,31 +35,42 @@ else:
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
-DTYPE = config.floatX
+DTYPE = model_spec.DTYPE
 
 
 if __name__ == "__main__":
 
     # Read in settings
-    parser = optparse.OptionParser()
-    parser.add_option(
-        "--config",
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
         "-c",
-        dest="config",
+        "--config",
+        type=str,
         default="example_config.yaml",
         help="configuration file",
     )
-    options, cmd_args = parser.parse_args()
-    print("Loading config file:", options.config)
+    args = parser.parse_args()
+    print("Loading config file:", args.config)
 
-    with open(options.config, "r") as f:
+    with open(args.config, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
-    covar_data = model_spec.read_covariates(config["data"])
+    inference_period = [
+        np.datetime64(x) for x in config["settings"]["inference_period"]
+    ]
+
+    covar_data = model_spec.read_covariates(
+        config["data"], date_low=inference_period[0], date_high=inference_period[1],
+    )
 
     # We load in cases and impute missing infections first, since this sets the
     # time epoch which we are analysing.
-    cases = model_spec.read_cases(config["data"]["reported_cases"])
+    cases = read_phe_cases(
+        config["data"]["reported_cases"],
+        date_low=inference_period[0],
+        date_high=inference_period[1],
+        date_type="report",
+    ).astype(DTYPE)
 
     # Impute censored events, return cases
     events = model_spec.impute_censored_events(cases)
@@ -67,7 +83,7 @@ if __name__ == "__main__":
     # to set up a sensible initial state.
     state = compute_state(
         initial_state=tf.concat(
-            [covar_data["N"], tf.zeros_like(events[:, 0, :])], axis=-1
+            [covar_data["N"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])], axis=-1
         ),
         events=events,
         stoichiometry=model_spec.STOICHIOMETRY,

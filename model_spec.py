@@ -7,6 +7,7 @@ import tensorflow_probability as tfp
 
 from covid.model import DiscreteTimeStateTransitionModel
 from covid.util import impute_previous_cases
+import covid.data as data
 
 tfd = tfp.distributions
 DTYPE = np.float64
@@ -17,7 +18,7 @@ XI_FREQ = 14  # baseline transmission changes every 14 days
 NU = tf.constant(0.5, dtype=DTYPE)  # E->I rate assumed known.
 
 
-def read_covariates(paths):
+def read_covariates(paths, date_low, date_high):
     """Loads covariate data
 
     :param paths: a dictionary of paths to data with keys {'mobility_matrix',
@@ -25,9 +26,11 @@ def read_covariates(paths):
     :returns: a dictionary of covariate information to be consumed by the model
               {'C': commute_matrix, 'W': traffic_flow, 'N': population_size}
     """
-    mobility = pd.read_csv(paths["mobility_matrix"], index_col=0)
-    popsize = pd.read_csv(paths["population_size"], index_col=0)
-    commute_volume = pd.read_csv(paths["commute_volume"], index_col=0)
+    mobility = data.read_mobility(paths["mobility_matrix"])
+    popsize = data.read_population(paths["population_size"])
+    commute_volume = data.read_traffic_flow(
+        paths["commute_volume"], date_low=date_low, date_high=date_high
+    )
 
     return dict(
         C=mobility.to_numpy().astype(DTYPE),
@@ -36,25 +39,18 @@ def read_covariates(paths):
     )
 
 
-def read_cases(path):
-    """Loads case data from CSV file"""
-    cases_tidy = pd.read_csv(path)
-    cases_wide = cases_tidy.pivot(index="lad19cd", columns="date", values="cases")
-    return cases_wide
-
-
 def impute_censored_events(cases):
     """Imputes censored S->E and E->I events using geometric
        sampling algorithm in `impute_previous_cases`
 
-    There are application-specific magic numbers hard-coded below, 
+    There are application-specific magic numbers hard-coded below,
     which reflect experimentation to get the right lag between EI and
     IR events, and SE and EI events respectively.  These were chosen
-    by experimentation and examination of the resulting epidemic 
+    by experimentation and examination of the resulting epidemic
     trajectories.
 
     :param cases: a MxT matrix of case numbers (I->R)
-    :returns: a MxTx3 tensor of events where the first two indices of 
+    :returns: a MxTx3 tensor of events where the first two indices of
               the right-most dimension contain the imputed event times.
     """
     ei_events, lag_ei = impute_previous_cases(cases, 0.44)
