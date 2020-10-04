@@ -77,16 +77,18 @@ def read_phe_cases(
     :returns: a Pandas data frame of LTLAs x dates
     """
     date_type_map = {"specimen": "specimen_date", "report": "lab_report_date"}
+
     line_listing = pd.read_csv(
         path, usecols=[date_type_map[date_type], "LTLA_code", "pillar"]
     )[[date_type_map[date_type], "LTLA_code", "pillar"]]
     line_listing.columns = ["date", "lad19cd", "pillar"]
+
     line_listing["lad19cd"] = _merge_ltla(line_listing["lad19cd"])
-    line_listing["date"] = pd.to_datetime(line_listing["date"], format="%d/%m/%Y")
+
     # Select dates
+    line_listing["date"] = pd.to_datetime(line_listing["date"], format="%d/%m/%Y")
     line_listing = line_listing[
-        (date_low <= line_listing["date"])
-        & (line_listing["date"] < (date_high - np.timedelta64(1, "D")))
+        (date_low <= line_listing["date"]) & (line_listing["date"] < date_high)
     ]
 
     # Choose pillar
