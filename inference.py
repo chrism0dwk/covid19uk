@@ -6,7 +6,7 @@ import os
 
 # Uncomment to block GPU use
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 from time import perf_counter
 
@@ -24,6 +24,7 @@ from covid.impl.occult_events_mh import UncalibratedOccultUpdate, TransitionTopo
 from covid.impl.gibbs import DeterministicScanKernel, GibbsStep, flatten_results
 from covid.impl.multi_scan_kernel import MultiScanKernel
 from covid.data import read_phe_cases
+from covid.cli_arg_parse import cli_args
 
 import model_spec
 
@@ -41,16 +42,7 @@ DTYPE = model_spec.DTYPE
 if __name__ == "__main__":
 
     # Read in settings
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=str,
-        default="example_config.yaml",
-        help="configuration file",
-    )
-    args = parser.parse_args()
-    print("Loading config file:", args.config)
+    args = cli_args()
 
     with open(args.config, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
@@ -69,7 +61,8 @@ if __name__ == "__main__":
         config["data"]["reported_cases"],
         date_low=inference_period[0],
         date_high=inference_period[1],
-        date_type="report",
+        date_type=config["data"]["case_date_type"],
+        pillar=config["data"]["pillar"],
     ).astype(DTYPE)
 
     # Impute censored events, return cases
@@ -258,7 +251,10 @@ if __name__ == "__main__":
 
     # Output Files
     posterior = h5py.File(
-        os.path.expandvars(config["output"]["posterior"]),
+        os.path.join(
+            os.path.expandvars(config["output"]["results_dir"]),
+            config["output"]["posterior"],
+        ),
         "w",
         rdcc_nbytes=1024 ** 2 * 400,
         rdcc_nslots=100000,

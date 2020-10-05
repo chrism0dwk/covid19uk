@@ -68,7 +68,7 @@ def _merge_ltla(series):
 
 
 def read_phe_cases(
-    path, date_low, date_high, pillar=None, date_type="specimen", ltlas=None
+    path, date_low, date_high, pillar="both", date_type="specimen", ltlas=None
 ):
     """Reads a PHE Anonymised Line Listing for dates in [low_date, high_date)
     :param path: path to PHE Anonymised Line Listing Data
@@ -77,6 +77,7 @@ def read_phe_cases(
     :returns: a Pandas data frame of LTLAs x dates
     """
     date_type_map = {"specimen": "specimen_date", "report": "lab_report_date"}
+    pillar_map = {"both": None, "1": "Pillar 1", "2": "Pillar 2"}
 
     line_listing = pd.read_csv(
         path, usecols=[date_type_map[date_type], "LTLA_code", "pillar"]
@@ -92,8 +93,8 @@ def read_phe_cases(
     ]
 
     # Choose pillar
-    if pillar is not None:
-        line_listing = line_listing.loc[line_listing["pillar"] == pillar]
+    if pillar_map[pillar] is not None:
+        line_listing = line_listing.loc[line_listing["pillar"] == pillar_map[pillar]]
 
     # Drop na rows
     orig_len = line_listing.shape[0]

@@ -1,0 +1,36 @@
+#!/bin/bash
+
+#$ -S /bin/bash
+#$ -N covidp1p2
+#$ -q gpu
+#$ -l ngpus=1
+# -l ncpus=2
+#$ -l h_vmem=32G
+#$ -l h_rt=12:00:00
+#$ -j y
+#$ -cwd
+
+. /etc/profile
+. $HOME/.bashrc
+
+module add cuda/10.1
+conda activate covid19uk
+
+export XLA_FLAGS="--xla_gpu_cuda_data_dir=$CUDA_HOME"
+
+echo Args: "$@"
+
+echo -n "Preparing config..."
+CONFIG=`python prepare_config.py "$@"`
+echo "Done"
+
+echo Using config: $CONFIG
+echo Working directory: `pwd`
+
+echo -n "Run inference..."
+python inference.py -c "$CONFIG"
+echo "Done"
+
+echo -n "Create summary..."
+python summary.py -c "$CONFIG"
+echo "Done"

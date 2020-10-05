@@ -1,16 +1,19 @@
 """Calculate Rt given a posterior"""
+import argparse
+import os
 import yaml
 import h5py
 import numpy as np
+import pandas as pd
 import geopandas as gp
 
 import tensorflow as tf
 
+from covid.cli_arg_parse import cli_args
 from covid.model import (
     rayleigh_quotient,
     power_iteration,
 )
-
 from covid.impl.util import compute_state
 from covid.summary import mean_and_ci
 
@@ -18,9 +21,7 @@ import model_spec
 
 DTYPE = model_spec.DTYPE
 
-CONFIG_FILE = "example_config.yaml"
-GIS_TEMPLATE = "data/uk_clip.gpkg"
-GIS_OUTPUT = "example_gis_2020-09-25.gpkg"
+GIS_TEMPLATE = "data/UK2019mod_pop.gpkg"
 
 # Reproduction number calculation
 def calc_R_it(theta, xi, events, init_state, covar_data):
@@ -58,7 +59,7 @@ def predicted_incidence(theta, xi, init_state, init_step, num_steps):
     :param events: a [B, M, S] batched state tensor
     :param init_step: the initial time step
     :param num_steps: the number of steps to simulate
-    :returns: a tensor of shape [B, M, num_steps, X] where X is the number of state 
+    :returns: a tensor of srt_quhape [B, M, num_steps, X] where X is the number of state 
               transitions
     """
 
@@ -104,20 +105,33 @@ def predicted_events(events, name=None):
 
 if __name__ == "__main__":
 
+    args = cli_args()
+
     # Get general config
-    with open(CONFIG_FILE, "r") as f:
+    with open(args.config, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
+    inference_period = [
+        np.datetime64(x) for x in config["settings"]["inference_period"]
+    ]
+
     # Load covariate data
-    covar_data = model_spec.read_covariates(config["data"])
+    covar_data = model_spec.read_covariates(
+        config["data"], date_low=inference_period[0], date_high=inference_period[1]
+    )
 
     # Load posterior file
     posterior = h5py.File(
-        config["output"]["posterior"], "r", rdcc_nbytes=1024 ** 3, rdcc_nslots=1e6,
+        os.path.expandvars(
+            os.path.join(config["output"]["results_dir"], config["output"]["posterior"])
+        ),
+        "r",
+        rdcc_nbytes=1024 ** 3,
+        rdcc_nslots=1e6,
     )
 
     # Pre-determined thinning of posterior (better done in MCMC?)
-    idx = slice(posterior["samples/theta"].shape[0])  # range(6000, 10000, 10)
+    idx = range(6000, 10000, 10)
     theta = posterior["samples/theta"][idx]
     xi = posterior["samples/xi"][idx]
     events = posterior["samples/events"][idx]
@@ -133,7 +147,9 @@ if __name__ == "__main__":
     b, _ = power_iteration(ngms)
     rt = rayleigh_quotient(ngms, b)
     q = np.arange(0.05, 1.0, 0.05)
-    rt_quantiles = np.stack([q, np.quantile(rt, q)], axis=-1)
+    rt_quantiles = pd.DataFrame({"Rt": np.quantile(rt, q)}, index=q).T.to_excel(
+        os.path.join(config["output"]["results_dir"], config["output"]["national_rt"]),
+    )
 
     # Prediction requires simulation from the last available timepoint for 28 + 4 + 1 days
     # Note a 4 day recording lag in the case timeseries data requires that
@@ -176,7 +192,7 @@ if __name__ == "__main__":
                 geodata[k] = arr
 
     ## GIS here
-    ltla = gp.read_file(GIS_TEMPLATE)
+    ltla = gp.read_file(GIS_TEMPLATE, layer="UK2019mod_pop_xgen")
     ltla = ltla[ltla["lad19cd"].str.startswith("E")]  # England only, for now.
     ltla = ltla.sort_values("lad19cd")
     rti = tf.reduce_sum(ngms, axis=-1)
@@ -205,4 +221,7 @@ if __name__ == "__main__":
             "(lad19cd|lad19nm$|prev|cases|Rt|popsize|geometry)", regex=True
         ),
     ]
-    ltla.to_file(GIS_OUTPUT, driver="GPKG")
+    ltla.to_file(
+        os.path.join(config["output"]["results_dir"], config["output"]["geopackage"]),
+        driver="GPKG",
+    )
