@@ -1,4 +1,10 @@
+argparse
+geopandas
+h5py
 matplotlib
+numpy
 pyreadr
 PyYAML
-geopandas
+tensorflow
+tensorflow_probability
+tqdm
