@@ -2,12 +2,11 @@
 
 # Enqueues COVID-19 pipelines
 
-CASES_FILE="data/Anonymised Combined Line List 20201002.csv"
-DATE_LOW="2020-07-19"
-DATE_HIGH="2020-09-28"
+CASES_FILE="data/Anonymised Combined Line List 20201005.csv"
+DATE_LOW="2020-07-13"
+DATE_HIGH="2020-10-02"
 
 TEMPLATE_CONFIG=template_config.yaml
-
 
 
 # Job submisison

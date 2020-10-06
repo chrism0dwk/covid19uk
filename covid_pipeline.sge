@@ -1,7 +1,6 @@
 #!/bin/bash
 
 #$ -S /bin/bash
-#$ -N covidp1p2
 #$ -q gpu
 #$ -l ngpus=1
 # -l ncpus=2
