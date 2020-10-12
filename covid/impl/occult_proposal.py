@@ -66,7 +66,7 @@ def DelOccultProposal(
             )
             hot_meta = tf.cast(tf.transpose(hot_meta), dtype=events.dtype)
             logits = tf.math.log(hot_meta)
-            X = Categorical2(logits=logits, dtype=dtype, name="m")
+            X = Categorical2(logits=tf.cast(logits, tf.float32), dtype=dtype, name="m")
             return X
 
     def t(m):
@@ -80,7 +80,9 @@ def DelOccultProposal(
             )
             hot_times = tf.cast(hot_times, dtype=events.dtype)
             logits = tf.math.log(hot_times)
-            return Categorical2(logits=logits, dtype=dtype, name="t")
+            return Categorical2(
+                logits=tf.cast(logits, tf.float32), dtype=dtype, name="t"
+            )
 
     def x_star(m, t):
         """Draw num to delete"""

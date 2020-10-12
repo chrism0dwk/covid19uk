@@ -27,4 +27,4 @@ class Categorical2(tfd.Categorical):
                 k, logits, base_dtype=dtype_util.base_dtype(self.dtype)
             )
             logits_normalised = tf.math.log(tf.math.softmax(logits))
-            return tf.gather(logits_normalised, k, batch_dims=1)
+            return tf.cast(tf.gather(logits_normalised, k, batch_dims=1), tf.float64)

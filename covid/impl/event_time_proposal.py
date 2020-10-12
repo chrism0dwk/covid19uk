@@ -132,7 +132,7 @@ def EventTimeProposal(
     def t():
         with tf.name_scope("t"):
             # Waiting for fixed tf.nn.sparse_softmax_cross_entropy_with_logits
-            x = tf.cast(target_events > 0, dtype=tf.float64)  # [M, T]
+            x = tf.cast(target_events > 0, dtype=tf.float32)  # [M, T]
             return Categorical2(logits=tf.math.log(x), name="event_coords")
 
     def x_star(t, delta_t):
