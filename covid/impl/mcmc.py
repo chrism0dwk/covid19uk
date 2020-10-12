@@ -63,51 +63,12 @@ class UncalibratedLogRandomWalk(tfp.mcmc.UncalibratedRandomWalk):
                     for s in current_state_parts
                 ]
 
-            # Seed handling complexity is due to users possibly expecting an old-style
-            # stateful seed to be passed to `self.new_state_fn`.
-            # In other words:
-            # - If we were given a seed, we sanitize it to stateless, and
-            #   if the `new_state_fn` doesn't like that, we crash and propagate
-            #   the error.  Rationale: The contract is stateless sampling given
-            #   seed, and doing otherwise would not meet it.
-            # - If we were not given a seed, we try `new_state_fn` with a stateless
-            #   seed.  Rationale: This is the future.
-            # - If it fails with a seed incompatibility problem (as best we can
-            #   detect from here), we issue a warning and try it again with a
-            #   stateful-style seed. Rationale: User code that didn't set seeds
-            #   shouldn't suddenly break.
-            # TODO(b/159636942): Clean up after 2020-09-20.
-            if seed is not None:
-                force_stateless = True
-                seed = samplers.sanitize_seed(seed)
-            else:
-                force_stateless = False
-                if self._seed_stream.original_seed is not None:
-                    warnings.warn(mcmc_util.SEED_CTOR_ARG_DEPRECATION_MSG)
-                    stateful_seed = self._seed_stream()
-                    seed = samplers.sanitize_seed(stateful_seed)
-            try:
-                # Log random walk
-                next_state_parts = self.new_state_fn(  # pylint: disable=not-callable
-                    [tf.zeros_like(s) for s in current_state_parts], seed,
-                )
-            except TypeError as e:
-                if (
-                    "Expected int for argument" not in str(e)
-                    and TENSOR_SEED_MSG_PREFIX not in str(e)
-                ) or force_stateless:
-                    raise
-                msg = (
-                    "Falling back to `int` seed for `new_state_fn` {}. Please update "
-                    "to use `tf.random.stateless_*` RNGs. "
-                    "This fallback may be removed after 10-Sep-2020. ({})"
-                )
-                warnings.warn(msg.format(self.new_state_fn, str(e)))
-                seed = None
-                next_state_parts = self.new_state_fn(
-                    [tf.zeros_lik(s) for s in current_state_parts], stateful_seed
-                )
+            seed = samplers.sanitize_seed(seed)
 
+            # Log random walk
+            next_state_parts = self.new_state_fn(  # pylint: disable=not-callable
+                [tf.zeros_like(s) for s in current_state_parts], seed,
+            )
             next_state_parts = [
                 cs * tf.exp(ns) for cs, ns in zip(current_state_parts, next_state_parts)
             ]
