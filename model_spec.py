@@ -74,7 +74,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         )
 
     def xi():
-        sigma = tf.constant(0.01, dtype=DTYPE)
+        sigma = tf.constant(0.1, dtype=DTYPE)
         phi = tf.constant(24.0, dtype=DTYPE)
         kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
         idx_pts = tf.cast(tf.range(num_steps // XI_FREQ) * XI_FREQ, dtype=DTYPE)
@@ -120,7 +120,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             ei = tf.broadcast_to([NU], shape=[state.shape[0]])  # Vector of length nc
             ir = tf.broadcast_to([gamma], shape=[state.shape[0]])  # Vector of length nc
 
-            return [infec_rate, ei, ir]
+            return [infec_rate, ei, ir]            
 
         return DiscreteTimeStateTransitionModel(
             transition_rates=transition_rate_fn,
@@ -130,7 +130,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             time_delta=TIME_DELTA,
             num_steps=num_steps,
         )
-
+    
     return tfd.JointDistributionNamed(
         dict(beta1=beta1, beta2=beta2, xi=xi, gamma=gamma, seir=seir)
     )
