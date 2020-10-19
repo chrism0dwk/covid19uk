@@ -110,11 +110,12 @@ if __name__ == "__main__":
     #     Q(Z^{ei}, Z^{ei\prime}) (occult)
     def make_theta_kernel(scale, bounded_convergence, name):
         def fn(target_log_prob_fn, state):
-            return tfp.mcmc.MetropolisHastings(
-                inner_kernel=UncalibratedLogRandomWalk(
+            return tfp.mcmc.TransformedTransitionKernel(
+                inner_kernel=tfp.mcmc.RandomWalkMetropolis(
                     target_log_prob_fn=target_log_prob_fn,
                     new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence),
                 ),
+                bijector=tfp.bijectors.Exp(),
                 name=name,
             )
 
