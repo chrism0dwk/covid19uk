@@ -19,6 +19,9 @@ from covid.impl.occult_events_mh import UncalibratedOccultUpdate, TransitionTopo
 from covid.impl.gibbs import flatten_results
 from covid.impl.gibbs_kernel import GibbsKernel, GibbsKernelResults
 from covid.impl.multi_scan_kernel import MultiScanKernel
+from covid.impl.adaptive_random_walk_metropolis import (
+    AdaptiveRandomWalkMetropolisHastings,
+)
 from covid.data import read_phe_cases
 from covid.cli_arg_parse import cli_args
 
@@ -108,12 +111,14 @@ if __name__ == "__main__":
     #     Q(Z^{ei}, Z^{ei\prime}) (partially-censored)
     #     Q(Z^{se}, Z^{se\prime}) (occult)
     #     Q(Z^{ei}, Z^{ei\prime}) (occult)
-    def make_theta_kernel(scale, bounded_convergence, name):
+    def make_theta_kernel(shape, name):
         def fn(target_log_prob_fn, state):
             return tfp.mcmc.TransformedTransitionKernel(
-                inner_kernel=tfp.mcmc.RandomWalkMetropolis(
+                inner_kernel=AdaptiveRandomWalkMetropolisHastings(
                     target_log_prob_fn=target_log_prob_fn,
-                    new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence),
+                    initial_state=tf.zeros(shape, dtype=model_spec.DTYPE),
+                    initial_covariance=[np.eye(shape[0]) * 1e-6],
+                    covariance_burnin=200,
                 ),
                 bijector=tfp.bijectors.Exp(),
                 name=name,
@@ -121,11 +126,13 @@ if __name__ == "__main__":
 
         return fn
 
-    def make_xi_kernel(scale, bounded_convergence, name):
+    def make_xi_kernel(shape, name):
         def fn(target_log_prob_fn, state):
-            return tfp.mcmc.RandomWalkMetropolis(
+            return AdaptiveRandomWalkMetropolisHastings(
                 target_log_prob_fn=target_log_prob_fn,
-                new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence),
+                initial_state=tf.ones(shape, dtype=model_spec.DTYPE),
+                initial_covariance=[np.eye(shape[0]) * 1e-6],
+                covariance_burnin=200,
                 name=name,
             )
 
@@ -209,7 +216,7 @@ if __name__ == "__main__":
 
     # Build MCMC algorithm here.  This will be run in bursts for memory economy
     @tf.function(autograph=False, experimental_compile=True)
-    def sample(n_samples, init_state, sigma_theta, sigma_xi):
+    def sample(n_samples, init_state, previous_results=None):
         with tf.name_scope("main_mcmc_sample_loop"):
 
             init_state = init_state.copy()
@@ -217,17 +224,22 @@ if __name__ == "__main__":
             gibbs_schema = GibbsKernel(
                 target_log_prob_fn=logp,
                 kernel_list=[
-                    (0, make_theta_kernel(sigma_theta, 0.95, "theta")),
-                    (1, make_xi_kernel(sigma_xi, 0.95, "xi")),
+                    (0, make_theta_kernel(init_state[0].shape, "theta")),
+                    (1, make_xi_kernel(init_state[1].shape, "xi")),
                     (2, make_event_multiscan_kernel),
                 ],
                 name="gibbs0",
             )
-            samples, results = tfp.mcmc.sample_chain(
-                n_samples, init_state, kernel=gibbs_schema, trace_fn=trace_results_fn
+            samples, results, final_results = tfp.mcmc.sample_chain(
+                n_samples,
+                init_state,
+                kernel=gibbs_schema,
+                previous_kernel_results=previous_results,
+                return_final_kernel_results=True,
+                trace_fn=trace_results_fn,
             )
 
-            return samples, results
+            return samples, results, final_results
 
     ####################################
     # Construct bursted MCMC loop here #
@@ -305,28 +317,13 @@ if __name__ == "__main__":
 
     print("Initial logpi:", logp(*current_state))
 
-    theta_scale = tf.constant(
-        [
-            [1.12e-3, 1.67e-4, 1.61e-4],
-            [1.67e-4, 7.41e-4, 4.68e-5],
-            [1.61e-4, 4.68e-5, 1.28e-4],
-        ],
-        dtype=DTYPE,
-    )
-    theta_scale = theta_scale * 0.2 / theta_scale.shape[0]
-
-    xi_scale = tf.eye(current_state[1].shape[0], dtype=DTYPE)
-    xi_scale = xi_scale * 0.0001 / xi_scale.shape[0]
-
     # We loop over successive calls to sample because we have to dump results
     #   to disc, or else end OOM (even on a 32GB system).
     # with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
+    final_results = None
     for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
-        samples, results = sample(
-            NUM_BURST_SAMPLES,
-            init_state=current_state,
-            sigma_theta=theta_scale,
-            sigma_xi=xi_scale,
+        samples, results, final_results = sample(
+            NUM_BURST_SAMPLES, init_state=current_state, previous_results=final_results,
         )
         current_state = [s[-1] for s in samples]
         s = slice(i * THIN_BURST_SAMPLES, i * THIN_BURST_SAMPLES + THIN_BURST_SAMPLES)
