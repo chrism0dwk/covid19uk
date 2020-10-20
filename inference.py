@@ -117,7 +117,7 @@ if __name__ == "__main__":
                 inner_kernel=AdaptiveRandomWalkMetropolisHastings(
                     target_log_prob_fn=target_log_prob_fn,
                     initial_state=tf.zeros(shape, dtype=model_spec.DTYPE),
-                    initial_covariance=[np.eye(shape[0]) * 1e-6],
+                    initial_covariance=[np.eye(shape[0]) * 1e-1],
                     covariance_burnin=200,
                 ),
                 bijector=tfp.bijectors.Exp(),
@@ -131,7 +131,7 @@ if __name__ == "__main__":
             return AdaptiveRandomWalkMetropolisHastings(
                 target_log_prob_fn=target_log_prob_fn,
                 initial_state=tf.ones(shape, dtype=model_spec.DTYPE),
-                initial_covariance=[np.eye(shape[0]) * 1e-6],
+                initial_covariance=[np.eye(shape[0]) * 1e-1],
                 covariance_burnin=200,
                 name=name,
             )
@@ -256,7 +256,7 @@ if __name__ == "__main__":
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.85, 0.3, 0.25], dtype=DTYPE),
+        np.array([0.45, 0.65, 0.48], dtype=DTYPE),
         np.zeros(model.model["xi"]().event_shape[-1], dtype=DTYPE),
         events,
     ]

@@ -100,11 +100,13 @@ class GibbsKernel(mcmc.TransitionKernel):
         In graph and XLA modes, the for loop should be unrolled.
         """
         if mcmc_util.is_list_like(current_state):
-            next_state = [
-                tf.convert_to_tensor(state_part) for state_part in current_state
-            ]
+            next_state = list(current_state)
         else:
             next_state = [tf.convert_to_tensor(current_state)]
+
+        current_state = [
+            tf.convert_to_tensor(s, name="current_state") for s in current_state
+        ]
 
         next_results = []
         untransformed_target_log_prob = previous_results.target_log_prob
@@ -151,17 +153,18 @@ class GibbsKernel(mcmc.TransitionKernel):
     def bootstrap_results(self, current_state):
 
         if mcmc_util.is_list_like(current_state):
-            current_state = [
-                tf.convert_to_tensor(state_part) for state_part in current_state
-            ]
+            current_state = list(current_state)
         else:
             current_state = [tf.convert_to_tensor(current_state)]
+        current_state = [
+            tf.convert_to_tensor(s, name="current_state") for s in current_state
+        ]
 
         inner_results = []
         untransformed_target_log_prob = 0.0
         for state_part_idx, kernel_fn in self.kernel_list:
 
-            def target_log_prob_fn(state_part):
+            def target_log_prob_fn(_):
                 return self.target_log_prob_fn(*current_state)
 
             kernel = kernel_fn(target_log_prob_fn, current_state)
