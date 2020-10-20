@@ -2,6 +2,7 @@
 
 import os
 import yaml
+from datetime import datetime
 import numpy as np
 import h5py
 import pandas as pd
@@ -10,7 +11,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from covid.cli_arg_parse import cli_args
-from covid.util import compute_state
+from covid.impl.util import compute_state
 import model_spec
 
 
@@ -49,7 +50,7 @@ def predicted_incidence(theta, xi, init_state, init_step, num_steps):
 
 if __name__ == "__main__":
 
-    args = cli_args()
+    args = cli_args(["--config", "medium_term.yaml"])
 
     with open(args.config, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
@@ -110,20 +111,20 @@ if __name__ == "__main__":
             "Model": "StochasticSEIR",
             "ModelType": "Pillar 1+2",
             "Version": 0.2,
-            "Creation Day": dates[0].day,
-            "Creation Month": dates[0].month,
-            "Creation Year": dates[0].year,
-            "Day of Value": [d.day for d in dates],
-            "Month of Value": [d.month for d in dates],
-            "Year of Value": [d.year for d in dates],
+            "Creation Day": dates[0].astype(datetime).day,
+            "Creation Month": dates[0].astype(datetime).month,
+            "Creation Year": dates[0].astype(datetime).year,
+            "Day of Value": [d.astype(datetime).day for d in dates],
+            "Month of Value": [d.astype(datetime).month for d in dates],
+            "Year of Value": [d.astype(datetime).year for d in dates],
             "AgeBand": "All",
             "Geography": "England",
             "ValueType": "num_positive_tests",
             "Value": quantiles[9, :],
         }
     )
-    foo = pd.DataFrame(quantiles.T, columns=[f"Quantile {qq:%.2f}" for qq in q])
-    output = pd.concat([output, foo], axis=-1)
+    foo = pd.DataFrame(quantiles.numpy().T, columns=[f"Quantile {qq:.2f}" for qq in q])
+    output = pd.concat([output, foo], axis="columns")
     output.to_csv(
         os.path.join(config["output"]["results_dir"], config["output"]["medium_term"]),
         index=False,
