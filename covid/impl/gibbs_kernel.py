@@ -100,12 +100,12 @@ class GibbsKernel(mcmc.TransitionKernel):
         In graph and XLA modes, the for loop should be unrolled.
         """
         if mcmc_util.is_list_like(current_state):
-            next_state = list(current_state)
+            state_parts = list(current_state)
         else:
-            next_state = [tf.convert_to_tensor(current_state)]
+            state_parts = [current_state]
 
-        current_state = [
-            tf.convert_to_tensor(s, name="current_state") for s in current_state
+        state_parts = [
+            tf.convert_to_tensor(s, name="current_state") for s in state_parts
         ]
 
         next_results = []
@@ -113,37 +113,37 @@ class GibbsKernel(mcmc.TransitionKernel):
         for i, (state_part_idx, kernel_fn) in enumerate(self.kernel_list):
 
             def target_log_prob_fn(state_part):
-                next_state[
+                state_parts[
                     state_part_idx  # pylint: disable=cell-var-from-loop
                 ] = state_part
-                return self.target_log_prob_fn(*next_state)
+                return self.target_log_prob_fn(*state_parts)
 
-            kernel = kernel_fn(target_log_prob_fn, next_state)
+            kernel = kernel_fn(target_log_prob_fn, state_parts)
 
             previous_kernel_results = update_target_log_prob(
                 previous_results.inner_results[i],
                 maybe_transform_value(
                     tlp=untransformed_target_log_prob,
-                    state=next_state[state_part_idx],
+                    state=state_parts[state_part_idx],
                     kernel=kernel,
                     direction="inverse",
                 ),
             )
 
-            next_state[state_part_idx], next_kernel_results = kernel.one_step(
-                next_state[state_part_idx], previous_kernel_results, seed
+            state_parts[state_part_idx], next_kernel_results = kernel.one_step(
+                state_parts[state_part_idx], previous_kernel_results, seed
             )
 
             next_results.append(next_kernel_results)
             untransformed_target_log_prob = maybe_transform_value(
                 tlp=get_target_log_prob(next_kernel_results),
-                state=next_state[state_part_idx],
+                state=state_parts[state_part_idx],
                 kernel=kernel,
                 direction="forward",
             )
 
         return (
-            next_state if mcmc_util.is_list_like(current_state) else next_state[0],
+            state_parts if mcmc_util.is_list_like(current_state) else state_parts[0],
             GibbsKernelResults(
                 target_log_prob=untransformed_target_log_prob,
                 inner_results=next_results,
