@@ -62,9 +62,9 @@ def impute_censored_events(cases):
 
 def CovidUK(covariates, initial_state, initial_step, num_steps):
     def beta1():
-        return tfd.Gamma(
-            concentration=tf.constant(1.0, dtype=DTYPE),
-            rate=tf.constant(1.0, dtype=DTYPE),
+        return tfd.Normal(
+            loc=tf.constant(0.0, dtype=DTYPE),
+            scale=tf.constant(1000., dtype=DTYPE),
         )
 
     def beta2():
@@ -73,14 +73,14 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             rate=tf.constant(10.0, dtype=DTYPE),
         )
 
-    def xi():
+    def xi(beta1):
         sigma = tf.constant(0.1, dtype=DTYPE)
         phi = tf.constant(24.0, dtype=DTYPE)
         kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
         idx_pts = tf.cast(tf.range(num_steps // XI_FREQ) * XI_FREQ, dtype=DTYPE)
         return tfd.GaussianProcess(
             kernel,
-            mean_fn=lambda idx: -sigma / 2.0,
+            mean_fn=lambda idx: beta1,
             index_points=idx_pts[:, tf.newaxis],
         )
 
@@ -90,9 +90,8 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             rate=tf.constant(400.0, dtype=DTYPE),
         )
 
-    def seir(beta1, beta2, xi, gamma):
+    def seir(beta2, xi, gamma):
 
-        beta1 = tf.convert_to_tensor(beta1, DTYPE)
         beta2 = tf.convert_to_tensor(beta2, DTYPE)
         xi = tf.convert_to_tensor(xi, DTYPE)
         gamma = tf.convert_to_tensor(gamma, DTYPE)
@@ -111,9 +110,8 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
                 tf.clip_by_value(t // XI_FREQ, 0, xi.shape[0] - 1), dtype=tf.int64,
             )
             xi_ = tf.gather(xi, xi_idx)
-            beta = beta1 * tf.math.exp(xi_)
 
-            infec_rate = beta * (
+            infec_rate = tf.math.exp(xi_) * (
                 state[..., 2]
                 + beta2
                 * commute_volume
