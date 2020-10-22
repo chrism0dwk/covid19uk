@@ -2,9 +2,7 @@
 # pylint: disable=E402
 
 import os
-
 from time import perf_counter
-
 import tqdm
 import yaml
 import h5py
@@ -103,13 +101,7 @@ if __name__ == "__main__":
     # $\pi(\theta, \xi, y^{se}, y^{ei} | y^{ir})$
     def logp(theta, xi, events):
         return model.log_prob(
-            dict(
-                beta1=theta[0],
-                beta2=theta[1],
-                gamma=theta[2],
-                xi=xi,
-                seir=events,
-            )
+            dict(beta1=xi[0], beta2=theta[0], gamma=theta[1], xi=xi[1:], seir=events,)
         )
 
     # Build Metropolis within Gibbs sampler
@@ -268,8 +260,8 @@ if __name__ == "__main__":
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.45, 0.65, 0.48], dtype=DTYPE),
-        np.zeros(model.model["xi"]().event_shape[-1], dtype=DTYPE),
+        np.array([0.65, 0.48], dtype=DTYPE),
+        np.zeros(model.model["xi"](0.).event_shape[-1]+1, dtype=DTYPE),
         events,
     ]
 
@@ -298,9 +290,7 @@ if __name__ == "__main__":
         dtype=np.float64,
     )
     xi_samples = posterior.create_dataset(
-        "samples/xi",
-        [NUM_SAVED_SAMPLES, current_state[1].shape[0]],
-        dtype=np.float64,
+        "samples/xi", [NUM_SAVED_SAMPLES, current_state[1].shape[0]], dtype=np.float64,
     )
     event_samples = posterior.create_dataset(
         "samples/events",
