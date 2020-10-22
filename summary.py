@@ -159,7 +159,7 @@ if __name__ == "__main__":
         xi,
         init_state=state_timeseries[..., -1, :],
         init_step=state_timeseries.shape[-2] - 1,
-        num_steps=33,
+        num_steps=70,
     )
     predicted_state = compute_state(
         state_timeseries[..., -1, :], prediction, model_spec.STOICHIOMETRY
@@ -176,12 +176,14 @@ if __name__ == "__main__":
     cases_14 = predicted_events(prediction[..., 4:18, 2], name="cases14")
     cases_21 = predicted_events(prediction[..., 4:25, 2], name="cases21")
     cases_28 = predicted_events(prediction[..., 4:32, 2], name="cases28")
+    cases_56 = predicted_events(prediction[..., 4:60, 2], name="cases56")
 
     # Prevalence at day 7
     prev_7 = prevalence(predicted_state[..., 11, :], covar_data["N"], name="prev7")
     prev_14 = prevalence(predicted_state[..., 18, :], covar_data["N"], name="prev14")
     prev_21 = prevalence(predicted_state[..., 25, :], covar_data["N"], name="prev21")
-    prev_28 = prevalence(predicted_state[..., 28, :], covar_data["N"], name="prev28")
+    prev_28 = prevalence(predicted_state[..., 32, :], covar_data["N"], name="prev28")
+    prev_56 = prevalence(predicted_state[..., 60, :], covar_data["N"], name="prev56")
 
     def geosummary(geodata, summaries):
         for summary in summaries:
@@ -207,10 +209,12 @@ if __name__ == "__main__":
             prev_14,
             prev_21,
             prev_28,
+            prev_56,
             cases_7,
             cases_14,
             cases_21,
             cases_28,
+            cases_56,
         ),
     )
 

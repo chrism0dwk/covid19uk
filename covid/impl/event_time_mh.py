@@ -69,7 +69,6 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         dmax,
         mmax,
         nmax,
-        seed=None,
         name=None,
     ):
         """An uncalibrated random walk for event times.
@@ -82,7 +81,6 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
         :param seed: a random seed
         :param name: the name of the update step
         """
-        self._seed_stream = SeedStream(seed, salt="UncalibratedEventTimesUpdate")
         self._name = name
         self._parameters = dict(
             target_log_prob_fn=target_log_prob_fn,
@@ -93,7 +91,6 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
             dmax=dmax,
             mmax=mmax,
             nmax=nmax,
-            seed=seed,
             name=name,
         )
         self.tx_topology = TransitionTopology(
@@ -134,7 +131,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
     def is_calibrated(self):
         return False
 
-    def one_step(self, current_events, previous_kernel_results):
+    def one_step(self, current_events, previous_kernel_results, seed=None):
         """One update of event times.
         :param current_events: a [T, M, X] tensor containing number of events
                                per time t, metapopulation m,
@@ -155,7 +152,7 @@ class UncalibratedEventTimesUpdate(tfp.mcmc.TransitionKernel):
                 d_max=self.parameters["dmax"],
                 n_max=self.parameters["nmax"],
             )
-            update = proposal.sample()
+            update = proposal.sample(seed=seed)
 
             move = update["move"]
             to_t = move["t"] + move["delta_t"]
