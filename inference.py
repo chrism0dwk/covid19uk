@@ -17,12 +17,18 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+from tensorflow_probability.python.experimental import unnest
+
 from covid.impl.util import compute_state
 from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
 from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
 from covid.impl.occult_events_mh import UncalibratedOccultUpdate, TransitionTopology
-from covid.impl.gibbs import DeterministicScanKernel, GibbsStep, flatten_results
+from covid.impl.gibbs import flatten_results
+from covid.impl.gibbs_kernel import GibbsKernel, GibbsKernelResults
 from covid.impl.multi_scan_kernel import MultiScanKernel
+from covid.impl.adaptive_random_walk_metropolis import (
+    AdaptiveRandomWalkMetropolisHastings,
+)
 from covid.data import read_phe_cases
 from covid.cli_arg_parse import cli_args
 
@@ -112,36 +118,40 @@ if __name__ == "__main__":
     #     Q(Z^{ei}, Z^{ei\prime}) (partially-censored)
     #     Q(Z^{se}, Z^{se\prime}) (occult)
     #     Q(Z^{ei}, Z^{ei\prime}) (occult)
-    def make_theta_kernel(scale, bounded_convergence, name):
-        return GibbsStep(
-            0,
-            tfp.mcmc.MetropolisHastings(
-                inner_kernel=UncalibratedLogRandomWalk(
-                    target_log_prob_fn=logp,
-                    new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence),
-                )
-            ),
-            name=name,
-        )
+    def make_theta_kernel(shape, name):
+        def fn(target_log_prob_fn, state):
+            return tfp.mcmc.TransformedTransitionKernel(
+                inner_kernel=AdaptiveRandomWalkMetropolisHastings(
+                    target_log_prob_fn=target_log_prob_fn,
+                    initial_state=tf.zeros(shape, dtype=model_spec.DTYPE),
+                    initial_covariance=[np.eye(shape[0]) * 1e-1],
+                    covariance_burnin=200,
+                ),
+                bijector=tfp.bijectors.Exp(),
+                name=name,
+            )
 
-    def make_xi_kernel(scale, bounded_convergence, name):
-        return GibbsStep(
-            1,
-            tfp.mcmc.RandomWalkMetropolis(
-                target_log_prob_fn=logp,
-                new_state_fn=random_walk_mvnorm_fn(scale, p_u=bounded_convergence),
-            ),
-            name=name,
-        )
+        return fn
+
+    def make_xi_kernel(shape, name):
+        def fn(target_log_prob_fn, state):
+            return AdaptiveRandomWalkMetropolisHastings(
+                target_log_prob_fn=target_log_prob_fn,
+                initial_state=tf.ones(shape, dtype=model_spec.DTYPE),
+                initial_covariance=[np.eye(shape[0]) * 1e-1],
+                covariance_burnin=200,
+                name=name,
+            )
+
+        return fn
 
     def make_partially_observed_step(
         target_event_id, prev_event_id=None, next_event_id=None, name=None
     ):
-        return GibbsStep(
-            2,
-            tfp.mcmc.MetropolisHastings(
+        def fn(target_log_prob_fn, state):
+            return tfp.mcmc.MetropolisHastings(
                 inner_kernel=UncalibratedEventTimesUpdate(
-                    target_log_prob_fn=logp,
+                    target_log_prob_fn=target_log_prob_fn,
                     target_event_id=target_event_id,
                     prev_event_id=prev_event_id,
                     next_event_id=next_event_id,
@@ -149,17 +159,17 @@ if __name__ == "__main__":
                     dmax=config["mcmc"]["dmax"],
                     mmax=config["mcmc"]["m"],
                     nmax=config["mcmc"]["nmax"],
-                )
-            ),
-            name=name,
-        )
+                ),
+                name=name,
+            )
+
+        return fn
 
     def make_occults_step(prev_event_id, target_event_id, next_event_id, name):
-        return GibbsStep(
-            2,
-            tfp.mcmc.MetropolisHastings(
+        def fn(target_log_prob_fn, state):
+            return tfp.mcmc.MetropolisHastings(
                 inner_kernel=UncalibratedOccultUpdate(
-                    target_log_prob_fn=logp,
+                    target_log_prob_fn=target_log_prob_fn,
                     topology=TransitionTopology(
                         prev_event_id, target_event_id, next_event_id
                     ),
@@ -167,67 +177,76 @@ if __name__ == "__main__":
                     nmax=config["mcmc"]["occult_nmax"],
                     t_range=(events.shape[1] - 21, events.shape[1]),
                     name=name,
-                )
+                ),
+                name=name,
+            )
+
+        return fn
+
+    def make_event_multiscan_kernel(target_log_prob_fn, state):
+        return MultiScanKernel(
+            config["mcmc"]["num_event_time_updates"],
+            GibbsKernel(
+                target_log_prob_fn=target_log_prob_fn,
+                kernel_list=[
+                    (0, make_partially_observed_step(0, None, 1, "se_events")),
+                    (0, make_partially_observed_step(1, 0, 2, "ei_events")),
+                    (0, make_occults_step(None, 0, 1, "se_occults")),
+                    (0, make_occults_step(0, 1, 2, "ei_occults")),
+                ],
+                name="gibbs1",
             ),
-            name=name,
         )
 
     # MCMC tracing functions
     def trace_results_fn(_, results):
         """Returns log_prob, accepted, q_ratio"""
 
-        def is_accepted(result):
-            if hasattr(result, "is_accepted"):
-                return tf.cast(result.is_accepted, DTYPE)
-            return is_accepted(result.inner_results)
-
         def f(result):
-            log_prob = result.proposed_results.target_log_prob
-            accepted = is_accepted(result)
-            q_ratio = result.proposed_results.log_acceptance_correction
-            if hasattr(result.proposed_results, "extra"):
-                proposed = tf.cast(result.proposed_results.extra, log_prob.dtype)
+            proposed_results = unnest.get_innermost(result, "proposed_results")
+            log_prob = proposed_results.target_log_prob
+            accepted = tf.cast(
+                unnest.get_innermost(result, "is_accepted"), log_prob.dtype
+            )
+            q_ratio = proposed_results.log_acceptance_correction
+            if hasattr(proposed_results, "extra"):
+                proposed = tf.cast(proposed_results.extra, log_prob.dtype)
                 return tf.concat([[log_prob], [accepted], [q_ratio], proposed], axis=0)
             return tf.concat([[log_prob], [accepted], [q_ratio]], axis=0)
 
-        def recurse(f, list_or_atom):
-            if isinstance(list_or_atom, list):
-                return [recurse(f, x) for x in list_or_atom]
-            return f(list_or_atom)
+        def recurse(f, results):
+            if isinstance(results, GibbsKernelResults):
+                return [recurse(f, x) for x in results.inner_results]
+            return f(results)
 
         return recurse(f, results)
 
     # Build MCMC algorithm here.  This will be run in bursts for memory economy
     @tf.function(autograph=False, experimental_compile=True)
-    def sample(n_samples, init_state, sigma_theta, sigma_xi):
+    def sample(n_samples, init_state, previous_results=None):
         with tf.name_scope("main_mcmc_sample_loop"):
 
             init_state = init_state.copy()
 
-            kernel = DeterministicScanKernel(
-                [
-                    make_theta_kernel(sigma_theta, 1.0, "theta_kernel"),
-                    make_xi_kernel(sigma_xi, 1.0, "xi_kernel"),
-                    MultiScanKernel(
-                        config["mcmc"]["num_event_time_updates"],
-                        DeterministicScanKernel(
-                            [
-                                make_partially_observed_step(0, None, 1, "se_events"),
-                                make_partially_observed_step(1, 0, 2, "ei_events"),
-                                make_occults_step(None, 0, 1, "se_occults"),
-                                make_occults_step(0, 1, 2, "ei_occults"),
-                            ]
-                        ),
-                    ),
+            gibbs_schema = GibbsKernel(
+                target_log_prob_fn=logp,
+                kernel_list=[
+                    (0, make_theta_kernel(init_state[0].shape, "theta")),
+                    (1, make_xi_kernel(init_state[1].shape, "xi")),
+                    (2, make_event_multiscan_kernel),
                 ],
-                name="gibbs_kernel",
+                name="gibbs0",
+            )
+            samples, results, final_results = tfp.mcmc.sample_chain(
+                n_samples,
+                init_state,
+                kernel=gibbs_schema,
+                previous_kernel_results=previous_results,
+                return_final_kernel_results=True,
+                trace_fn=trace_results_fn,
             )
 
-            samples, results = tfp.mcmc.sample_chain(
-                n_samples, init_state, kernel=kernel, trace_fn=trace_results_fn
-            )
-
-            return samples, results
+            return samples, results, final_results
 
     ####################################
     # Construct bursted MCMC loop here #
@@ -244,7 +263,7 @@ if __name__ == "__main__":
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.85, 0.3, 0.25], dtype=DTYPE),
+        np.array([0.45, 0.65, 0.48], dtype=DTYPE),
         np.zeros(model.model["xi"]().event_shape[-1], dtype=DTYPE),
         events,
     ]
@@ -305,36 +324,13 @@ if __name__ == "__main__":
 
     print("Initial logpi:", logp(*current_state))
 
-    # theta_scale = tf.constant(
-    #     [
-    #         [1.12e-3, 1.67e-4, 1.61e-4],
-    #         [1.67e-4, 7.41e-4, 4.68e-5],
-    #         [1.61e-4, 4.68e-5, 1.28e-4],
-    #     ],
-    #     dtype=DTYPE,
-    # )
-    theta_scale = tf.constant(
-        [
-            [2.21e-05, -5.33e-05, 4.21e-06],
-            [-5.33e-05, 3.66e-04, 1.45e-05],
-            [4.21e-06, 1.45e-05, 1.52e-05],
-        ],
-        dtype=DTYPE,
-        )
-    theta_scale = theta_scale * 1.0 / theta_scale.shape[0]
-
-    xi_scale = tf.eye(current_state[1].shape[0], dtype=DTYPE)
-    xi_scale = xi_scale * 0.0002 / xi_scale.shape[0]
-
     # We loop over successive calls to sample because we have to dump results
     #   to disc, or else end OOM (even on a 32GB system).
     # with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
+    final_results = None
     for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
-        samples, results = sample(
-            NUM_BURST_SAMPLES,
-            init_state=current_state,
-            sigma_theta=theta_scale,
-            sigma_xi=xi_scale,
+        samples, results, final_results = sample(
+            NUM_BURST_SAMPLES, init_state=current_state, previous_results=final_results,
         )
         current_state = [s[-1] for s in samples]
         s = slice(i * THIN_BURST_SAMPLES, i * THIN_BURST_SAMPLES + THIN_BURST_SAMPLES)

@@ -17,6 +17,7 @@ matplotlib = "^3.3.2"
 xlrd = "^1.2.0"
 tqdm = "^4.50.2"
 openpyxl = "^3.0.5"
+h5py = "^2.10.0"
 
 [tool.poetry.dev-dependencies]
 ipython = "^7.18.1"
