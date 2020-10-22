@@ -9,7 +9,6 @@ license = "MIT"
 python = "^3.7"
 pandas = "^1.1.3"
 geopandas = "^0.8.1"
-gemlib-tfp-extra = {git = "ssh://git@fhm-chicas-code.lancs.ac.uk/GEM/gemlib-tfp-extra.git"}
 mapclassify = "^2.3.0"
 PyYAML = "^5.3.1"
 descartes = "^1.1.0"
@@ -18,6 +17,7 @@ xlrd = "^1.2.0"
 tqdm = "^4.50.2"
 openpyxl = "^3.0.5"
 h5py = "^2.10.0"
+gemlib = {git = "http://fhm-chicas-code.lancs.ac.uk/GEM/gemlib.git"}
 
 [tool.poetry.dev-dependencies]
 ipython = "^7.18.1"

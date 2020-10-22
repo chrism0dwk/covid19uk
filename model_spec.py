@@ -1,11 +1,10 @@
 """Implements the COVID SEIR model as a TFP Joint Distribution"""
 
-import pandas as pd
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from covid.model import DiscreteTimeStateTransitionModel
+from gemlib.distributions import DiscreteTimeStateTransitionModel
 from covid.util import impute_previous_cases
 import covid.data as data
 
@@ -104,7 +103,8 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
             commute_volume = tf.gather(W, w_idx)
             xi_idx = tf.cast(
-                tf.clip_by_value(t // XI_FREQ, 0, xi.shape[0] - 1), dtype=tf.int64,
+                tf.clip_by_value(t // XI_FREQ, 0, xi.shape[0] - 1),
+                dtype=tf.int64,
             )
             xi_ = tf.gather(xi, xi_idx)
             beta = beta1 * tf.math.exp(xi_)
@@ -115,10 +115,16 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
                 * commute_volume
                 * tf.linalg.matvec(C, state[..., 2] / tf.squeeze(N))
             )
-            infec_rate = infec_rate / tf.squeeze(N) + 0.000000001  # Vector of length nc
+            infec_rate = (
+                infec_rate / tf.squeeze(N) + 0.000000001
+            )  # Vector of length nc
 
-            ei = tf.broadcast_to([NU], shape=[state.shape[0]])  # Vector of length nc
-            ir = tf.broadcast_to([gamma], shape=[state.shape[0]])  # Vector of length nc
+            ei = tf.broadcast_to(
+                [NU], shape=[state.shape[0]]
+            )  # Vector of length nc
+            ir = tf.broadcast_to(
+                [gamma], shape=[state.shape[0]]
+            )  # Vector of length nc
 
             return [infec_rate, ei, ir]
 
@@ -137,29 +143,32 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
 
 
 def next_generation_matrix_fn(covar_data, param):
-    """The next generation matrix calculates the force of infection from 
-       individuals in metapopulation i to all other metapopulations j during
-       a typical infectious period (1/gamma). i.e.
-         
-         \[ A_{ij} = S_j * \beta_1 ( 1 + \beta_2 * w_t * C_{ij} / N_i) / N_j / gamma \]
+    """The next generation matrix calculates the force of infection from
+    individuals in metapopulation i to all other metapopulations j during
+    a typical infectious period (1/gamma). i.e.
 
-       :param covar_data: a dictionary of covariate data
-       :param param: a dictionary of parameters
-       :returns: a function taking arguments `t` and `state` giving the time and
-                 epidemic state (SEIR) for which the NGM is to be calculated.  This
-                 function in turn returns an MxM next generation matrix.
+      \[ A_{ij} = S_j * \beta_1 ( 1 + \beta_2 * w_t * C_{ij} / N_i) / N_j / gamma \]
+
+    :param covar_data: a dictionary of covariate data
+    :param param: a dictionary of parameters
+    :returns: a function taking arguments `t` and `state` giving the time and
+              epidemic state (SEIR) for which the NGM is to be calculated.  This
+              function in turn returns an MxM next generation matrix.
     """
 
     def fn(t, state):
         C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
-        C = tf.linalg.set_diag(C + tf.transpose(C), tf.zeros(C.shape[0], dtype=DTYPE))
+        C = tf.linalg.set_diag(
+            C + tf.transpose(C), tf.zeros(C.shape[0], dtype=DTYPE)
+        )
         W = tf.constant(covar_data["W"], dtype=DTYPE)
         N = tf.constant(covar_data["N"], dtype=DTYPE)
 
         w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
         commute_volume = tf.gather(W, w_idx)
         xi_idx = tf.cast(
-            tf.clip_by_value(t // XI_FREQ, 0, param["xi"].shape[0] - 1), dtype=tf.int64,
+            tf.clip_by_value(t // XI_FREQ, 0, param["xi"].shape[0] - 1),
+            dtype=tf.int64,
         )
         xi = tf.gather(param["xi"], xi_idx)
         beta = param["beta1"] * tf.math.exp(xi)
@@ -168,7 +177,11 @@ def next_generation_matrix_fn(covar_data, param):
             tf.eye(C.shape[0], dtype=state.dtype)
             + param["beta2"] * commute_volume * C / N[tf.newaxis, :]
         )
-        ngm = ngm * state[..., 0][..., tf.newaxis] / (N[:, tf.newaxis] * param["gamma"])
+        ngm = (
+            ngm
+            * state[..., 0][..., tf.newaxis]
+            / (N[:, tf.newaxis] * param["gamma"])
+        )
         return ngm
 
     return fn

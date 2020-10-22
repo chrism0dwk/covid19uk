@@ -1,12 +1,7 @@
 """MCMC Test Rig for COVID-19 UK model"""
 # pylint: disable=E402
 
-import argparse
 import os
-
-# Uncomment to block GPU use
-
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 from time import perf_counter
 
@@ -19,16 +14,15 @@ import tensorflow_probability as tfp
 
 from tensorflow_probability.python.experimental import unnest
 
-from covid.impl.util import compute_state
-from covid.impl.mcmc import UncalibratedLogRandomWalk, random_walk_mvnorm_fn
-from covid.impl.event_time_mh import UncalibratedEventTimesUpdate
-from covid.impl.occult_events_mh import UncalibratedOccultUpdate, TransitionTopology
-from covid.impl.gibbs import flatten_results
-from covid.impl.gibbs_kernel import GibbsKernel, GibbsKernelResults
-from covid.impl.multi_scan_kernel import MultiScanKernel
-from covid.impl.adaptive_random_walk_metropolis import (
-    AdaptiveRandomWalkMetropolisHastings,
-)
+from gemlib.util import compute_state
+from gemlib.mcmc import UncalibratedEventTimesUpdate
+from gemlib.mcmc import UncalibratedOccultUpdate, TransitionTopology
+from gemlib.mcmc import GibbsKernel
+from gemlib.mcmc.gibbs_kernel import GibbsKernelResults
+from gemlib.mcmc.gibbs_kernel import flatten_results
+from gemlib.mcmc import MultiScanKernel
+from gemlib.mcmc import AdaptiveRandomWalkMetropolis
+
 from covid.data import read_phe_cases
 from covid.cli_arg_parse import cli_args
 
@@ -58,7 +52,9 @@ if __name__ == "__main__":
     ]
 
     covar_data = model_spec.read_covariates(
-        config["data"], date_low=inference_period[0], date_high=inference_period[1],
+        config["data"],
+        date_low=inference_period[0],
+        date_high=inference_period[1],
     )
 
     # We load in cases and impute missing infections first, since this sets the
@@ -82,7 +78,8 @@ if __name__ == "__main__":
     # to set up a sensible initial state.
     state = compute_state(
         initial_state=tf.concat(
-            [covar_data["N"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])], axis=-1
+            [covar_data["N"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])],
+            axis=-1,
         ),
         events=events,
         stoichiometry=model_spec.STOICHIOMETRY,
@@ -106,7 +103,13 @@ if __name__ == "__main__":
     # $\pi(\theta, \xi, y^{se}, y^{ei} | y^{ir})$
     def logp(theta, xi, events):
         return model.log_prob(
-            dict(beta1=theta[0], beta2=theta[1], gamma=theta[2], xi=xi, seir=events,)
+            dict(
+                beta1=theta[0],
+                beta2=theta[1],
+                gamma=theta[2],
+                xi=xi,
+                seir=events,
+            )
         )
 
     # Build Metropolis within Gibbs sampler
@@ -121,7 +124,7 @@ if __name__ == "__main__":
     def make_theta_kernel(shape, name):
         def fn(target_log_prob_fn, state):
             return tfp.mcmc.TransformedTransitionKernel(
-                inner_kernel=AdaptiveRandomWalkMetropolisHastings(
+                inner_kernel=AdaptiveRandomWalkMetropolis(
                     target_log_prob_fn=target_log_prob_fn,
                     initial_state=tf.zeros(shape, dtype=model_spec.DTYPE),
                     initial_covariance=[np.eye(shape[0]) * 1e-1],
@@ -135,7 +138,7 @@ if __name__ == "__main__":
 
     def make_xi_kernel(shape, name):
         def fn(target_log_prob_fn, state):
-            return AdaptiveRandomWalkMetropolisHastings(
+            return AdaptiveRandomWalkMetropolis(
                 target_log_prob_fn=target_log_prob_fn,
                 initial_state=tf.ones(shape, dtype=model_spec.DTYPE),
                 initial_covariance=[np.eye(shape[0]) * 1e-1],
@@ -211,7 +214,9 @@ if __name__ == "__main__":
             q_ratio = proposed_results.log_acceptance_correction
             if hasattr(proposed_results, "extra"):
                 proposed = tf.cast(proposed_results.extra, log_prob.dtype)
-                return tf.concat([[log_prob], [accepted], [q_ratio], proposed], axis=0)
+                return tf.concat(
+                    [[log_prob], [accepted], [q_ratio], proposed], axis=0
+                )
             return tf.concat([[log_prob], [accepted], [q_ratio]], axis=0)
 
         def recurse(f, results):
@@ -293,7 +298,9 @@ if __name__ == "__main__":
         dtype=np.float64,
     )
     xi_samples = posterior.create_dataset(
-        "samples/xi", [NUM_SAVED_SAMPLES, current_state[1].shape[0]], dtype=np.float64,
+        "samples/xi",
+        [NUM_SAVED_SAMPLES, current_state[1].shape[0]],
+        dtype=np.float64,
     )
     event_samples = posterior.create_dataset(
         "samples/events",
@@ -305,13 +312,25 @@ if __name__ == "__main__":
     )
 
     output_results = [
-        posterior.create_dataset("results/theta", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,),
-        posterior.create_dataset("results/xi", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,),
         posterior.create_dataset(
-            "results/move/S->E", (NUM_SAVED_SAMPLES, 3 + num_metapop), dtype=DTYPE,
+            "results/theta",
+            (NUM_SAVED_SAMPLES, 3),
+            dtype=DTYPE,
         ),
         posterior.create_dataset(
-            "results/move/E->I", (NUM_SAVED_SAMPLES, 3 + num_metapop), dtype=DTYPE,
+            "results/xi",
+            (NUM_SAVED_SAMPLES, 3),
+            dtype=DTYPE,
+        ),
+        posterior.create_dataset(
+            "results/move/S->E",
+            (NUM_SAVED_SAMPLES, 3 + num_metapop),
+            dtype=DTYPE,
+        ),
+        posterior.create_dataset(
+            "results/move/E->I",
+            (NUM_SAVED_SAMPLES, 3 + num_metapop),
+            dtype=DTYPE,
         ),
         posterior.create_dataset(
             "results/occult/S->E", (NUM_SAVED_SAMPLES, 6), dtype=DTYPE
@@ -330,10 +349,14 @@ if __name__ == "__main__":
     final_results = None
     for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
         samples, results, final_results = sample(
-            NUM_BURST_SAMPLES, init_state=current_state, previous_results=final_results,
+            NUM_BURST_SAMPLES,
+            init_state=current_state,
+            previous_results=final_results,
         )
         current_state = [s[-1] for s in samples]
-        s = slice(i * THIN_BURST_SAMPLES, i * THIN_BURST_SAMPLES + THIN_BURST_SAMPLES)
+        s = slice(
+            i * THIN_BURST_SAMPLES, i * THIN_BURST_SAMPLES + THIN_BURST_SAMPLES
+        )
         idx = tf.constant(range(0, NUM_BURST_SAMPLES, config["mcmc"]["thin"]))
         theta_samples[s, ...] = tf.gather(samples[0], idx)
         xi_samples[s, ...] = tf.gather(samples[1], idx)
@@ -361,7 +384,8 @@ if __name__ == "__main__":
             tf.reduce_mean(tf.cast(flat_results[0][:, 1], tf.float32)),
         )
         print(
-            "Acceptance xi:", tf.reduce_mean(tf.cast(flat_results[1][:, 1], tf.float32))
+            "Acceptance xi:",
+            tf.reduce_mean(tf.cast(flat_results[1][:, 1], tf.float32)),
         )
         print(
             "Acceptance move S->E:",
