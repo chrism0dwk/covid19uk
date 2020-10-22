@@ -74,7 +74,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         )
 
     def xi():
-        sigma = tf.constant(0.01, dtype=DTYPE)
+        sigma = tf.constant(0.4, dtype=DTYPE)
         phi = tf.constant(24.0, dtype=DTYPE)
         kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
         idx_pts = tf.cast(tf.range(num_steps // XI_FREQ) * XI_FREQ, dtype=DTYPE)

@@ -305,18 +305,26 @@ if __name__ == "__main__":
 
     print("Initial logpi:", logp(*current_state))
 
+    # theta_scale = tf.constant(
+    #     [
+    #         [1.12e-3, 1.67e-4, 1.61e-4],
+    #         [1.67e-4, 7.41e-4, 4.68e-5],
+    #         [1.61e-4, 4.68e-5, 1.28e-4],
+    #     ],
+    #     dtype=DTYPE,
+    # )
     theta_scale = tf.constant(
         [
-            [1.12e-3, 1.67e-4, 1.61e-4],
-            [1.67e-4, 7.41e-4, 4.68e-5],
-            [1.61e-4, 4.68e-5, 1.28e-4],
+            [2.21e-05, -5.33e-05, 4.21e-06],
+            [-5.33e-05, 3.66e-04, 1.45e-05],
+            [4.21e-06, 1.45e-05, 1.52e-05],
         ],
         dtype=DTYPE,
-    )
-    theta_scale = theta_scale * 0.2 / theta_scale.shape[0]
+        )
+    theta_scale = theta_scale * 1.0 / theta_scale.shape[0]
 
     xi_scale = tf.eye(current_state[1].shape[0], dtype=DTYPE)
-    xi_scale = xi_scale * 0.0001 / xi_scale.shape[0]
+    xi_scale = xi_scale * 0.0002 / xi_scale.shape[0]
 
     # We loop over successive calls to sample because we have to dump results
     #   to disc, or else end OOM (even on a 32GB system).
