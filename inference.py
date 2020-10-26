@@ -90,11 +90,19 @@ if __name__ == "__main__":
     ########################################################
     # Build the model, and then construct the MCMC kernels #
     ########################################################
+    def convert_priors(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                node[k] = convert_priors(v)
+            return node
+        return float(node)
+
     model = model_spec.CovidUK(
         covariates=covar_data,
         initial_state=initial_state,
         initial_step=0,
         num_steps=events.shape[1],
+        priors=convert_priors(config['mcmc']['prior']),
     )
 
     # Full joint log posterior distribution

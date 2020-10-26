@@ -52,14 +52,14 @@ def impute_censored_events(cases):
     :returns: a MxTx3 tensor of events where the first two indices of
               the right-most dimension contain the imputed event times.
     """
-    ei_events, lag_ei = impute_previous_cases(cases, 0.44)
-    se_events, lag_se = impute_previous_cases(ei_events, 2.0)
+    ei_events, lag_ei = impute_previous_cases(cases, 0.25)
+    se_events, lag_se = impute_previous_cases(ei_events, 0.5)
     ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
     ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
     return tf.stack([se_events, ei_events, ir_events], axis=-1)
 
 
-def CovidUK(covariates, initial_state, initial_step, num_steps):
+def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
     def beta1():
         return tfd.Normal(
             loc=tf.constant(0.0, dtype=DTYPE),
@@ -85,8 +85,8 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
 
     def gamma():
         return tfd.Gamma(
-            concentration=tf.constant(100.0, dtype=DTYPE),
-            rate=tf.constant(400.0, dtype=DTYPE),
+            concentration=tf.constant(priors['gamma']['concentration'], dtype=DTYPE),
+            rate=tf.constant(priors['gamma']['rate'], dtype=DTYPE),
         )
 
     def seir(beta2, xi, gamma):

@@ -41,7 +41,11 @@ mcmc:
   num_bursts: 200
   num_burst_samples: 1000
   thin: 20
-  
+  prior:
+    gamma:
+      concentration: 2.0
+      rate: 4.0
+
 output:
   results_dir: $global_scratch/covid19/
   posterior: posterior.hd5
