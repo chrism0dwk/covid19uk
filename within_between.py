@@ -30,15 +30,20 @@ def make_within_rate_fns(covariates, theta, xi):
     gamma = theta[2]
 
     def within_fn(t, state):
-        beta = beta1 * np.exp(xi)
+        beta = np.exp(xi)
         rate = beta * state[..., 2] / N
         return rate
 
     def between_fn(t, state):
         w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
         commute_volume = tf.gather(W, w_idx)
-        beta = beta1 * np.exp(xi)
-        rate = beta * beta2 * commute_volume * tf.linalg.matvec(C, state[..., 2] / N)
+        beta = np.exp(xi)
+        rate = (
+            beta
+            * beta2
+            * commute_volume
+            * tf.linalg.matvec(C, state[..., 2] / N)
+        )
         return rate
 
     return within_fn, between_fn
@@ -56,7 +61,7 @@ def calc_pressure_components(covariates, theta, xi, state):
     return tf.vectorize_map(atomic_fn, elems=(theta, xi))
 
 
-args = cli_args(["--config", "within_between_config.yaml"])
+args = cli_args()
 
 with open(args.config, "r") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
@@ -73,7 +78,9 @@ covar_data = model_spec.read_covariates(
 # Load posterior file
 posterior = h5py.File(
     os.path.expandvars(
-        os.path.join(config["output"]["results_dir"], config["output"]["posterior"])
+        os.path.join(
+            config["output"]["results_dir"], config["output"]["posterior"]
+        )
     ),
     "r",
     rdcc_nbytes=1024 ** 3,
@@ -92,7 +99,11 @@ within, between = calc_pressure_components(
     covar_data, theta, xi[:, -1], state_timeseries[..., -1, :]
 )
 
-gpkg = gp.read_file(GIS_TEMPLATE, layer="UK2019mod_pop_xgen")
+gpkg = gp.read_file(
+    os.path.join(
+        config["output"]["results_dir"], config["output"]["geopackage"]
+    )
+)
 gpkg = gpkg[gpkg["lad19cd"].str.startswith("E")]
 gpkg = gpkg.sort_values("lad19cd")
 
@@ -101,6 +112,8 @@ gpkg["between_mean"] = np.mean(between, axis=0)
 gpkg["p_within_gt_between"] = np.mean(within > between)
 
 gpkg.to_file(
-    os.path.join(config["output"]["results_dir"], config["output"]["geopackage"]),
+    os.path.join(
+        config["output"]["results_dir"], config["output"]["geopackage"]
+    ),
     driver="GPKG",
 )
