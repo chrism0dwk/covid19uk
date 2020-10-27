@@ -1,10 +1,11 @@
-"""Implements the COVID SEIR model as a TFP Joint Distribution"""
+"""Implements a marginalised COVID SEIR model as a TFP Joint Distribution"""
 
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
 from gemlib.distributions import DiscreteTimeStateTransitionModel
+from gemlib.util import compute_state
 from covid.util import impute_previous_cases
 import covid.data as data
 
@@ -60,42 +61,25 @@ def impute_censored_events(cases):
 
 
 def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
-    def beta1():
-        return tfd.Normal(
-            loc=tf.constant(0.0, dtype=DTYPE),
-            scale=tf.constant(1000.0, dtype=DTYPE),
-        )
-
     def beta2():
         return tfd.Gamma(
             concentration=tf.constant(3.0, dtype=DTYPE),
             rate=tf.constant(10.0, dtype=DTYPE),
         )
 
-    def xi(beta1):
-        sigma = tf.constant(0.1, dtype=DTYPE)
+    def xi():
+        sigma = tf.constant(0.4, dtype=DTYPE)
         phi = tf.constant(24.0, dtype=DTYPE)
         kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
         idx_pts = tf.cast(tf.range(num_steps // XI_FREQ) * XI_FREQ, dtype=DTYPE)
         return tfd.GaussianProcess(
             kernel,
-            mean_fn=lambda idx: beta1,
             index_points=idx_pts[:, tf.newaxis],
         )
 
-    def gamma():
-        return tfd.Gamma(
-            concentration=tf.constant(
-                priors["gamma"]["concentration"], dtype=DTYPE
-            ),
-            rate=tf.constant(priors["gamma"]["rate"], dtype=DTYPE),
-        )
-
-    def seir(beta2, xi, gamma):
-
+    def seir(beta2, xi):
         beta2 = tf.convert_to_tensor(beta2, DTYPE)
         xi = tf.convert_to_tensor(xi, DTYPE)
-        gamma = tf.convert_to_tensor(gamma, DTYPE)
 
         def transition_rate_fn(t, state):
             C = tf.convert_to_tensor(covariates["C"], dtype=DTYPE)
@@ -124,15 +108,15 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             )  # Vector of length nc
 
             ei = tf.broadcast_to(
-                [NU], shape=[state.shape[0]]
+                [tf.constant(1.0, dtype=DTYPE)], shape=[state.shape[0]]
             )  # Vector of length nc
             ir = tf.broadcast_to(
-                [gamma], shape=[state.shape[0]]
+                [tf.constant(1.0, dtype=DTYPE)], shape=[state.shape[0]]
             )  # Vector of length nc
 
             return [infec_rate, ei, ir]
 
-        return DiscreteTimeStateTransitionModel(
+        return DiscreteTimeStateTransitionMarginalModel(
             transition_rates=transition_rate_fn,
             stoichiometry=STOICHIOMETRY,
             initial_state=initial_state,
@@ -141,28 +125,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             num_steps=num_steps,
         )
 
-    return tfd.JointDistributionNamed(
-        dict(beta1=beta1, beta2=beta2, xi=xi, gamma=gamma, seir=seir)
-    )
-
-
-def marginalized_log_prob(model):
-    """Joint log_prob function with baseline hazard
-    rates marginalized out.
-    """
-
-    def log_prob(beta2, xi, seir):
-
-        lp_beta2 = model.model.modules["beta"].log_prob(beta2)
-        lp_xi = model.model.modules["xi"].log_prob(xi)
-
-        seir_marginal = DiscreteTimeStateTransitionMarginalModel(
-            *model.model.modules["seir"]._parameters
-        )
-
-        lp_seir_marginal = seir_marginal(seir)
-
-        return lp_beta2 + lp_xi + lp_seir_marginal
+    return tfd.JointDistributionNamed(dict(beta2=beta2, xi=xi, seir=seir))
 
 
 def next_generation_matrix_fn(covar_data, param):
@@ -194,7 +157,7 @@ def next_generation_matrix_fn(covar_data, param):
             dtype=tf.int64,
         )
         xi = tf.gather(param["xi"], xi_idx)
-        beta = tf.math.exp(xi)
+        beta = param["beta1"] * tf.math.exp(xi)
 
         ngm = beta * (
             tf.eye(C.shape[0], dtype=state.dtype)
