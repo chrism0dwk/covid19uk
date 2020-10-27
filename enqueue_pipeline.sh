@@ -2,9 +2,9 @@
 
 # Enqueues COVID-19 pipelines
 
-CASES_FILE="data/Anonymised Combined Line List 20201019.csv"
-DATE_LOW="2020-07-24"
-DATE_HIGH="2020-10-16"
+CASES_FILE="data/Anonymised Combined Line List 20201026.csv"
+DATE_LOW="2020-07-31"
+DATE_HIGH="2020-10-23"
 
 TEMPLATE_CONFIG=template_config.yaml
 
@@ -12,7 +12,7 @@ TEMPLATE_CONFIG=template_config.yaml
 # Job submisison
 switch-gpu
 
-for PILLAR in both
+for PILLAR in both 1
 do
     for CASE_DATE_TYPE in specimen report
     do	

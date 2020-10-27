@@ -8,13 +8,13 @@ import pandas as pd
 import geopandas as gp
 
 import tensorflow as tf
+from gemlib.util import compute_state
 
 from covid.cli_arg_parse import cli_args
-from covid.model import (
+from covid.summary import (
     rayleigh_quotient,
     power_iteration,
 )
-from covid.impl.util import compute_state
 from covid.summary import mean_and_ci
 
 import model_spec
@@ -22,6 +22,7 @@ import model_spec
 DTYPE = model_spec.DTYPE
 
 GIS_TEMPLATE = "data/UK2019mod_pop.gpkg"
+
 
 # Reproduction number calculation
 def calc_R_it(theta, xi, events, init_state, covar_data):
@@ -41,7 +42,7 @@ def calc_R_it(theta, xi, events, init_state, covar_data):
         state = compute_state(init_state, events_, model_spec.STOICHIOMETRY)
         state = tf.gather(state, t - 1, axis=-2)  # State on final inference day
 
-        par = dict(beta1=theta_[0], beta2=theta_[1], gamma=theta_[2], xi=xi_)
+        par = dict(beta1=xi_[0], beta2=theta_[0], gamma=theta_[1], xi=xi_[1:])
 
         ngm_fn = model_spec.next_generation_matrix_fn(covar_data, par)
         ngm = ngm_fn(t, state)
@@ -51,7 +52,7 @@ def calc_R_it(theta, xi, events, init_state, covar_data):
 
 
 @tf.function
-def predicted_incidence(theta, xi, init_state, init_step, num_steps):
+def predicted_incidence(theta, xi, init_state, init_step, num_steps, priors):
     """Runs the simulation forward in time from `init_state` at time `init_time`
        for `num_steps`.
     :param theta: a tensor of batched theta parameters [B] + theta.shape
@@ -59,26 +60,30 @@ def predicted_incidence(theta, xi, init_state, init_step, num_steps):
     :param events: a [B, M, S] batched state tensor
     :param init_step: the initial time step
     :param num_steps: the number of steps to simulate
-    :returns: a tensor of srt_quhape [B, M, num_steps, X] where X is the number of state 
+    :param priors: the priors for gamma
+    :returns: a tensor of srt_quhape [B, M, num_steps, X] where X is the number of state
               transitions
     """
 
     def sim_fn(args):
         theta_, xi_, init_ = args
 
-        par = dict(beta1=theta_[0], beta2=theta_[1], gamma=theta_[2], xi=xi_)
+        par = dict(beta1=xi_[0], beta2=theta_[0], gamma=theta_[1], xi=xi_[1:])
 
         model = model_spec.CovidUK(
             covar_data,
             initial_state=init_,
             initial_step=init_step,
             num_steps=num_steps,
+            priors=priors,
         )
         sim = model.sample(**par)
         return sim["seir"]
 
     events = tf.map_fn(
-        sim_fn, elems=(theta, xi, init_state), fn_output_signature=(tf.float64),
+        sim_fn,
+        elems=(theta, xi, init_state),
+        fn_output_signature=(tf.float64),
     )
     return events
 
@@ -117,13 +122,17 @@ if __name__ == "__main__":
 
     # Load covariate data
     covar_data = model_spec.read_covariates(
-        config["data"], date_low=inference_period[0], date_high=inference_period[1]
+        config["data"],
+        date_low=inference_period[0],
+        date_high=inference_period[1],
     )
 
     # Load posterior file
     posterior = h5py.File(
         os.path.expandvars(
-            os.path.join(config["output"]["results_dir"], config["output"]["posterior"])
+            os.path.join(
+                config["output"]["results_dir"], config["output"]["posterior"]
+            )
         ),
         "r",
         rdcc_nbytes=1024 ** 3,
@@ -136,11 +145,17 @@ if __name__ == "__main__":
     xi = posterior["samples/xi"][idx]
     events = posterior["samples/events"][idx]
     init_state = posterior["initial_state"][:]
-    state_timeseries = compute_state(init_state, events, model_spec.STOICHIOMETRY)
+    state_timeseries = compute_state(
+        init_state, events, model_spec.STOICHIOMETRY
+    )
 
     # Build model
     model = model_spec.CovidUK(
-        covar_data, initial_state=init_state, initial_step=0, num_steps=events.shape[1],
+        covar_data,
+        initial_state=init_state,
+        initial_step=0,
+        num_steps=events.shape[1],
+        priors=config["mcmc"]["prior"],
     )
 
     ngms = calc_R_it(theta, xi, events, init_state, covar_data)
@@ -148,7 +163,9 @@ if __name__ == "__main__":
     rt = rayleigh_quotient(ngms, b)
     q = np.arange(0.05, 1.0, 0.05)
     rt_quantiles = pd.DataFrame({"Rt": np.quantile(rt, q)}, index=q).T.to_excel(
-        os.path.join(config["output"]["results_dir"], config["output"]["national_rt"]),
+        os.path.join(
+            config["output"]["results_dir"], config["output"]["national_rt"]
+        ),
     )
 
     # Prediction requires simulation from the last available timepoint for 28 + 4 + 1 days
@@ -160,13 +177,16 @@ if __name__ == "__main__":
         init_state=state_timeseries[..., -1, :],
         init_step=state_timeseries.shape[-2] - 1,
         num_steps=70,
+        priors=config["mcmc"]["prior"],
     )
     predicted_state = compute_state(
         state_timeseries[..., -1, :], prediction, model_spec.STOICHIOMETRY
     )
 
     # Prevalence now
-    prev_now = prevalence(predicted_state[..., 4, :], covar_data["N"], name="prev")
+    prev_now = prevalence(
+        predicted_state[..., 4, :], covar_data["N"], name="prev"
+    )
 
     # Incidence of detections now
     cases_now = predicted_events(prediction[..., 4:5, 2], name="cases")
@@ -179,11 +199,21 @@ if __name__ == "__main__":
     cases_56 = predicted_events(prediction[..., 4:60, 2], name="cases56")
 
     # Prevalence at day 7
-    prev_7 = prevalence(predicted_state[..., 11, :], covar_data["N"], name="prev7")
-    prev_14 = prevalence(predicted_state[..., 18, :], covar_data["N"], name="prev14")
-    prev_21 = prevalence(predicted_state[..., 25, :], covar_data["N"], name="prev21")
-    prev_28 = prevalence(predicted_state[..., 32, :], covar_data["N"], name="prev28")
-    prev_56 = prevalence(predicted_state[..., 60, :], covar_data["N"], name="prev56")
+    prev_7 = prevalence(
+        predicted_state[..., 11, :], covar_data["N"], name="prev7"
+    )
+    prev_14 = prevalence(
+        predicted_state[..., 18, :], covar_data["N"], name="prev14"
+    )
+    prev_21 = prevalence(
+        predicted_state[..., 25, :], covar_data["N"], name="prev21"
+    )
+    prev_28 = prevalence(
+        predicted_state[..., 32, :], covar_data["N"], name="prev28"
+    )
+    prev_56 = prevalence(
+        predicted_state[..., 60, :], covar_data["N"], name="prev56"
+    )
 
     def geosummary(geodata, summaries):
         for summary in summaries:
@@ -226,6 +256,8 @@ if __name__ == "__main__":
         ),
     ]
     ltla.to_file(
-        os.path.join(config["output"]["results_dir"], config["output"]["geopackage"]),
+        os.path.join(
+            config["output"]["results_dir"], config["output"]["geopackage"]
+        ),
         driver="GPKG",
     )

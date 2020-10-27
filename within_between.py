@@ -9,11 +9,8 @@ import geopandas as gp
 import tensorflow as tf
 
 from covid.cli_arg_parse import cli_args
-from covid.impl.util import compute_state
+from gemlib.util import compute_state
 import model_spec
-
-
-GIS_TEMPLATE = "data/UK2019_mod_pop.gpkg"
 
 
 def make_within_rate_fns(covariates, theta, xi):
@@ -22,22 +19,24 @@ def make_within_rate_fns(covariates, theta, xi):
     C = tf.linalg.set_diag(
         C + tf.transpose(C), tf.zeros(C.shape[0], dtype=model_spec.DTYPE)
     )
-    W = tf.constant(np.squeeze(covariates["W"], dtype=model_spec.DTYPE))
-    N = tf.constant(np.squeeze(covariates["N"], dtype=model_spec.DTYPE))
+    W = tf.convert_to_tensor(
+        tf.squeeze(covariates["W"]), dtype=model_spec.DTYPE
+    )
+    N = tf.convert_to_tensor(
+        tf.squeeze(covariates["N"]), dtype=model_spec.DTYPE
+    )
 
-    beta1 = theta[0]
-    beta2 = theta[1]
-    gamma = theta[2]
+    beta2 = theta[0]
 
     def within_fn(t, state):
-        beta = np.exp(xi)
-        rate = beta * state[..., 2] / N
+        beta = tf.math.exp(xi)
+        rate = state[..., 2]
         return rate
 
     def between_fn(t, state):
         w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
         commute_volume = tf.gather(W, w_idx)
-        beta = np.exp(xi)
+        beta = tf.math.exp(xi)
         rate = (
             beta
             * beta2
@@ -49,16 +48,17 @@ def make_within_rate_fns(covariates, theta, xi):
     return within_fn, between_fn
 
 
-@tf.function
+# @tf.function
 def calc_pressure_components(covariates, theta, xi, state):
-    def atomic_fn(theta_, xi_):
+    def atomic_fn(args):
+        theta_, xi_, state_ = args
         within_fn, between_fn = make_within_rate_fns(covariates, theta_, xi_)
-        within = within_fn(covariates["W"].shape[0], state)
-        between = between_fn(covariates["W"].shape[0], state)
+        within = within_fn(covariates["W"].shape[0], state_)
+        between = between_fn(covariates["W"].shape[0], state_)
         total = within + between
         return within / total, between / total
 
-    return tf.vectorize_map(atomic_fn, elems=(theta, xi))
+    return tf.vectorized_map(atomic_fn, elems=(theta, xi, state))
 
 
 args = cli_args()
@@ -106,6 +106,8 @@ gpkg = gp.read_file(
 )
 gpkg = gpkg[gpkg["lad19cd"].str.startswith("E")]
 gpkg = gpkg.sort_values("lad19cd")
+
+print("Within shape:", within.shape)
 
 gpkg["within_mean"] = np.mean(within, axis=0)
 gpkg["between_mean"] = np.mean(between, axis=0)

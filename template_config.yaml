@@ -36,7 +36,7 @@ mcmc:
   dmax: 21
   nmax: 50
   m: 1
-  occult_nmax: 5
+  occult_nmax: 15
   num_event_time_updates: 35
   num_bursts: 200
   num_burst_samples: 1000

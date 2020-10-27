@@ -8,12 +8,14 @@ import argparse
 import yaml
 
 
-def make_or_refresh_dir(path):
+def maybe_delete_dir(path):
     dirpath = Path(path)
     if dirpath.exists():
         shutil.rmtree(dirpath)
-    dirpath.mkdir()
 
+def maybe_make_dir(path):
+    dirpath = Path(path)
+    dirpath.mkdir(exist_ok=True)
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -40,7 +42,7 @@ parser.add_argument(
 )
 parser.add_argument("--pillar", type=str, help="Pillar", choices=["both", "1", "2"])
 parser.add_argument("--results-dir", type=str, help="Results directory")
-
+parser.add_argument("--delete", type=bool, default=False, help="Delete an existing results dir before writing")
 parser.add_argument("config_template", type=str, help="Config file template")
 
 args = parser.parse_args()
@@ -63,8 +65,9 @@ for key in ["results_dir"]:
     if val is not None:
         config["output"][key] = val
 
-
-make_or_refresh_dir(config["output"]["results_dir"])
+if args.delete is True:
+    maybe_delete_dir(config["output"]["results_dir"])
+maybe_make_dir(config["output"]["results_dir"])
 
 if args.output == "stdout":
     print(yaml.dump(config))
