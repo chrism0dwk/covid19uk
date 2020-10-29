@@ -24,7 +24,7 @@ from gemlib.mcmc import AdaptiveRandomWalkMetropolis
 from covid.data import read_phe_cases
 from covid.cli_arg_parse import cli_args
 
-import model_spec
+import model_spec_marginal as model_spec
 
 if tf.test.gpu_device_name():
     print("Using GPU")
@@ -102,55 +102,35 @@ if __name__ == "__main__":
         initial_state=initial_state,
         initial_step=0,
         num_steps=events.shape[1],
-        priors=convert_priors(config['mcmc']['prior']),
     )
 
     # Full joint log posterior distribution
     # $\pi(\theta, \xi, y^{se}, y^{ei} | y^{ir})$
-    def logp(theta, xi, events):
+    def logp(theta, events):
         return model.log_prob(
             dict(
-                beta1=xi[0],
                 beta2=theta[0],
-                gamma=theta[1],
-                xi=xi[1:],
+                xi=theta[1:],
                 seir=events,
             )
         )
 
     # Build Metropolis within Gibbs sampler
-    #
-    # Kernels are:
-    #     Q(\theta, \theta^\prime)
-    #     Q(\xi, \xi^\prime)
-    #     Q(Z^{se}, Z^{se\prime}) (partially-censored)
-    #     Q(Z^{ei}, Z^{ei\prime}) (partially-censored)
-    #     Q(Z^{se}, Z^{se\prime}) (occult)
-    #     Q(Z^{ei}, Z^{ei\prime}) (occult)
     def make_theta_kernel(shape, name):
+        bij = tfp.bijectors.Blockwise(
+            bijectors=[tfp.bijectors.Exp(), tfp.bijectors.Identity()],
+            block_sizes=[1, shape[0] - 1],
+        )
+
         def fn(target_log_prob_fn, _):
             return tfp.mcmc.TransformedTransitionKernel(
                 inner_kernel=AdaptiveRandomWalkMetropolis(
                     target_log_prob_fn=target_log_prob_fn,
-                    initial_covariance=[
-                        np.eye(shape[0], dtype=model_spec.DTYPE) * 1e-1
-                    ],
+                    initial_covariance=np.eye(shape[0], dtype=model_spec.DTYPE)
+                    * 1e-1,
                     covariance_burnin=200,
                 ),
-                bijector=tfp.bijectors.Exp(),
-                name=name,
-            )
-
-        return fn
-
-    def make_xi_kernel(shape, name):
-        def fn(target_log_prob_fn, _):
-            return AdaptiveRandomWalkMetropolis(
-                target_log_prob_fn=target_log_prob_fn,
-                initial_covariance=[
-                    np.eye(shape[0], dtype=model_spec.DTYPE) * 1e-1
-                ],
-                covariance_burnin=200,
+                bijector=bij,
                 name=name,
             )
 
@@ -245,8 +225,7 @@ if __name__ == "__main__":
                 target_log_prob_fn=logp,
                 kernel_list=[
                     (0, make_theta_kernel(init_state[0].shape, "theta")),
-                    (1, make_xi_kernel(init_state[1].shape, "xi")),
-                    (2, make_event_multiscan_kernel),
+                    (1, make_event_multiscan_kernel),
                 ],
                 name="gibbs0",
             )
@@ -276,8 +255,13 @@ if __name__ == "__main__":
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.65, 0.48], dtype=DTYPE),
-        np.zeros(model.model["xi"](0.0).event_shape[-1] + 1, dtype=DTYPE),
+        tf.concat(
+            [
+                tf.constant([0.1], dtype=DTYPE),
+                np.zeros(model.model["xi"]().event_shape[-1], dtype=DTYPE),
+            ],
+            axis=-1,
+        ),
         events,
     ]
 
@@ -292,7 +276,7 @@ if __name__ == "__main__":
         rdcc_nslots=100000,
         libver="latest",
     )
-    event_size = [NUM_SAVED_SAMPLES] + list(current_state[2].shape)
+    event_size = [NUM_SAVED_SAMPLES] + list(current_state[1].shape)
 
     posterior.create_dataset("initial_state", data=initial_state)
 
@@ -303,11 +287,6 @@ if __name__ == "__main__":
     theta_samples = posterior.create_dataset(
         "samples/theta",
         [NUM_SAVED_SAMPLES, current_state[0].shape[0]],
-        dtype=np.float64,
-    )
-    xi_samples = posterior.create_dataset(
-        "samples/xi",
-        [NUM_SAVED_SAMPLES, current_state[1].shape[0]],
         dtype=np.float64,
     )
     event_samples = posterior.create_dataset(
@@ -321,10 +300,9 @@ if __name__ == "__main__":
 
     output_results = [
         posterior.create_dataset(
-            "results/theta", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,
-        ),
-        posterior.create_dataset(
-            "results/xi", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,
+            "results/theta",
+            (NUM_SAVED_SAMPLES, 3),
+            dtype=DTYPE,
         ),
         posterior.create_dataset(
             "results/move/S->E",
@@ -363,18 +341,9 @@ if __name__ == "__main__":
         )
         idx = tf.constant(range(0, NUM_BURST_SAMPLES, config["mcmc"]["thin"]))
         theta_samples[s, ...] = tf.gather(samples[0], idx)
-        xi_samples[s, ...] = tf.gather(samples[1], idx)
-        # cov = np.cov(
-        #     np.log(theta_samples[: (i * NUM_BURST_SAMPLES + NUM_BURST_SAMPLES), ...]),
-        #     rowvar=False,
-        # )
         print(current_state[0].numpy(), flush=True)
-        # print(cov, flush=True)
-        # if (i * NUM_BURST_SAMPLES) > 1000 and np.all(np.isfinite(cov)):
-        #     theta_scale = 2.38 ** 2 * cov / 2.0
-
         start = perf_counter()
-        event_samples[s, ...] = tf.gather(samples[2], idx)
+        event_samples[s, ...] = tf.gather(samples[1], idx)
         end = perf_counter()
 
         flat_results = flatten_results(results)
@@ -388,31 +357,26 @@ if __name__ == "__main__":
             tf.reduce_mean(tf.cast(flat_results[0][:, 1], tf.float32)),
         )
         print(
-            "Acceptance xi:",
+            "Acceptance move S->E:",
             tf.reduce_mean(tf.cast(flat_results[1][:, 1], tf.float32)),
         )
         print(
-            "Acceptance move S->E:",
+            "Acceptance move E->I:",
             tf.reduce_mean(tf.cast(flat_results[2][:, 1], tf.float32)),
         )
         print(
-            "Acceptance move E->I:",
+            "Acceptance occult S->E:",
             tf.reduce_mean(tf.cast(flat_results[3][:, 1], tf.float32)),
         )
         print(
-            "Acceptance occult S->E:",
-            tf.reduce_mean(tf.cast(flat_results[4][:, 1], tf.float32)),
-        )
-        print(
             "Acceptance occult E->I:",
-            tf.reduce_mean(tf.cast(flat_results[5][:, 1], tf.float32)),
+            tf.reduce_mean(tf.cast(flat_results[4][:, 1], tf.float32)),
         )
 
     print(f"Acceptance theta: {output_results[0][:, 1].mean()}")
-    print(f"Acceptance xi: {output_results[1][:, 1].mean()}")
-    print(f"Acceptance move S->E: {output_results[2][:, 1].mean()}")
-    print(f"Acceptance move E->I: {output_results[3][:, 1].mean()}")
-    print(f"Acceptance occult S->E: {output_results[4][:, 1].mean()}")
-    print(f"Acceptance occult E->I: {output_results[5][:, 1].mean()}")
+    print(f"Acceptance move S->E: {output_results[1][:, 1].mean()}")
+    print(f"Acceptance move E->I: {output_results[2][:, 1].mean()}")
+    print(f"Acceptance occult S->E: {output_results[3][:, 1].mean()}")
+    print(f"Acceptance occult E->I: {output_results[4][:, 1].mean()}")
 
     posterior.close()
