@@ -17,7 +17,7 @@ xlrd = "^1.2.0"
 tqdm = "^4.50.2"
 openpyxl = "^3.0.5"
 h5py = "^2.10.0"
-gemlib = {git = "http://fhm-chicas-code.lancs.ac.uk/GEM/gemlib.git"}
+gemlib = {git = "http://fhm-chicas-code.lancs.ac.uk/GEM/gemlib.git", rev="marginal_discrete"}
 
 [tool.poetry.dev-dependencies]
 ipython = "^7.18.1"

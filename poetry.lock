@@ -332,14 +332,14 @@ python-versions = "^3.7"
 
 [package.dependencies]
 numpy = "^1.18.5"
-tf-nightly = "2.4.0-alpha.20201021"
-tfp-nightly = "0.12.0-alpha.20201021"
+tf-nightly = "*"
+tfp-nightly = "*"
 
 [package.source]
 type = "git"
 url = "http://fhm-chicas-code.lancs.ac.uk/GEM/gemlib.git"
-reference = "master"
-resolved_reference = "8214e242a8170b9dd79326657257820dfa6df94b"
+reference = "marginal_discrete"
+resolved_reference = "819955ea4ddecb9f04c88633576438127e15c5af"
 
 [[package]]
 name = "geopandas"
@@ -1610,7 +1610,7 @@ testing = ["pytest (>=3.5,<3.7.3 || >3.7.3)", "pytest-checkdocs (>=1.2.3)", "pyt
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.7"
-content-hash = "395b276b10f26a5b382015a38a3f6e7465fde3b785efe0ff59b4dd79f01f57a6"
+content-hash = "63965159d4be1e447438f4efb50fe72d7cc276570c1029a5afae111f8bc72823"
 
 [metadata.files]
 absl-py = [
