@@ -60,7 +60,13 @@ def impute_censored_events(cases):
     return tf.stack([se_events, ei_events, ir_events], axis=-1)
 
 
-def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
+def CovidUK(covariates, initial_state, initial_step, num_steps):
+
+    h0_priors = dict(
+        concentration=tf.constant([0.1, 2.0, 2.0], dtype=DTYPE),
+        rate=tf.constant([0.1, 4.0, 4.0], dtype=DTYPE),
+    )
+
     def beta2():
         return tfd.Gamma(
             concentration=tf.constant(3.0, dtype=DTYPE),
@@ -118,6 +124,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
 
         return StateTransitionMarginalModel(
             transition_rates=transition_rate_fn,
+            baseline_hazard_rate_priors=h0_priors,
             stoichiometry=STOICHIOMETRY,
             initial_state=initial_state,
             initial_step=initial_step,
