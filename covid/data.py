@@ -5,7 +5,12 @@ from warnings import warn
 import numpy as np
 import pandas as pd
 
-__all__ = ["read_mobility", "read_population", "read_traffic_flow", "read_phe_cases"]
+__all__ = [
+    "read_mobility",
+    "read_population",
+    "read_traffic_flow",
+    "read_phe_cases",
+]
 
 
 def read_mobility(path):
@@ -19,7 +24,8 @@ def read_mobility(path):
     """
     mobility = pd.read_csv(path)
     mobility = mobility[
-        mobility["From"].str.startswith("E") & mobility["To"].str.startswith("E")
+        mobility["From"].str.startswith("E")
+        & mobility["To"].str.startswith("E")
     ]
     mobility = mobility.sort_values(["From", "To"])
     mobility = mobility.groupby(["From", "To"]).agg({"Flow": sum}).reset_index()
@@ -40,7 +46,9 @@ def read_population(path):
     return pop
 
 
-def read_traffic_flow(path: str, date_low: np.datetime64, date_high: np.datetime64):
+def read_traffic_flow(
+    path: str, date_low: np.datetime64, date_high: np.datetime64
+):
     """Read traffic flow data, returning a timeseries between dates.
     :param path: path to a traffic flow CSV with <date>,<Car> columns
     :returns: a Pandas timeseries
@@ -50,8 +58,12 @@ def read_traffic_flow(path: str, date_low: np.datetime64, date_high: np.datetime
     )
     commute_raw.index = pd.to_datetime(commute_raw.index, format="%Y-%m-%d")
     commute_raw.sort_index(axis=0, inplace=True)
-    commute = pd.DataFrame(index=np.arange(date_low, date_high, np.timedelta64(1, "D")))
-    commute = commute.merge(commute_raw, left_index=True, right_index=True, how="left")
+    commute = pd.DataFrame(
+        index=np.arange(date_low, date_high, np.timedelta64(1, "D"))
+    )
+    commute = commute.merge(
+        commute_raw, left_index=True, right_index=True, how="left"
+    )
     commute[commute.index < commute_raw.index[0]] = commute_raw.iloc[0, 0]
     commute[commute.index > commute_raw.index[-1]] = commute_raw.iloc[-1, 0]
     commute["Cars"] = commute["Cars"] / 100.0
@@ -87,14 +99,18 @@ def read_phe_cases(
     line_listing["lad19cd"] = _merge_ltla(line_listing["lad19cd"])
 
     # Select dates
-    line_listing["date"] = pd.to_datetime(line_listing["date"], format="%d/%m/%Y")
+    line_listing["date"] = pd.to_datetime(
+        line_listing["date"], format="%d/%m/%Y"
+    )
     line_listing = line_listing[
         (date_low <= line_listing["date"]) & (line_listing["date"] < date_high)
     ]
 
     # Choose pillar
     if pillar_map[pillar] is not None:
-        line_listing = line_listing.loc[line_listing["pillar"] == pillar_map[pillar]]
+        line_listing = line_listing.loc[
+            line_listing["pillar"] == pillar_map[pillar]
+        ]
 
     # Drop na rows
     orig_len = line_listing.shape[0]
@@ -112,8 +128,45 @@ due to missing values ({100. * (orig_len - line_listing.shape[0])/orig_len}%)"
     dates = pd.date_range(date_low, date_high, closed="left")
     if ltlas is None:
         ltlas = case_counts.index.levels[1]
-    index = pd.MultiIndex.from_product([dates, ltlas], names=["date", "lad19cd"])
+    index = pd.MultiIndex.from_product(
+        [dates, ltlas], names=["date", "lad19cd"]
+    )
     case_counts = case_counts.reindex(index, fill_value=0)
     return case_counts.reset_index().pivot(
         index="lad19cd", columns="date", values="count"
     )
+
+
+def read_tier_restriction_data(
+    tier_restriction_csv, lad19cd_lookup, date_low, date_high
+):
+    data = pd.read_csv(tier_restriction_csv)
+
+    # Group merged ltlas
+    london = ["City of London", "Westminster"]
+    corn_scilly = ["Cornwall", "Isles of Scilly"]
+    data.loc[data["ltla"].isin(london), "ltla"] = ":".join(london)
+    data.loc[data["ltla"].isin(corn_scilly), "ltla"] = ":".join(corn_scilly)
+
+    # Fix up dodgy names
+    data.loc[
+        data["ltla"] == "Blackburn With Darwen", "ltla"
+    ] = "Blackburn with Darwen"
+
+    # Merge
+    data = lad19cd_lookup.merge(
+        data, how="left", left_on="lad19nm", right_on="ltla"
+    )
+
+    # Re-index
+    data.index = pd.MultiIndex.from_frame(data[["date", "lad19cd"]])
+    data = data[["tier_2", "tier_3"]]
+    data = data[~data.index.duplicated()]
+    dates = pd.date_range(date_low, date_high - pd.Timedelta(1, "D"))
+    lad19cd = lad19cd_lookup["lad19cd"].sort_values().unique()
+    new_index = pd.MultiIndex.from_product([dates, lad19cd])
+    data = data.reindex(new_index, fill_value=0.0)
+
+    # Pack into [T, M, V] array.
+    arr_data = data.to_xarray().to_array()
+    return np.transpose(arr_data, axes=[1, 2, 0])

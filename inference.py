@@ -102,18 +102,19 @@ if __name__ == "__main__":
         initial_state=initial_state,
         initial_step=0,
         num_steps=events.shape[1],
-        priors=convert_priors(config['mcmc']['prior']),
+        priors=convert_priors(config["mcmc"]["prior"]),
     )
 
     # Full joint log posterior distribution
     # $\pi(\theta, \xi, y^{se}, y^{ei} | y^{ir})$
-    def logp(theta, xi, events):
+    def logp(block0, block1, events):
         return model.log_prob(
             dict(
-                beta1=xi[0],
-                beta2=theta[0],
-                gamma=theta[1],
-                xi=xi[1:],
+                beta1=block1[0],
+                beta2=block0[0],
+                beta3=block1[1:3],
+                gamma=block0[1],
+                xi=block1[3:],
                 seir=events,
             )
         )
@@ -127,14 +128,13 @@ if __name__ == "__main__":
     #     Q(Z^{ei}, Z^{ei\prime}) (partially-censored)
     #     Q(Z^{se}, Z^{se\prime}) (occult)
     #     Q(Z^{ei}, Z^{ei\prime}) (occult)
-    def make_theta_kernel(shape, name):
+    def make_blk0_kernel(shape, name):
         def fn(target_log_prob_fn, _):
             return tfp.mcmc.TransformedTransitionKernel(
                 inner_kernel=AdaptiveRandomWalkMetropolis(
                     target_log_prob_fn=target_log_prob_fn,
-                    initial_covariance=[
-                        np.eye(shape[0], dtype=model_spec.DTYPE) * 1e-1
-                    ],
+                    initial_covariance=np.eye(shape[0], dtype=model_spec.DTYPE)
+                    * 1e-1,
                     covariance_burnin=200,
                 ),
                 bijector=tfp.bijectors.Exp(),
@@ -143,13 +143,12 @@ if __name__ == "__main__":
 
         return fn
 
-    def make_xi_kernel(shape, name):
+    def make_blk1_kernel(shape, name):
         def fn(target_log_prob_fn, _):
             return AdaptiveRandomWalkMetropolis(
                 target_log_prob_fn=target_log_prob_fn,
-                initial_covariance=[
-                    np.eye(shape[0], dtype=model_spec.DTYPE) * 1e-1
-                ],
+                initial_covariance=np.eye(shape[0], dtype=model_spec.DTYPE)
+                * 1e-1,
                 covariance_burnin=200,
                 name=name,
             )
@@ -235,7 +234,7 @@ if __name__ == "__main__":
         return recurse(f, results)
 
     # Build MCMC algorithm here.  This will be run in bursts for memory economy
-    @tf.function(autograph=False, experimental_compile=True)
+    @tf.function  # (autograph=False, experimental_compile=True)
     def sample(n_samples, init_state, previous_results=None):
         with tf.name_scope("main_mcmc_sample_loop"):
 
@@ -244,8 +243,8 @@ if __name__ == "__main__":
             gibbs_schema = GibbsKernel(
                 target_log_prob_fn=logp,
                 kernel_list=[
-                    (0, make_theta_kernel(init_state[0].shape, "theta")),
-                    (1, make_xi_kernel(init_state[1].shape, "xi")),
+                    (0, make_blk0_kernel(init_state[0].shape, "theta")),
+                    (1, make_blk1_kernel(init_state[1].shape, "xi")),
                     (2, make_event_multiscan_kernel),
                 ],
                 name="gibbs0",
@@ -277,7 +276,7 @@ if __name__ == "__main__":
 
     current_state = [
         np.array([0.65, 0.48], dtype=DTYPE),
-        np.zeros(model.model["xi"](0.0).event_shape[-1] + 1, dtype=DTYPE),
+        np.zeros(model.model["xi"](0.0).event_shape[-1] + 3, dtype=DTYPE),
         events,
     ]
 
