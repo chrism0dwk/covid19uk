@@ -17,6 +17,7 @@ xlrd = "^1.2.0"
 tqdm = "^4.50.2"
 openpyxl = "^3.0.5"
 h5py = "^2.10.0"
+tf-nightly = "^2.4.0.dev20201021"
 gemlib = {git = "http://fhm-chicas-code.lancs.ac.uk/GEM/gemlib.git"}
 
 [tool.poetry.dev-dependencies]

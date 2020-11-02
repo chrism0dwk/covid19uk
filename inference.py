@@ -132,9 +132,7 @@ if __name__ == "__main__":
             return tfp.mcmc.TransformedTransitionKernel(
                 inner_kernel=AdaptiveRandomWalkMetropolis(
                     target_log_prob_fn=target_log_prob_fn,
-                    initial_covariance=[
-                        np.eye(shape[0], dtype=model_spec.DTYPE) * 1e-1
-                    ],
+                    initial_covariance=np.eye(shape[0], dtype=model_spec.DTYPE) * 1e-1,
                     covariance_burnin=200,
                 ),
                 bijector=tfp.bijectors.Exp(),
@@ -147,9 +145,7 @@ if __name__ == "__main__":
         def fn(target_log_prob_fn, _):
             return AdaptiveRandomWalkMetropolis(
                 target_log_prob_fn=target_log_prob_fn,
-                initial_covariance=[
-                    np.eye(shape[0], dtype=model_spec.DTYPE) * 1e-1
-                ],
+                initial_covariance=np.eye(shape[0], dtype=model_spec.DTYPE) * 1e-1,
                 covariance_burnin=200,
                 name=name,
             )
