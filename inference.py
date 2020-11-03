@@ -110,10 +110,10 @@ if __name__ == "__main__":
     def logp(block0, block1, events):
         return model.log_prob(
             dict(
-                beta1=block1[0],
                 beta2=block0[0],
-                beta3=block1[1:3],
                 gamma=block0[1],
+                beta1=block1[0],
+                beta3=block1[1:3],
                 xi=block1[3:],
                 seir=events,
             )
@@ -234,7 +234,7 @@ if __name__ == "__main__":
         return recurse(f, results)
 
     # Build MCMC algorithm here.  This will be run in bursts for memory economy
-    @tf.function  # (autograph=False, experimental_compile=True)
+    @tf.function(autograph=False, experimental_compile=True)
     def sample(n_samples, init_state, previous_results=None):
         with tf.name_scope("main_mcmc_sample_loop"):
 
@@ -320,10 +320,14 @@ if __name__ == "__main__":
 
     output_results = [
         posterior.create_dataset(
-            "results/theta", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,
+            "results/theta",
+            (NUM_SAVED_SAMPLES, 3),
+            dtype=DTYPE,
         ),
         posterior.create_dataset(
-            "results/xi", (NUM_SAVED_SAMPLES, 3), dtype=DTYPE,
+            "results/xi",
+            (NUM_SAVED_SAMPLES, 3),
+            dtype=DTYPE,
         ),
         posterior.create_dataset(
             "results/move/S->E",
