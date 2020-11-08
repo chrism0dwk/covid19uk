@@ -141,6 +141,7 @@ def read_tier_restriction_data(
     tier_restriction_csv, lad19cd_lookup, date_low, date_high
 ):
     data = pd.read_csv(tier_restriction_csv)
+    data.loc[:, "date"] = pd.to_datetime(data["date"])
 
     # Group merged ltlas
     london = ["City of London", "Westminster"]
@@ -166,6 +167,7 @@ def read_tier_restriction_data(
     lad19cd = lad19cd_lookup["lad19cd"].sort_values().unique()
     new_index = pd.MultiIndex.from_product([dates, lad19cd])
     data = data.reindex(new_index, fill_value=0.0)
+    warn(f"Tier summary: {np.mean(data, axis=0)}")
 
     # Pack into [T, M, V] array.
     arr_data = data.to_xarray().to_array()

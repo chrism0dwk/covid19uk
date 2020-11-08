@@ -107,10 +107,10 @@ if __name__ == "__main__":
     def logp(block0, block1, events):
         return model.log_prob(
             dict(
-                beta1=block1[0],
                 beta2=block0[0],
-                beta3=block1[1:3],
                 gamma=block0[1],
+                beta1=block1[0],
+                beta3=block1[1:3],
                 xi=block1[3:],
                 seir=events,
             )

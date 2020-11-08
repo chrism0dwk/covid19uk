@@ -86,7 +86,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
         return tfd.Sample(
             tfd.Normal(
                 loc=tf.constant(0.0, dtype=DTYPE),
-                scale=tf.constant(1000.0, dtype=DTYPE),
+                scale=tf.constant(100.0, dtype=DTYPE),
             ),
             sample_shape=2,
         )
@@ -176,17 +176,17 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
 
 
 def next_generation_matrix_fn(covar_data, param):
-    """The next generation matrix calculates the force of infection from 
-       individuals in metapopulation i to all other metapopulations j during
-       a typical infectious period (1/gamma). i.e.
-         
-         \[ A_{ij} = S_j * \beta_1 ( 1 + \beta_2 * w_t * C_{ij} / N_i) / N_j / gamma \]
+    """The next generation matrix calculates the force of infection from
+    individuals in metapopulation i to all other metapopulations j during
+    a typical infectious period (1/gamma). i.e.
 
-       :param covar_data: a dictionary of covariate data
-       :param param: a dictionary of parameters
-       :returns: a function taking arguments `t` and `state` giving the time and
-                 epidemic state (SEIR) for which the NGM is to be calculated.  This
-                 function in turn returns an MxM next generation matrix.
+      \[ A_{ij} = S_j * \beta_1 ( 1 + \beta_2 * w_t * C_{ij} / N_i) / N_j / gamma \]
+
+    :param covar_data: a dictionary of covariate data
+    :param param: a dictionary of parameters
+    :returns: a function taking arguments `t` and `state` giving the time and
+              epidemic state (SEIR) for which the NGM is to be calculated.  This
+              function in turn returns an MxM next generation matrix.
     """
 
     def fn(t, state):
