@@ -278,9 +278,9 @@ if __name__ == "__main__":
     ####################################
 
     # MCMC Control
-    NUM_BURSTS = config["mcmc"]["num_bursts"]
-    NUM_BURST_SAMPLES = config["mcmc"]["num_burst_samples"]
-    NUM_EVENT_TIME_UPDATES = config["mcmc"]["num_event_time_updates"]
+    NUM_BURSTS = int(config["mcmc"]["num_bursts"])
+    NUM_BURST_SAMPLES = int(config["mcmc"]["num_burst_samples"])
+    NUM_EVENT_TIME_UPDATES = int(config["mcmc"]["num_event_time_updates"])
     NUM_SAVED_SAMPLES = NUM_BURST_SAMPLES * NUM_BURSTS
 
     # RNG stuff
@@ -299,9 +299,12 @@ if __name__ == "__main__":
             os.path.expandvars(config["output"]["results_dir"]),
             config["output"]["posterior"],
         ),
-        {"theta": samples[0], "xi": samples[1], "events": samples[2]},
-        results,
-        NUM_SAVED_SAMPLES,
+        sample_dict={"theta": (samples[0], (NUM_BURST_SAMPLES, 1)),
+                     "xi": (samples[1], (NUM_BURST_SAMPLES, 1)),
+                     "events": (samples[2], (NUM_BURST_SAMPLES, 64, 64, 1)),
+                    },
+        results_dict=results,
+        num_samples=NUM_SAVED_SAMPLES,
     )
     posterior._file.create_dataset("initial_state", data=initial_state)
     posterior._file.create_dataset("config", data=yaml.dump(config))
