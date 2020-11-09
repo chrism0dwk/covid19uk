@@ -62,8 +62,8 @@ def impute_censored_events(cases):
     :returns: a MxTx3 tensor of events where the first two indices of
               the right-most dimension contain the imputed event times.
     """
-    ei_events, lag_ei = impute_previous_cases(cases, 0.25)
-    se_events, lag_se = impute_previous_cases(ei_events, 0.5)
+    ei_events, lag_ei = impute_previous_cases(cases, 0.21)
+    se_events, lag_se = impute_previous_cases(ei_events, 0.28)
     ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
     ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
     return tf.stack([se_events, ei_events, ir_events], axis=-1)
@@ -190,6 +190,9 @@ def next_generation_matrix_fn(covar_data, param):
     """
 
     def fn(t, state):
+        L = tf.convert_to_tensor(covar_data["L"], DTYPE)
+        L = L - tf.reduce_mean(L, axis=0)
+
         C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
         C = tf.linalg.set_diag(
             C + tf.transpose(C), tf.zeros(C.shape[0], dtype=DTYPE)
@@ -204,9 +207,14 @@ def next_generation_matrix_fn(covar_data, param):
             dtype=tf.int64,
         )
         xi = tf.gather(param["xi"], xi_idx)
-        beta = param["beta1"] * tf.math.exp(xi)
 
-        ngm = beta * (
+        L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
+        Lt = tf.gather(L, L_idx)
+        xB = tf.linalg.matvec(Lt, param["beta3"])
+
+        beta = tf.math.exp(xi + xB)
+
+        ngm = beta[tf.newaxis, :] * (
             tf.eye(C.shape[0], dtype=state.dtype)
             + param["beta2"] * commute_volume * C / N[tf.newaxis, :]
         )

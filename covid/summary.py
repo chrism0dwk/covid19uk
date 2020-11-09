@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from gemlib_tfp_extra.util import compute_state
+from gemlib.util import compute_state
 
 
 def mean_and_ci(arr, q=(0.025, 0.975), axis=0, name=None):

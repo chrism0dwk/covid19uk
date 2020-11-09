@@ -281,8 +281,7 @@ if __name__ == "__main__":
     NUM_BURSTS = config["mcmc"]["num_bursts"]
     NUM_BURST_SAMPLES = config["mcmc"]["num_burst_samples"]
     NUM_EVENT_TIME_UPDATES = config["mcmc"]["num_event_time_updates"]
-    THIN_BURST_SAMPLES = NUM_BURST_SAMPLES // config["mcmc"]["thin"]
-    NUM_SAVED_SAMPLES = THIN_BURST_SAMPLES * NUM_BURSTS
+    NUM_SAVED_SAMPLES = NUM_BURST_SAMPLES * NUM_BURSTS
 
     # RNG stuff
     tf.random.set_seed(2)
@@ -300,7 +299,7 @@ if __name__ == "__main__":
             os.path.expandvars(config["output"]["results_dir"]),
             config["output"]["posterior"],
         ),
-        {"theta": samples[0], "xi": samples[1]},
+        {"theta": samples[0], "xi": samples[1], "events": samples[2]},
         results,
         NUM_SAVED_SAMPLES,
     )
@@ -313,7 +312,9 @@ if __name__ == "__main__":
     #   to disc, or else end OOM (even on a 32GB system).
     # with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
     final_results = None
-    for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
+    for i in tqdm.tqdm(
+        range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES * config["mcmc"]["thin"]
+    ):
         samples, results, final_results = sample(
             NUM_BURST_SAMPLES,
             init_state=current_state,
@@ -325,7 +326,7 @@ if __name__ == "__main__":
 
         start = perf_counter()
         posterior.write_samples(
-            {"theta": samples[0], "xi": samples[1]},
+            {"theta": samples[0], "xi": samples[1], "events": samples[2]},
             first_dim_offset=i * NUM_BURST_SAMPLES,
         )
         posterior.write_results(results, first_dim_offset=i * NUM_BURST_SAMPLES)
