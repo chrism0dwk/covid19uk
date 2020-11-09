@@ -3,10 +3,12 @@
 data:
   mobility_matrix: data/mergedflows.csv
   population_size: data/c2019modagepop.csv
-  commute_volume: data/201016_OFF_SEN_COVID19_road_traffic_national_table.xlsx
-  reported_cases: data/Anonymised Combined Line List 20201002.csv
+  commute_volume: data/201106_OFF_SEN_COVID19_road_traffic_national_table.xlsx
+  reported_cases: data/Anonymised Combined Line List 20201109.csv
   case_date_type: specimen
   pillar: both
+  tier_restriction_csv: data/NPI_dataset_full_extract_03_12_2020 (3).csv
+  geopackage: data/UK2019mod_pop.gpkg
 
 parameter:
   beta1: 0.291   # R0 2.4
@@ -36,10 +38,10 @@ mcmc:
   dmax: 21
   nmax: 50
   m: 1
-  occult_nmax: 5
+  occult_nmax: 15
   num_event_time_updates: 35
   num_bursts: 200
-  num_burst_samples: 1000
+  num_burst_samples: 50
   thin: 20
   prior:
     gamma:

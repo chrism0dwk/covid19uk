@@ -1,6 +1,7 @@
 #!/bin/bash
 
 #$ -S /bin/bash
+#$ -P chicas
 #$ -q gpu
 #$ -l ngpus=1
 # -l ncpus=2
@@ -10,26 +11,29 @@
 #$ -cwd
 
 . /etc/profile
-. $HOME/.bashrc
+. $HOME/.bash_profile
 
-module add cuda/10.1
-conda activate covid19uk
+module add cuda/11.0
 
 export XLA_FLAGS="--xla_gpu_cuda_data_dir=$CUDA_HOME"
 
 echo Args: "$@"
 
 echo -n "Preparing config..."
-CONFIG=`python prepare_config.py "$@"`
+CONFIG=`poetry run python prepare_config.py "$@"`
 echo "Done"
 
 echo Using config: $CONFIG
 echo Working directory: `pwd`
 
 echo -n "Run inference..."
-python inference.py -c "$CONFIG"
+poetry run python inference.py -c "$CONFIG"
 echo "Done"
 
 echo -n "Create summary..."
-python summary.py -c "$CONFIG"
+poetry run python summary.py -c "$CONFIG"
+echo "Done"
+
+echo -n "Localisation summary..."
+poetry run python within_between.py -c "$CONFIG"
 echo "Done"
