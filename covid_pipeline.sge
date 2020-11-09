@@ -26,9 +26,9 @@ echo "Done"
 echo Using config: $CONFIG
 echo Working directory: `pwd`
 
-#echo -n "Run inference..."
-#poetry run python inference.py -c "$CONFIG"
-#echo "Done"
+echo -n "Run inference..."
+poetry run python inference.py -c "$CONFIG"
+echo "Done"
 
 echo -n "Create summary..."
 poetry run python summary.py -c "$CONFIG"
