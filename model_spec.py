@@ -15,7 +15,7 @@ DTYPE = np.float64
 STOICHIOMETRY = np.array([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])
 TIME_DELTA = 1.0
 XI_FREQ = 14  # baseline transmission changes every 14 days
-NU = tf.constant(0.5, dtype=DTYPE)  # E->I rate assumed known.
+NU = tf.constant(0.28, dtype=DTYPE)  # E->I rate assumed known.
 
 
 def read_covariates(paths, date_low, date_high):

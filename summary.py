@@ -74,7 +74,7 @@ def predicted_incidence(theta, xi, init_state, init_step, num_steps, priors):
     def sim_fn(args):
         theta_, xi_, init_ = args
 
-        par = dict(beta1=xi_[0], beta2=theta_[0], gamma=theta_[1], xi=xi_[1:])
+        par = dict(beta1=xi_[0], beta2=theta_[0], beta3=xi_[1:3], gamma=theta_[1], xi=xi_[3:])
 
         model = model_spec.CovidUK(
             covar_data,
