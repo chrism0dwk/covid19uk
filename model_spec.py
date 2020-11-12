@@ -1,5 +1,6 @@
 """Implements the COVID SEIR model as a TFP Joint Distribution"""
 
+import geopandas as gp
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -14,7 +15,7 @@ DTYPE = np.float64
 STOICHIOMETRY = np.array([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])
 TIME_DELTA = 1.0
 XI_FREQ = 14  # baseline transmission changes every 14 days
-NU = tf.constant(0.5, dtype=DTYPE)  # E->I rate assumed known.
+NU = tf.constant(0.28, dtype=DTYPE)  # E->I rate assumed known.
 
 
 def read_covariates(paths, date_low, date_high):
@@ -31,10 +32,19 @@ def read_covariates(paths, date_low, date_high):
         paths["commute_volume"], date_low=date_low, date_high=date_high
     )
 
+    geo = gp.read_file(paths["geopackage"])
+    geo = geo.loc[geo["lad19cd"].str.startswith("E")]
+    tier_restriction = data.read_tier_restriction_data(
+        paths["tier_restriction_csv"],
+        geo[["lad19cd", "lad19nm"]],
+        date_low,
+        date_high,
+    )
     return dict(
         C=mobility.to_numpy().astype(DTYPE),
         W=commute_volume.to_numpy().astype(DTYPE),
         N=popsize.to_numpy().astype(DTYPE),
+        L=tier_restriction.astype(DTYPE),
     )
 
 
@@ -52,8 +62,8 @@ def impute_censored_events(cases):
     :returns: a MxTx3 tensor of events where the first two indices of
               the right-most dimension contain the imputed event times.
     """
-    ei_events, lag_ei = impute_previous_cases(cases, 0.25)
-    se_events, lag_se = impute_previous_cases(ei_events, 0.5)
+    ei_events, lag_ei = impute_previous_cases(cases, 0.21)
+    se_events, lag_se = impute_previous_cases(ei_events, 0.28)
     ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
     ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
     return tf.stack([se_events, ei_events, ir_events], axis=-1)
@@ -70,6 +80,15 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
         return tfd.Gamma(
             concentration=tf.constant(3.0, dtype=DTYPE),
             rate=tf.constant(10.0, dtype=DTYPE),
+        )
+
+    def beta3():
+        return tfd.Sample(
+            tfd.Normal(
+                loc=tf.constant(0.0, dtype=DTYPE),
+                scale=tf.constant(100.0, dtype=DTYPE),
+            ),
+            sample_shape=2,
         )
 
     def xi(beta1):
@@ -91,11 +110,15 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             rate=tf.constant(priors["gamma"]["rate"], dtype=DTYPE),
         )
 
-    def seir(beta2, xi, gamma):
+    def seir(beta2, beta3, xi, gamma):
 
         beta2 = tf.convert_to_tensor(beta2, DTYPE)
+        beta3 = tf.convert_to_tensor(beta3, DTYPE)
         xi = tf.convert_to_tensor(xi, DTYPE)
         gamma = tf.convert_to_tensor(gamma, DTYPE)
+
+        L = tf.convert_to_tensor(covariates["L"], DTYPE)
+        L = L - tf.reduce_mean(L, axis=0)
 
         def transition_rate_fn(t, state):
             C = tf.convert_to_tensor(covariates["C"], dtype=DTYPE)
@@ -113,7 +136,11 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             )
             xi_ = tf.gather(xi, xi_idx)
 
-            infec_rate = tf.math.exp(xi_) * (
+            L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
+            Lt = tf.gather(L, L_idx)
+            xB = tf.linalg.matvec(Lt, beta3)
+
+            infec_rate = tf.math.exp(xi_ + xB) * (
                 state[..., 2]
                 + beta2
                 * commute_volume
@@ -142,27 +169,10 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
         )
 
     return tfd.JointDistributionNamed(
-        dict(beta1=beta1, beta2=beta2, xi=xi, gamma=gamma, seir=seir)
-    )
-
-
-def marginalized_log_prob(model):
-    """Joint log_prob function with baseline hazard
-    rates marginalized out.
-    """
-
-    def log_prob(beta2, xi, seir):
-
-        lp_beta2 = model.model.modules["beta"].log_prob(beta2)
-        lp_xi = model.model.modules["xi"].log_prob(xi)
-
-        seir_marginal = DiscreteTimeStateTransitionMarginalModel(
-            *model.model.modules["seir"]._parameters
+        dict(
+            beta1=beta1, beta2=beta2, beta3=beta3, xi=xi, gamma=gamma, seir=seir
         )
-
-        lp_seir_marginal = seir_marginal(seir)
-
-        return lp_beta2 + lp_xi + lp_seir_marginal
+    )
 
 
 def next_generation_matrix_fn(covar_data, param):
@@ -180,6 +190,9 @@ def next_generation_matrix_fn(covar_data, param):
     """
 
     def fn(t, state):
+        L = tf.convert_to_tensor(covar_data["L"], DTYPE)
+        L = L - tf.reduce_mean(L, axis=0)
+
         C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
         C = tf.linalg.set_diag(
             C + tf.transpose(C), tf.zeros(C.shape[0], dtype=DTYPE)
@@ -194,9 +207,14 @@ def next_generation_matrix_fn(covar_data, param):
             dtype=tf.int64,
         )
         xi = tf.gather(param["xi"], xi_idx)
-        beta = tf.math.exp(xi)
 
-        ngm = beta * (
+        L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
+        Lt = tf.gather(L, L_idx)
+        xB = tf.linalg.matvec(Lt, param["beta3"])
+
+        beta = tf.math.exp(xi + xB)
+
+        ngm = beta[tf.newaxis, :] * (
             tf.eye(C.shape[0], dtype=state.dtype)
             + param["beta2"] * commute_volume * C / N[tf.newaxis, :]
         )

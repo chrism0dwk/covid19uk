@@ -33,3 +33,7 @@ echo "Done"
 echo -n "Create summary..."
 poetry run python summary.py -c "$CONFIG"
 echo "Done"
+
+echo -n "Localisation summary..."
+poetry run python within_between.py -c "$CONFIG"
+echo "Done"

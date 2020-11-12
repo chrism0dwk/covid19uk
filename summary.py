@@ -42,7 +42,13 @@ def calc_R_it(theta, xi, events, init_state, covar_data):
         state = compute_state(init_state, events_, model_spec.STOICHIOMETRY)
         state = tf.gather(state, t - 1, axis=-2)  # State on final inference day
 
-        par = dict(beta1=xi_[0], beta2=theta_[0], gamma=theta_[1], xi=xi_[1:])
+        par = dict(
+            beta1=xi_[0],
+            beta2=theta_[0],
+            beta3=xi_[1:3],
+            gamma=theta_[1],
+            xi=xi_[3:],
+        )
 
         ngm_fn = model_spec.next_generation_matrix_fn(covar_data, par)
         ngm = ngm_fn(t, state)
@@ -68,7 +74,7 @@ def predicted_incidence(theta, xi, init_state, init_step, num_steps, priors):
     def sim_fn(args):
         theta_, xi_, init_ = args
 
-        par = dict(beta1=xi_[0], beta2=theta_[0], gamma=theta_[1], xi=xi_[1:])
+        par = dict(beta1=xi_[0], beta2=theta_[0], beta3=xi_[1:3], gamma=theta_[1], xi=xi_[3:])
 
         model = model_spec.CovidUK(
             covar_data,
