@@ -25,7 +25,7 @@ GIS_TEMPLATE = "data/UK2019mod_pop.gpkg"
 
 
 # Reproduction number calculation
-def calc_R_it(theta, xi, events, init_state, covar_data):
+def calc_R_it(param, events, init_state, covar_data):
     """Calculates effective reproduction number for batches of metapopulations
     :param theta: a tensor of batched theta parameters [B] + theta.shape
     :param xi: a tensor of batched xi parameters [B] + xi.shape
@@ -34,31 +34,41 @@ def calc_R_it(theta, xi, events, init_state, covar_data):
     :param covar_data: the covariate data
     :return a batched vector of R_it estimates
     """
-    print("Theta shape: ", theta.shape)
 
     def r_fn(args):
-        theta_, xi_, events_ = args
+        beta1_, beta2_, xi_, gamma0_, events_ = args
         t = events_.shape[-2] - 1
         state = compute_state(init_state, events_, model_spec.STOICHIOMETRY)
-        state = tf.gather(state, t - 1, axis=-2)  # State on final inference day
+        state = tf.gather(state, t, axis=-2)  # State on final inference day
 
         par = dict(
-            beta1=xi_[0],
-            beta2=theta_[0],
-            beta3=xi_[1:3],
-            gamma=theta_[1],
-            xi=xi_[3:],
+            beta1=beta1_,
+            beta2=beta2_,
+            beta3=tf.constant(
+                [0.0, 0.0, 0.0], dtype=model_spec.DTYPE
+            ),  # xi_[1:4],
+            gamma0=gamma0_,
+            xi=xi_,
         )
 
         ngm_fn = model_spec.next_generation_matrix_fn(covar_data, par)
         ngm = ngm_fn(t, state)
         return ngm
 
-    return tf.vectorized_map(r_fn, elems=(theta, xi, events))
+    return tf.vectorized_map(
+        r_fn,
+        elems=(
+            param["beta1"],
+            param["beta2"],
+            param["xi"],
+            param["gamma0"],
+            events,
+        ),
+    )
 
 
 @tf.function
-def predicted_incidence(theta, xi, init_state, init_step, num_steps, priors):
+def predicted_incidence(param, init_state, init_step, num_steps, priors):
     """Runs the simulation forward in time from `init_state` at time `init_time`
        for `num_steps`.
     :param theta: a tensor of batched theta parameters [B] + theta.shape
@@ -72,9 +82,16 @@ def predicted_incidence(theta, xi, init_state, init_step, num_steps, priors):
     """
 
     def sim_fn(args):
-        theta_, xi_, init_ = args
+        beta1_, beta2_, xi_, gamma0_, gamma1_, init_ = args
 
-        par = dict(beta1=xi_[0], beta2=theta_[0], beta3=xi_[1:3], gamma=theta_[1], xi=xi_[3:])
+        par = dict(
+            beta1=beta1_,
+            beta2=beta2_,
+            beta3=[0.0, 0.0, 0.0],
+            gamma0=gamma0_,
+            gamma1=gamma1_,
+            xi=xi_,
+        )
 
         model = model_spec.CovidUK(
             covar_data,
@@ -88,7 +105,14 @@ def predicted_incidence(theta, xi, init_state, init_step, num_steps, priors):
 
     events = tf.map_fn(
         sim_fn,
-        elems=(theta, xi, init_state),
+        elems=(
+            param["beta1"],
+            param["beta2"],
+            param["xi"],
+            param["gamma0"],
+            param["gamma1"],
+            init_state,
+        ),
         fn_output_signature=(tf.float64),
     )
     return events
@@ -134,11 +158,13 @@ if __name__ == "__main__":
     )
 
     # Load posterior file
+    posterior_path = os.path.join(
+        config["output"]["results_dir"], config["output"]["posterior"]
+    )
+    print("Using posterior:", posterior_path)
     posterior = h5py.File(
         os.path.expandvars(
-            os.path.join(
-                config["output"]["results_dir"], config["output"]["posterior"]
-            )
+            posterior_path,
         ),
         "r",
         rdcc_nbytes=1024 ** 3,
@@ -147,8 +173,13 @@ if __name__ == "__main__":
 
     # Pre-determined thinning of posterior (better done in MCMC?)
     idx = range(6000, 10000, 10)
-    theta = posterior["samples/theta"][idx]
-    xi = posterior["samples/xi"][idx]
+    param = dict(
+        beta1=posterior["samples/beta1"][idx],
+        beta2=posterior["samples/beta2"][idx],
+        xi=posterior["samples/xi"][idx],
+        gamma0=posterior["samples/gamma0"][idx],
+        gamma1=posterior["samples/gamma1"][idx],
+    )
     events = posterior["samples/events"][idx]
     init_state = posterior["initial_state"][:]
     state_timeseries = compute_state(
@@ -164,11 +195,13 @@ if __name__ == "__main__":
         priors=config["mcmc"]["prior"],
     )
 
-    ngms = calc_R_it(theta, xi, events, init_state, covar_data)
+    ngms = calc_R_it(param, events, init_state, covar_data)
     b, _ = power_iteration(ngms)
     rt = rayleigh_quotient(ngms, b)
     q = np.arange(0.05, 1.0, 0.05)
-    rt_quantiles = pd.DataFrame({"Rt": np.quantile(rt, q)}, index=q).T.to_excel(
+    rt_quantiles = pd.DataFrame(
+        {"Rt": np.quantile(rt, q, axis=-1)}, index=q
+    ).T.to_excel(
         os.path.join(
             config["output"]["results_dir"], config["output"]["national_rt"]
         ),
@@ -178,8 +211,7 @@ if __name__ == "__main__":
     # Note a 4 day recording lag in the case timeseries data requires that
     # now = state_timeseries.shape[-2] + 4
     prediction = predicted_incidence(
-        theta,
-        xi,
+        param,
         init_state=state_timeseries[..., -1, :],
         init_step=state_timeseries.shape[-2] - 1,
         num_steps=70,
@@ -233,7 +265,7 @@ if __name__ == "__main__":
     ltla = gp.read_file(GIS_TEMPLATE, layer="UK2019mod_pop_xgen")
     ltla = ltla[ltla["lad19cd"].str.startswith("E")]  # England only, for now.
     ltla = ltla.sort_values("lad19cd")
-    rti = tf.reduce_sum(ngms, axis=-1)
+    rti = tf.reduce_sum(ngms, axis=-2)
 
     geosummary(
         ltla,

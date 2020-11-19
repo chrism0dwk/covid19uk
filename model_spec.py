@@ -1,5 +1,6 @@
 """Implements the COVID SEIR model as a TFP Joint Distribution"""
 
+import pandas as pd
 import geopandas as gp
 import numpy as np
 import tensorflow as tf
@@ -40,11 +41,14 @@ def read_covariates(paths, date_low, date_high):
         date_low,
         date_high,
     )
+    weekday = pd.date_range(date_low, date_high).weekday < 5
+
     return dict(
         C=mobility.to_numpy().astype(DTYPE),
         W=commute_volume.to_numpy().astype(DTYPE),
         N=popsize.to_numpy().astype(DTYPE),
         L=tier_restriction.astype(DTYPE),
+        weekday=weekday.astype(DTYPE),
     )
 
 
@@ -88,7 +92,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
                 loc=tf.constant(0.0, dtype=DTYPE),
                 scale=tf.constant(100.0, dtype=DTYPE),
             ),
-            sample_shape=2,
+            sample_shape=covariates["L"].shape[-1],
         )
 
     def xi(beta1):
@@ -102,23 +106,34 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             index_points=idx_pts[:, tf.newaxis],
         )
 
-    def gamma():
-        return tfd.Gamma(
-            concentration=tf.constant(
-                priors["gamma"]["concentration"], dtype=DTYPE
-            ),
-            rate=tf.constant(priors["gamma"]["rate"], dtype=DTYPE),
+    def gamma0():
+        # return tfd.Gamma(
+        #     concentration=tf.constant(
+        #         priors["gamma"]["concentration"], dtype=DTYPE
+        #     ),
+        #     rate=tf.constant(priors["gamma"]["rate"], dtype=DTYPE),
+        # )
+        return  tfd.Normal(loc=tf.constant(0.0, dtype=DTYPE),
+                           scale=tf.constant(100.0, dtype=DTYPE),
+        )
+    def gamma1():
+        return tfd.Normal(
+            loc=tf.constant(0.0, dtype=DTYPE),
+            scale=tf.constant(100.0, dtype=DTYPE),
         )
 
-    def seir(beta2, beta3, xi, gamma):
-
+    def seir(beta2, beta3, xi, gamma0, gamma1):
         beta2 = tf.convert_to_tensor(beta2, DTYPE)
         beta3 = tf.convert_to_tensor(beta3, DTYPE)
         xi = tf.convert_to_tensor(xi, DTYPE)
-        gamma = tf.convert_to_tensor(gamma, DTYPE)
+        gamma0 = tf.convert_to_tensor(gamma0, DTYPE)
+        gamma1 = tf.convert_to_tensor(gamma1, DTYPE)
 
         L = tf.convert_to_tensor(covariates["L"], DTYPE)
         L = L - tf.reduce_mean(L, axis=0)
+
+        weekday = tf.convert_to_tensor(covariates["weekday"], DTYPE)
+        weekday = weekday - tf.reduce_mean(weekday, axis=-1)
 
         def transition_rate_fn(t, state):
             C = tf.convert_to_tensor(covariates["C"], dtype=DTYPE)
@@ -140,6 +155,11 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             Lt = tf.gather(L, L_idx)
             xB = tf.linalg.matvec(Lt, beta3)
 
+            weekday_idx = tf.clip_by_value(
+                tf.cast(t, tf.int64), 0, weekday.shape[0] - 1
+            )
+            weekday_t = tf.gather(weekday, weekday_idx)
+
             infec_rate = tf.math.exp(xi_ + xB) * (
                 state[..., 2]
                 + beta2
@@ -154,7 +174,8 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
                 [NU], shape=[state.shape[0]]
             )  # Vector of length nc
             ir = tf.broadcast_to(
-                [gamma], shape=[state.shape[0]]
+                [tf.math.exp(gamma0 + gamma1 * weekday_t)],
+                shape=[state.shape[0]],
             )  # Vector of length nc
 
             return [infec_rate, ei, ir]
@@ -170,7 +191,13 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
 
     return tfd.JointDistributionNamed(
         dict(
-            beta1=beta1, beta2=beta2, beta3=beta3, xi=xi, gamma=gamma, seir=seir
+            beta1=beta1,
+            beta2=beta2,
+            beta3=beta3,
+            xi=xi,
+            gamma0=gamma0,
+            gamma1=gamma1,
+            seir=seir,
         )
     )
 
@@ -214,14 +241,14 @@ def next_generation_matrix_fn(covar_data, param):
 
         beta = tf.math.exp(xi + xB)
 
-        ngm = beta[tf.newaxis, :] * (
+        ngm = beta[:, tf.newaxis] * (
             tf.eye(C.shape[0], dtype=state.dtype)
             + param["beta2"] * commute_volume * C / N[tf.newaxis, :]
         )
         ngm = (
             ngm
             * state[..., 0][..., tf.newaxis]
-            / (N[:, tf.newaxis] * param["gamma"])
+            / (N[:, tf.newaxis] * tf.math.exp(param["gamma0"]))
         )
         return ngm
 

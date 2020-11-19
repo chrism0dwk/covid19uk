@@ -5,7 +5,6 @@ import os
 from time import perf_counter
 import tqdm
 import yaml
-import h5py
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -108,10 +107,11 @@ if __name__ == "__main__":
         return model.log_prob(
             dict(
                 beta2=block0[0],
-                gamma=block0[1],
+                gamma0=block0[1],
+                gamma1=block0[2],
                 beta1=block1[0],
-                beta3=block1[1:3],
-                xi=block1[3:],
+                beta3=[0.0, 0.0, 0.0],  # block1[1:4],
+                xi=block1[1:],  # block1[4:],
                 seir=events,
             )
         )
@@ -134,7 +134,10 @@ if __name__ == "__main__":
                     * 1e-1,
                     covariance_burnin=200,
                 ),
-                bijector=tfp.bijectors.Exp(),
+                bijector=tfp.bijectors.Blockwise(
+                    bijectors=[tfp.bijectors.Exp(), tfp.bijectors.Identity()],
+                    block_sizes=[1, 2],
+                ),
                 name=name,
             )
 
@@ -211,13 +214,13 @@ if __name__ == "__main__":
         results_dict = {}
         res0 = results.inner_results
 
-        results_dict["theta"] = {
+        results_dict["block0"] = {
             "is_accepted": res0[0].inner_results.is_accepted,
             "target_log_prob": res0[
                 0
             ].inner_results.accepted_results.target_log_prob,
         }
-        results_dict["xi"] = {
+        results_dict["block1"] = {
             "is_accepted": res0[1].is_accepted,
             "target_log_prob": res0[1].accepted_results.target_log_prob,
         }
@@ -254,8 +257,8 @@ if __name__ == "__main__":
             gibbs_schema = GibbsKernel(
                 target_log_prob_fn=logp,
                 kernel_list=[
-                    (0, make_blk0_kernel(init_state[0].shape, "theta")),
-                    (1, make_blk1_kernel(init_state[1].shape, "xi")),
+                    (0, make_blk0_kernel(init_state[0].shape, "block0")),
+                    (1, make_blk1_kernel(init_state[1].shape, "block1")),
                     (2, make_event_multiscan_kernel),
                 ],
                 name="gibbs0",
@@ -287,10 +290,16 @@ if __name__ == "__main__":
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.65, 0.48], dtype=DTYPE),
-        np.zeros(model.model["xi"](0.0).event_shape[-1] + 3, dtype=DTYPE),
+        np.array([0.65, 0.0, 0.0], dtype=DTYPE),
+        np.zeros(
+            model.model["xi"](0.0).event_shape[-1]
+            # + model.model["beta3"]().event_shape[-1]
+            + 1,
+            dtype=DTYPE,
+        ),
         events,
     ]
+    print("Initial logpi:", logp(*current_state))
 
     # Output file
     samples, results, _ = sample(1, current_state)
@@ -299,17 +308,22 @@ if __name__ == "__main__":
             os.path.expandvars(config["output"]["results_dir"]),
             config["output"]["posterior"],
         ),
-        sample_dict={"theta": (samples[0], (NUM_BURST_SAMPLES, 1)),
-                     "xi": (samples[1], (NUM_BURST_SAMPLES, 1)),
-                     "events": (samples[2], (NUM_BURST_SAMPLES, 64, 64, 1)),
-                    },
+        sample_dict={
+            "beta2": (samples[0][:, 0], (NUM_BURST_SAMPLES,)),
+            "gamma0": (samples[0][:, 1], (NUM_BURST_SAMPLES,)),
+            "gamma1": (samples[0][:, 2], (NUM_BURST_SAMPLES,)),
+            "beta1": (samples[1][:, 0], (NUM_BURST_SAMPLES,)),
+            "xi": (
+                samples[1][:, 1:],
+                (NUM_BURST_SAMPLES, samples[1].shape[1] - 1),
+            ),
+            "events": (samples[2], (NUM_BURST_SAMPLES, 64, 64, 1)),
+        },
         results_dict=results,
         num_samples=NUM_SAVED_SAMPLES,
     )
     posterior._file.create_dataset("initial_state", data=initial_state)
     posterior._file.create_dataset("config", data=yaml.dump(config))
-
-    print("Initial logpi:", logp(*current_state))
 
     # We loop over successive calls to sample because we have to dump results
     #   to disc, or else end OOM (even on a 32GB system).
@@ -329,7 +343,14 @@ if __name__ == "__main__":
 
         start = perf_counter()
         posterior.write_samples(
-            {"theta": samples[0], "xi": samples[1], "events": samples[2]},
+            {
+                "beta2": samples[0][:, 0],
+                "gamma0": samples[0][:, 1],
+                "gamma1": samples[0][:, 2],
+                "beta1": samples[1][:, 0],
+                "xi": samples[1][:, 1:],
+                "events": samples[2],
+            },
             first_dim_offset=i * NUM_BURST_SAMPLES,
         )
         posterior.write_results(results, first_dim_offset=i * NUM_BURST_SAMPLES)
@@ -339,13 +360,13 @@ if __name__ == "__main__":
         print(
             "Acceptance theta:",
             tf.reduce_mean(
-                tf.cast(results["theta"]["is_accepted"], tf.float32)
+                tf.cast(results["block0"]["is_accepted"], tf.float32)
             ),
         )
         print(
             "Acceptance xi:",
             tf.reduce_mean(
-                tf.cast(results["theta"]["is_accepted"], tf.float32),
+                tf.cast(results["block1"]["is_accepted"], tf.float32),
             ),
         )
         print(
@@ -374,9 +395,9 @@ if __name__ == "__main__":
         )
 
     print(
-        f"Acceptance theta: {posterior['results/theta/is_accepted'][:].mean()}"
+        f"Acceptance theta: {posterior['results/block0/is_accepted'][:].mean()}"
     )
-    print(f"Acceptance xi: {posterior['results/xi/is_accepted'][:].mean()}")
+    print(f"Acceptance xi: {posterior['results/block1/is_accepted'][:].mean()}")
     print(
         f"Acceptance move S->E: {posterior['results/move/S->E/is_accepted'][:].mean()}"
     )

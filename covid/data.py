@@ -161,7 +161,7 @@ def read_tier_restriction_data(
 
     # Re-index
     data.index = pd.MultiIndex.from_frame(data[["date", "lad19cd"]])
-    data = data[["tier_2", "tier_3"]]
+    data = data[["tier_2", "tier_3", "national_lockdown"]]
     data = data[~data.index.duplicated()]
     dates = pd.date_range(date_low, date_high - pd.Timedelta(1, "D"))
     lad19cd = lad19cd_lookup["lad19cd"].sort_values().unique()

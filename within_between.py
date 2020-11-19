@@ -13,7 +13,7 @@ from gemlib.util import compute_state
 import model_spec
 
 
-def make_within_rate_fns(covariates, theta, xi):
+def make_within_rate_fns(covariates, beta2):
 
     C = tf.convert_to_tensor(covariates["C"], dtype=model_spec.DTYPE)
     C = tf.linalg.set_diag(
@@ -26,39 +26,30 @@ def make_within_rate_fns(covariates, theta, xi):
         tf.squeeze(covariates["N"]), dtype=model_spec.DTYPE
     )
 
-    beta2 = theta[0]
-
     def within_fn(t, state):
-        beta = tf.math.exp(xi)
         rate = state[..., 2]
         return rate
 
     def between_fn(t, state):
         w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
         commute_volume = tf.gather(W, w_idx)
-        beta = tf.math.exp(xi)
-        rate = (
-            beta
-            * beta2
-            * commute_volume
-            * tf.linalg.matvec(C, state[..., 2] / N)
-        )
+        rate = beta2 * commute_volume * tf.linalg.matvec(C, state[..., 2] / N)
         return rate
 
     return within_fn, between_fn
 
 
 # @tf.function
-def calc_pressure_components(covariates, theta, xi, state):
+def calc_pressure_components(covariates, beta2, state):
     def atomic_fn(args):
-        theta_, xi_, state_ = args
-        within_fn, between_fn = make_within_rate_fns(covariates, theta_, xi_)
+        beta2_, state_ = args
+        within_fn, between_fn = make_within_rate_fns(covariates, beta2_)
         within = within_fn(covariates["W"].shape[0], state_)
         between = between_fn(covariates["W"].shape[0], state_)
         total = within + between
         return within / total, between / total
 
-    return tf.vectorized_map(atomic_fn, elems=(theta, xi, state))
+    return tf.vectorized_map(atomic_fn, elems=(beta2, state))
 
 
 args = cli_args()
@@ -89,14 +80,13 @@ posterior = h5py.File(
 
 # Pre-determined thinning of posterior (better done in MCMC?)
 idx = range(6000, 10000, 10)
-theta = posterior["samples/theta"][idx]
-xi = posterior["samples/xi"][idx]
+beta2 = posterior["samples/beta2"][idx]
 events = posterior["samples/events"][idx]
 init_state = posterior["initial_state"][:]
 state_timeseries = compute_state(init_state, events, model_spec.STOICHIOMETRY)
 
 within, between = calc_pressure_components(
-    covar_data, theta, xi[:, -1], state_timeseries[..., -1, :]
+    covar_data, beta2, state_timeseries[..., -1, :]
 )
 
 gpkg = gp.read_file(

@@ -339,7 +339,7 @@ tfp-nightly = "0.12.0.dev20201027"
 type = "git"
 url = "http://fhm-chicas-code.lancs.ac.uk/GEM/gemlib.git"
 reference = "master"
-resolved_reference = "d4ac2adfacec9efcd326e6a7030ef560ef1d559e"
+resolved_reference = "eddb85f7bfb3155777dc475eb467582f8caee9a5"
 
 [[package]]
 name = "geopandas"
