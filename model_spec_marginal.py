@@ -3,6 +3,7 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
+import pandas as pd
 
 from gemlib.distributions import StateTransitionMarginalModel
 from gemlib.util import compute_state
@@ -32,10 +33,13 @@ def read_covariates(paths, date_low, date_high):
         paths["commute_volume"], date_low=date_low, date_high=date_high
     )
 
+    weekday = pd.date_range(date_low, date_high).weekday < 5
+
     return dict(
         C=mobility.to_numpy().astype(DTYPE),
         W=commute_volume.to_numpy().astype(DTYPE),
         N=popsize.to_numpy().astype(DTYPE),
+        weekday=weekday.astype(DTYPE),
     )
 
 
@@ -63,8 +67,8 @@ def impute_censored_events(cases):
 def CovidUK(covariates, initial_state, initial_step, num_steps):
 
     h0_priors = dict(
-        concentration=tf.constant([0.1, 2.0, 2.0], dtype=DTYPE),
-        rate=tf.constant([0.1, 4.0, 4.0], dtype=DTYPE),
+        concentration=tf.constant([1.0e7, 2.0, 2.0], dtype=DTYPE),
+        rate=tf.constant([1.0e7, 4.0, 4.0], dtype=DTYPE),
     )
 
     def beta2():
@@ -83,9 +87,19 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             index_points=idx_pts[:, tf.newaxis],
         )
 
-    def seir(beta2, xi):
+    def gamma1():
+        return tfd.Normal(
+            loc=tf.constant(0.0, dtype=DTYPE),
+            scale=tf.constant(100.0, dtype=DTYPE),
+        )
+
+    def seir(beta2, xi, gamma1):
         beta2 = tf.convert_to_tensor(beta2, DTYPE)
         xi = tf.convert_to_tensor(xi, DTYPE)
+        gamma1 = tf.convert_to_tensor(gamma1, DTYPE)
+
+        weekday = tf.convert_to_tensor(covariates["weekday"], DTYPE)
+        weekday = weekday - tf.reduce_mean(weekday, axis=-1)
 
         def transition_rate_fn(t, state):
             C = tf.convert_to_tensor(covariates["C"], dtype=DTYPE)
@@ -103,6 +117,11 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             )
             xi_ = tf.gather(xi, xi_idx)
 
+            weekday_idx = tf.clip_by_value(
+                tf.cast(t, tf.int64), 0, weekday.shape[0] - 1
+            )
+            weekday_t = tf.gather(weekday, weekday_idx)
+
             infec_rate = tf.math.exp(xi_) * (
                 state[..., 2]
                 + beta2
@@ -117,7 +136,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
                 [tf.constant(1.0, dtype=DTYPE)], shape=[state.shape[0]]
             )  # Vector of length nc
             ir = tf.broadcast_to(
-                [tf.constant(1.0, dtype=DTYPE)], shape=[state.shape[0]]
+                [tf.math.exp(gamma1 * weekday_t)], shape=[state.shape[0]]
             )  # Vector of length nc
 
             return [infec_rate, ei, ir]
@@ -132,7 +151,9 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             num_steps=num_steps,
         )
 
-    return tfd.JointDistributionNamed(dict(beta2=beta2, xi=xi, seir=seir))
+    return tfd.JointDistributionNamed(
+        dict(beta2=beta2, xi=xi, gamma1=gamma1, seir=seir)
+    )
 
 
 def next_generation_matrix_fn(covar_data, param):

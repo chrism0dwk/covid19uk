@@ -10,8 +10,6 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from tensorflow_probability.python.experimental import unnest
-
 from gemlib.util import compute_state
 from gemlib.mcmc import UncalibratedEventTimesUpdate
 from gemlib.mcmc import UncalibratedOccultUpdate, TransitionTopology
@@ -20,6 +18,7 @@ from gemlib.mcmc.gibbs_kernel import GibbsKernelResults
 from gemlib.mcmc.gibbs_kernel import flatten_results
 from gemlib.mcmc import MultiScanKernel
 from gemlib.mcmc import AdaptiveRandomWalkMetropolis
+from gemlib.mcmc import Posterior
 
 from covid.data import read_phe_cases
 from covid.cli_arg_parse import cli_args
@@ -110,13 +109,14 @@ if __name__ == "__main__":
         return model.log_prob(
             dict(
                 beta2=theta[0],
-                xi=theta[1:],
+                xi=theta[2:],
+                gamma1=theta[1],
                 seir=events,
             )
         )
 
     # Build Metropolis within Gibbs sampler
-    def make_theta_kernel(shape, name):
+    def make_blk0_kernel(shape, name):
         bij = tfp.bijectors.Blockwise(
             bijectors=[tfp.bijectors.Exp(), tfp.bijectors.Identity()],
             block_sizes=[1, shape[0] - 1],
@@ -191,32 +191,42 @@ if __name__ == "__main__":
 
     # MCMC tracing functions
     def trace_results_fn(_, results):
-        """Returns log_prob, accepted, q_ratio"""
+        """Packs results into a dictionary"""
+        results_dict = {}
+        res0 = results.inner_results
 
-        def f(result):
-            proposed_results = unnest.get_innermost(result, "proposed_results")
-            log_prob = proposed_results.target_log_prob
-            accepted = tf.cast(
-                unnest.get_innermost(result, "is_accepted"), log_prob.dtype
-            )
-            q_ratio = proposed_results.log_acceptance_correction
-            if hasattr(proposed_results, "extra"):
-                proposed = tf.cast(proposed_results.extra, log_prob.dtype)
-                return tf.concat(
-                    [[log_prob], [accepted], [q_ratio], proposed], axis=0
-                )
-            return tf.concat([[log_prob], [accepted], [q_ratio]], axis=0)
+        results_dict["block0"] = {
+            "is_accepted": res0[0].inner_results.is_accepted,
+            "target_log_prob": res0[
+                0
+            ].inner_results.accepted_results.target_log_prob,
+        }
 
-        def recurse(f, results):
-            if isinstance(results, GibbsKernelResults):
-                return [recurse(f, x) for x in results.inner_results]
-            return f(results)
+        def get_move_results(results):
+            return {
+                "is_accepted": results.is_accepted,
+                "target_log_prob": results.accepted_results.target_log_prob,
+                "proposed_delta": tf.stack(
+                    [
+                        results.accepted_results.m,
+                        results.accepted_results.t,
+                        results.accepted_results.delta_t,
+                        results.accepted_results.x_star,
+                    ]
+                ),
+            }
 
-        return recurse(f, results)
+        res1 = res0[1].inner_results
+        results_dict["move/S->E"] = get_move_results(res1[0])
+        results_dict["move/E->I"] = get_move_results(res1[1])
+        results_dict["occult/S->E"] = get_move_results(res1[2])
+        results_dict["occult/E->I"] = get_move_results(res1[3])
+
+        return results_dict
 
     # Build MCMC algorithm here.  This will be run in bursts for memory economy
     @tf.function(autograph=False, experimental_compile=True)
-    def sample(n_samples, init_state, previous_results=None):
+    def sample(n_samples, init_state, thin=0, previous_results=None):
         with tf.name_scope("main_mcmc_sample_loop"):
 
             init_state = init_state.copy()
@@ -224,7 +234,7 @@ if __name__ == "__main__":
             gibbs_schema = GibbsKernel(
                 target_log_prob_fn=logp,
                 kernel_list=[
-                    (0, make_theta_kernel(init_state[0].shape, "theta")),
+                    (0, make_blk0_kernel(init_state[0].shape, "theta")),
                     (1, make_event_multiscan_kernel),
                 ],
                 name="gibbs0",
@@ -233,6 +243,7 @@ if __name__ == "__main__":
                 n_samples,
                 init_state,
                 kernel=gibbs_schema,
+                num_steps_between_results=thin,
                 previous_kernel_results=previous_results,
                 return_final_kernel_results=True,
                 trace_fn=trace_results_fn,
@@ -245,11 +256,10 @@ if __name__ == "__main__":
     ####################################
 
     # MCMC Control
-    NUM_BURSTS = config["mcmc"]["num_bursts"]
-    NUM_BURST_SAMPLES = config["mcmc"]["num_burst_samples"]
-    NUM_EVENT_TIME_UPDATES = config["mcmc"]["num_event_time_updates"]
-    THIN_BURST_SAMPLES = NUM_BURST_SAMPLES // config["mcmc"]["thin"]
-    NUM_SAVED_SAMPLES = THIN_BURST_SAMPLES * NUM_BURSTS
+    NUM_BURSTS = int(config["mcmc"]["num_bursts"])
+    NUM_BURST_SAMPLES = int(config["mcmc"]["num_burst_samples"])
+    NUM_EVENT_TIME_UPDATES = int(config["mcmc"]["num_event_time_updates"])
+    NUM_SAVED_SAMPLES = NUM_BURST_SAMPLES * NUM_BURSTS
 
     # RNG stuff
     tf.random.set_seed(2)
@@ -257,7 +267,7 @@ if __name__ == "__main__":
     current_state = [
         tf.concat(
             [
-                tf.constant([0.1], dtype=DTYPE),
+                tf.constant([0.1, 0.0], dtype=DTYPE),
                 np.zeros(model.model["xi"]().event_shape[-1], dtype=DTYPE),
             ],
             axis=-1,
@@ -265,118 +275,107 @@ if __name__ == "__main__":
         events,
     ]
 
-    # Output Files
-    posterior = h5py.File(
+    print("Initial logpi:", logp(*current_state))
+
+    samples, results, _ = sample(1, current_state)
+    print("Param samples shape", samples[0].shape)
+    print("Event samples shape", samples[1].shape)
+
+    posterior = Posterior(
         os.path.join(
             os.path.expandvars(config["output"]["results_dir"]),
             config["output"]["posterior"],
         ),
-        "w",
-        rdcc_nbytes=1024 ** 2 * 400,
-        rdcc_nslots=100000,
-        libver="latest",
+        sample_dict={
+            "beta2": (samples[0][:, 0], (NUM_BURST_SAMPLES,)),
+            "gamma1": (samples[0][:, 1], (NUM_BURST_SAMPLES,)),
+            "xi": (
+                samples[0][:, 2:],
+                (NUM_BURST_SAMPLES, samples[0][:, 2:].shape[1]),
+            ),
+            "events": (samples[1], (NUM_BURST_SAMPLES, 64, 64, 1)),
+        },
+        results_dict=results,
+        num_samples=NUM_SAVED_SAMPLES,
     )
-    event_size = [NUM_SAVED_SAMPLES] + list(current_state[1].shape)
-
-    posterior.create_dataset("initial_state", data=initial_state)
-
-    # Ideally we insert the inference period into the posterior file
-    # as this allows us to post-attribute it to the data.  Maybe better
-    # to simply save the data into it as well.
-    posterior.create_dataset("config", data=yaml.dump(config))
-    theta_samples = posterior.create_dataset(
-        "samples/theta",
-        [NUM_SAVED_SAMPLES, current_state[0].shape[0]],
-        dtype=np.float64,
-    )
-    event_samples = posterior.create_dataset(
-        "samples/events",
-        event_size,
-        dtype=DTYPE,
-        chunks=(32, 32, 32, 1),
-        compression="szip",
-        compression_opts=("nn", 16),
-    )
-
-    output_results = [
-        posterior.create_dataset(
-            "results/theta",
-            (NUM_SAVED_SAMPLES, 3),
-            dtype=DTYPE,
-        ),
-        posterior.create_dataset(
-            "results/move/S->E",
-            (NUM_SAVED_SAMPLES, 3 + num_metapop),
-            dtype=DTYPE,
-        ),
-        posterior.create_dataset(
-            "results/move/E->I",
-            (NUM_SAVED_SAMPLES, 3 + num_metapop),
-            dtype=DTYPE,
-        ),
-        posterior.create_dataset(
-            "results/occult/S->E", (NUM_SAVED_SAMPLES, 6), dtype=DTYPE
-        ),
-        posterior.create_dataset(
-            "results/occult/E->I", (NUM_SAVED_SAMPLES, 6), dtype=DTYPE
-        ),
-    ]
-    posterior.swmr_mode = True
-
-    print("Initial logpi:", logp(*current_state))
+    posterior._file.create_dataset("initial_state", data=initial_state)
+    posterior._file.create_dataset("config", data=yaml.dump(config))
 
     # We loop over successive calls to sample because we have to dump results
     #   to disc, or else end OOM (even on a 32GB system).
     # with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
     final_results = None
-    for i in tqdm.tqdm(range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES):
+    for i in tqdm.tqdm(
+        range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES * config["mcmc"]["thin"]
+    ):
         samples, results, final_results = sample(
             NUM_BURST_SAMPLES,
             init_state=current_state,
+            thin=config["mcmc"]["thin"] - 1,
             previous_results=final_results,
         )
         current_state = [s[-1] for s in samples]
-        s = slice(
-            i * THIN_BURST_SAMPLES, i * THIN_BURST_SAMPLES + THIN_BURST_SAMPLES
-        )
-        idx = tf.constant(range(0, NUM_BURST_SAMPLES, config["mcmc"]["thin"]))
-        theta_samples[s, ...] = tf.gather(samples[0], idx)
         print(current_state[0].numpy(), flush=True)
+
         start = perf_counter()
-        event_samples[s, ...] = tf.gather(samples[1], idx)
+        posterior.write_samples(
+            {
+                "beta2": samples[0][:, 0],
+                "gamma1": samples[0][:, 1],
+                "xi": samples[0][:, 2:],
+                "events": samples[1],
+            },
+            first_dim_offset=i * NUM_BURST_SAMPLES,
+        )
+        posterior.write_results(results, first_dim_offset=i * NUM_BURST_SAMPLES)
         end = perf_counter()
 
-        flat_results = flatten_results(results)
-        for i, ro in enumerate(output_results):
-            ro[s, ...] = tf.gather(flat_results[i], idx)
-
-        posterior.flush()
         print("Storage time:", end - start, "seconds")
         print(
-            "Acceptance theta:",
-            tf.reduce_mean(tf.cast(flat_results[0][:, 1], tf.float32)),
+            "Acceptance block0:",
+            tf.reduce_mean(
+                tf.cast(results["block0"]["is_accepted"], tf.float32)
+            ),
         )
         print(
             "Acceptance move S->E:",
-            tf.reduce_mean(tf.cast(flat_results[1][:, 1], tf.float32)),
+            tf.reduce_mean(
+                tf.cast(results["move/S->E"]["is_accepted"], tf.float32)
+            ),
         )
         print(
             "Acceptance move E->I:",
-            tf.reduce_mean(tf.cast(flat_results[2][:, 1], tf.float32)),
+            tf.reduce_mean(
+                tf.cast(results["move/E->I"]["is_accepted"], tf.float32)
+            ),
         )
         print(
             "Acceptance occult S->E:",
-            tf.reduce_mean(tf.cast(flat_results[3][:, 1], tf.float32)),
+            tf.reduce_mean(
+                tf.cast(results["occult/S->E"]["is_accepted"], tf.float32)
+            ),
         )
         print(
             "Acceptance occult E->I:",
-            tf.reduce_mean(tf.cast(flat_results[4][:, 1], tf.float32)),
+            tf.reduce_mean(
+                tf.cast(results["occult/E->I"]["is_accepted"], tf.float32)
+            ),
         )
 
-    print(f"Acceptance theta: {output_results[0][:, 1].mean()}")
-    print(f"Acceptance move S->E: {output_results[1][:, 1].mean()}")
-    print(f"Acceptance move E->I: {output_results[2][:, 1].mean()}")
-    print(f"Acceptance occult S->E: {output_results[3][:, 1].mean()}")
-    print(f"Acceptance occult E->I: {output_results[4][:, 1].mean()}")
+    print(
+        f"Acceptance block0: {posterior['results/block0/is_accepted'][:].mean()}"
+    )
+    print(
+        f"Acceptance move S->E: {posterior['results/move/S->E/is_accepted'][:].mean()}"
+    )
+    print(
+        f"Acceptance move E->I: {posterior['results/move/E->I/is_accepted'][:].mean()}"
+    )
+    print(
+        f"Acceptance occult S->E: {posterior['results/occult/S->E/is_accepted'][:].mean()}"
+    )
+    print(
+        f"Acceptance occult E->I: {posterior['results/occult/E->I/is_accepted'][:].mean()}"
+    )
 
-    posterior.close()
+    del posterior
