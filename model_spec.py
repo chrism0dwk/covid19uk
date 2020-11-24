@@ -66,8 +66,8 @@ def impute_censored_events(cases):
     :returns: a MxTx3 tensor of events where the first two indices of
               the right-most dimension contain the imputed event times.
     """
-    ei_events, lag_ei = impute_previous_cases(cases, 0.21)
-    se_events, lag_se = impute_previous_cases(ei_events, 0.28)
+    ei_events, lag_ei = impute_previous_cases(cases, 0.25)
+    se_events, lag_se = impute_previous_cases(ei_events, 0.5)
     ir_events = np.pad(cases, ((0, 0), (lag_ei + lag_se - 2, 0)))
     ei_events = np.pad(ei_events, ((0, 0), (lag_se - 1, 0)))
     return tf.stack([se_events, ei_events, ir_events], axis=-1)
