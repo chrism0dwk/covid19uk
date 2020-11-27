@@ -16,9 +16,8 @@ import model_spec
 def make_within_rate_fns(covariates, beta2):
 
     C = tf.convert_to_tensor(covariates["C"], dtype=model_spec.DTYPE)
-    C = tf.linalg.set_diag(
-        C + tf.transpose(C), tf.zeros(C.shape[0], dtype=model_spec.DTYPE)
-    )
+    C = tf.linalg.set_diag(C, tf.zeros(C.shape[0], dtype=model_spec.DTYPE))
+
     W = tf.convert_to_tensor(
         tf.squeeze(covariates["W"]), dtype=model_spec.DTYPE
     )
@@ -27,13 +26,21 @@ def make_within_rate_fns(covariates, beta2):
     )
 
     def within_fn(t, state):
-        rate = state[..., 2]
+        w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
+        commute_volume = tf.gather(W, w_idx)
+        rate = state[..., 2] - beta2 * state[
+            ..., 2
+        ] / N * commute_volume * tf.reduce_sum(C, axis=-2)
         return rate
 
     def between_fn(t, state):
         w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
         commute_volume = tf.gather(W, w_idx)
-        rate = beta2 * commute_volume * tf.linalg.matvec(C, state[..., 2] / N)
+        rate = (
+            beta2
+            * commute_volume
+            * tf.linalg.matvec(C + tf.transpose(C), state[..., 2] / N)
+        )
         return rate
 
     return within_fn, between_fn

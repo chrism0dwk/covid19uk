@@ -290,7 +290,7 @@ if __name__ == "__main__":
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.65, 0.0, 0.0], dtype=DTYPE),
+        np.array([0.2, 0.0, 0.0], dtype=DTYPE),
         np.zeros(
             model.model["xi"](0.0).event_shape[-1]
             # + model.model["beta3"]().event_shape[-1]

@@ -113,9 +113,11 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
         #     ),
         #     rate=tf.constant(priors["gamma"]["rate"], dtype=DTYPE),
         # )
-        return  tfd.Normal(loc=tf.constant(0.0, dtype=DTYPE),
-                           scale=tf.constant(100.0, dtype=DTYPE),
+        return tfd.Normal(
+            loc=tf.constant(0.0, dtype=DTYPE),
+            scale=tf.constant(100.0, dtype=DTYPE),
         )
+
     def gamma1():
         return tfd.Normal(
             loc=tf.constant(0.0, dtype=DTYPE),
@@ -137,9 +139,11 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
 
         def transition_rate_fn(t, state):
             C = tf.convert_to_tensor(covariates["C"], dtype=DTYPE)
-            C = tf.linalg.set_diag(
-                C + tf.transpose(C), tf.zeros(C.shape[0], dtype=DTYPE)
-            )
+            C = tf.linalg.set_diag(C, tf.zeros(C.shape[0], dtype=DTYPE))
+
+            Cstar = C + tf.transpose(C)
+            Cstar = tf.linalg.set_diag(Cstar, -tf.reduce_sum(C, axis=-2))
+
             W = tf.constant(np.squeeze(covariates["W"]), dtype=DTYPE)
             N = tf.constant(np.squeeze(covariates["N"]), dtype=DTYPE)
 
@@ -164,7 +168,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
                 state[..., 2]
                 + beta2
                 * commute_volume
-                * tf.linalg.matvec(C, state[..., 2] / tf.squeeze(N))
+                * tf.linalg.matvec(Cstar, state[..., 2] / tf.squeeze(N))
             )
             infec_rate = (
                 infec_rate / tf.squeeze(N) + 0.000000001
@@ -221,9 +225,11 @@ def next_generation_matrix_fn(covar_data, param):
         L = L - tf.reduce_mean(L, axis=0)
 
         C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
-        C = tf.linalg.set_diag(
-            C + tf.transpose(C), tf.zeros(C.shape[0], dtype=DTYPE)
-        )
+        C = tf.linalg.set_diag(C, -tf.reduce_sum(C, axis=-2))
+        C = tf.linalg.set_diag(C, tf.zeros(C.shape[0], dtype=DTYPE))
+        Cstar = C + tf.transpose(C)
+        Cstar = tf.linalg.set_diag(Cstar, -tf.reduce_sum(C, axis=-2))
+        
         W = tf.constant(covar_data["W"], dtype=DTYPE)
         N = tf.constant(covar_data["N"], dtype=DTYPE)
 
@@ -242,8 +248,8 @@ def next_generation_matrix_fn(covar_data, param):
         beta = tf.math.exp(xi + xB)
 
         ngm = beta[:, tf.newaxis] * (
-            tf.eye(C.shape[0], dtype=state.dtype)
-            + param["beta2"] * commute_volume * C / N[tf.newaxis, :]
+            tf.eye(Cstar.shape[0], dtype=state.dtype)
+            + param["beta2"] * commute_volume * Cstar / N[tf.newaxis, :]
         )
         ngm = (
             ngm
