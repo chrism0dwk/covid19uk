@@ -109,9 +109,10 @@ if __name__ == "__main__":
                 beta2=block0[0],
                 gamma0=block0[1],
                 gamma1=block0[2],
+                sigma=block0[3],
+                beta3=tf.concat([block0[4:6], [0.0]], axis=-1),
                 beta1=block1[0],
-                beta3=[0.0, 0.0, 0.0],  # block1[1:4],
-                xi=block1[1:],  # block1[4:],
+                xi=block1[1:],
                 seir=events,
             )
         )
@@ -135,8 +136,13 @@ if __name__ == "__main__":
                     covariance_burnin=200,
                 ),
                 bijector=tfp.bijectors.Blockwise(
-                    bijectors=[tfp.bijectors.Exp(), tfp.bijectors.Identity()],
-                    block_sizes=[1, 2],
+                    bijectors=[
+                        tfp.bijectors.Exp(),
+                        tfp.bijectors.Identity(),
+                        tfp.bijectors.Exp(),
+                        tfp.bijectors.Identity(),
+                    ],
+                    block_sizes=[1, 2, 1, 2],
                 ),
                 name=name,
             )
@@ -290,9 +296,9 @@ if __name__ == "__main__":
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.2, 0.0, 0.0], dtype=DTYPE),
+        np.array([0.2, 0.0, 0.0, 0.1, 0.0, 0.0], dtype=DTYPE),
         np.zeros(
-            model.model["xi"](0.0).event_shape[-1]
+            model.model["xi"](0.0, 0.1).event_shape[-1]
             # + model.model["beta3"]().event_shape[-1]
             + 1,
             dtype=DTYPE,
@@ -312,6 +318,8 @@ if __name__ == "__main__":
             "beta2": (samples[0][:, 0], (NUM_BURST_SAMPLES,)),
             "gamma0": (samples[0][:, 1], (NUM_BURST_SAMPLES,)),
             "gamma1": (samples[0][:, 2], (NUM_BURST_SAMPLES,)),
+            "sigma": (samples[0][:, 3], (NUM_BURST_SAMPLES,)),
+            "beta3": (samples[0][:, 4:], (NUM_BURST_SAMPLES, 2)),
             "beta1": (samples[1][:, 0], (NUM_BURST_SAMPLES,)),
             "xi": (
                 samples[1][:, 1:],
@@ -347,6 +355,8 @@ if __name__ == "__main__":
                 "beta2": samples[0][:, 0],
                 "gamma0": samples[0][:, 1],
                 "gamma1": samples[0][:, 2],
+                "sigma": samples[0][:, 3],
+                "beta3": samples[0][:, 4:],
                 "beta1": samples[1][:, 0],
                 "xi": samples[1][:, 1:],
                 "events": samples[2],

@@ -25,7 +25,7 @@ GIS_TEMPLATE = "data/UK2019mod_pop.gpkg"
 
 
 # Reproduction number calculation
-def calc_R_it(param, events, init_state, covar_data):
+def calc_R_it(param, events, init_state, covar_data, priors):
     """Calculates effective reproduction number for batches of metapopulations
     :param theta: a tensor of batched theta parameters [B] + theta.shape
     :param xi: a tensor of batched xi parameters [B] + xi.shape
@@ -36,21 +36,36 @@ def calc_R_it(param, events, init_state, covar_data):
     """
 
     def r_fn(args):
-        beta1_, beta2_, xi_, gamma0_, events_ = args
+        beta1_, beta2_, beta_3, sigma_, xi_, gamma0_, events_ = args
         t = events_.shape[-2] - 1
         state = compute_state(init_state, events_, model_spec.STOICHIOMETRY)
         state = tf.gather(state, t, axis=-2)  # State on final inference day
 
+        model = model_spec.CovidUK(
+            covariates=covar_data,
+            initial_state=init_state,
+            initial_step=0,
+            num_steps=events_.shape[-2],
+            priors=priors,
+        )
+
+        xi_pred = model_spec.conditional_gp(
+            model.model["xi"](beta1_, sigma_),
+            xi_,
+            tf.constant(
+                [events.shape[-2] + model_spec.XI_FREQ], dtype=model_spec.DTYPE
+            )[:, tf.newaxis],
+        )
+
         par = dict(
             beta1=beta1_,
             beta2=beta2_,
-            beta3=tf.constant(
-                [0.0, 0.0, 0.0], dtype=model_spec.DTYPE
-            ),  # xi_[1:4],
+            beta3=tf.concat([beta_3, [0.0]], axis=-1),
+            sigma=sigma_,
             gamma0=gamma0_,
-            xi=xi_,
+            xi=xi_,  # tf.reshape(xi_pred.sample(), [1]),
         )
-
+        print("xi shape:", par["xi"].shape)
         ngm_fn = model_spec.next_generation_matrix_fn(covar_data, par)
         ngm = ngm_fn(t, state)
         return ngm
@@ -60,6 +75,8 @@ def calc_R_it(param, events, init_state, covar_data):
         elems=(
             param["beta1"],
             param["beta2"],
+            param["beta3"],
+            param["sigma"],
             param["xi"],
             param["gamma0"],
             events,
@@ -82,12 +99,12 @@ def predicted_incidence(param, init_state, init_step, num_steps, priors):
     """
 
     def sim_fn(args):
-        beta1_, beta2_, xi_, gamma0_, gamma1_, init_ = args
+        beta1_, beta2_, beta3_, sigma_, xi_, gamma0_, gamma1_, init_ = args
 
         par = dict(
             beta1=beta1_,
             beta2=beta2_,
-            beta3=[0.0, 0.0, 0.0],
+            beta3=tf.concat([beta3_, [0.0]], axis=-1),
             gamma0=gamma0_,
             gamma1=gamma1_,
             xi=xi_,
@@ -108,6 +125,8 @@ def predicted_incidence(param, init_state, init_step, num_steps, priors):
         elems=(
             param["beta1"],
             param["beta2"],
+            param["beta3"],
+            param["sigma"],
             param["xi"],
             param["gamma0"],
             param["gamma1"],
@@ -176,6 +195,12 @@ if __name__ == "__main__":
     param = dict(
         beta1=posterior["samples/beta1"][idx],
         beta2=posterior["samples/beta2"][idx],
+        beta3=posterior["samples/beta3"][
+            idx,
+        ],
+        sigma=posterior["samples/sigma"][
+            idx,
+        ],
         xi=posterior["samples/xi"][idx],
         gamma0=posterior["samples/gamma0"][idx],
         gamma1=posterior["samples/gamma1"][idx],
@@ -195,7 +220,9 @@ if __name__ == "__main__":
         priors=config["mcmc"]["prior"],
     )
 
-    ngms = calc_R_it(param, events, init_state, covar_data)
+    ngms = calc_R_it(
+        param, events, init_state, covar_data, config["mcmc"]["prior"]
+    )
     b, _ = power_iteration(ngms)
     rt = rayleigh_quotient(ngms, b)
     q = np.arange(0.05, 1.0, 0.05)

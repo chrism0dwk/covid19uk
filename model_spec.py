@@ -73,6 +73,16 @@ def impute_censored_events(cases):
     return tf.stack([se_events, ei_events, ir_events], axis=-1)
 
 
+def conditional_gp(gp, observations, new_index_points):
+
+    param = gp.parameters
+    param["observation_index_points"] = param["index_points"]
+    param["observations"] = observations
+    param["index_points"] = new_index_points
+
+    return tfd.GaussianProcessRegressionModel(**param)
+
+
 def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
     def beta1():
         return tfd.Normal(
@@ -95,12 +105,18 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             sample_shape=covariates["L"].shape[-1],
         )
 
-    def xi(beta1):
-        sigma = tf.constant(0.4, dtype=DTYPE)
+    def sigma():
+        return tfd.Gamma(
+            concentration=tf.constant(2.0, dtype=DTYPE),
+            rate=tf.constant(20.0, dtype=DTYPE),
+        )
+
+    def xi(beta1, sigma):
+        # sigma = tf.constant(0.1, dtype=DTYPE)
         phi = tf.constant(24.0, dtype=DTYPE)
         kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
         idx_pts = tf.cast(tf.range(num_steps // XI_FREQ) * XI_FREQ, dtype=DTYPE)
-        return tfd.GaussianProcess(
+        return tfd.GaussianProcessRegressionModel(
             kernel,
             mean_fn=lambda idx: beta1,
             index_points=idx_pts[:, tf.newaxis],
@@ -132,7 +148,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
         gamma1 = tf.convert_to_tensor(gamma1, DTYPE)
 
         L = tf.convert_to_tensor(covariates["L"], DTYPE)
-        L = L - tf.reduce_mean(L, axis=0)
+        L = L - tf.reduce_mean(L, axis=(0, 1))
 
         weekday = tf.convert_to_tensor(covariates["weekday"], DTYPE)
         weekday = weekday - tf.reduce_mean(weekday, axis=-1)
@@ -198,6 +214,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             beta1=beta1,
             beta2=beta2,
             beta3=beta3,
+            sigma=sigma,
             xi=xi,
             gamma0=gamma0,
             gamma1=gamma1,
@@ -222,14 +239,14 @@ def next_generation_matrix_fn(covar_data, param):
 
     def fn(t, state):
         L = tf.convert_to_tensor(covar_data["L"], DTYPE)
-        L = L - tf.reduce_mean(L, axis=0)
+        L = L - tf.reduce_mean(L, axis=(0, 1))
 
         C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
         C = tf.linalg.set_diag(C, -tf.reduce_sum(C, axis=-2))
         C = tf.linalg.set_diag(C, tf.zeros(C.shape[0], dtype=DTYPE))
         Cstar = C + tf.transpose(C)
         Cstar = tf.linalg.set_diag(Cstar, -tf.reduce_sum(C, axis=-2))
-        
+
         W = tf.constant(covar_data["W"], dtype=DTYPE)
         N = tf.constant(covar_data["N"], dtype=DTYPE)
 
@@ -242,7 +259,7 @@ def next_generation_matrix_fn(covar_data, param):
         xi = tf.gather(param["xi"], xi_idx)
 
         L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
-        Lt = tf.gather(L, L_idx)
+        Lt = L[-1]  # Last timepoint
         xB = tf.linalg.matvec(Lt, param["beta3"])
 
         beta = tf.math.exp(xi + xB)
