@@ -215,7 +215,7 @@ if __name__ == "__main__":
                     (0, make_partially_observed_step(1, 2, None, "ir_events")),
                     (0, make_occults_step(None, 0, 1, "se_occults")),
                     (0, make_occults_step(0, 1, 2, "ei_occults")),
-                    (0, make_occults_step(1, 2, None, "ir_occults")),
+ #                   (0, make_occults_step(1, 2, None, "ir_occults")),
                 ],
                 name="gibbs1",
             ),
@@ -258,7 +258,7 @@ if __name__ == "__main__":
         results_dict["move/I->R"] = get_move_results(res1[2])
         results_dict["occult/S->E"] = get_move_results(res1[3])
         results_dict["occult/E->I"] = get_move_results(res1[4])
-        results_dict["occult/I->R"] = get_move_results(res1[5])
+#        results_dict["occult/I->R"] = get_move_results(res1[5])
 
         return results_dict
 
@@ -418,12 +418,12 @@ if __name__ == "__main__":
                 tf.cast(results["occult/E->I"]["is_accepted"], tf.float32)
             ),
         )
-        print(
-            "Acceptance occult I->R:",
-            tf.reduce_mean(
-                tf.cast(results["occult/I->R"]["is_accepted"], tf.float32)
-            ),
-        )
+        # print(
+        #     "Acceptance occult I->R:",
+        #     tf.reduce_mean(
+        #         tf.cast(results["occult/I->R"]["is_accepted"], tf.float32)
+        #     ),
+        # )
 
     print(
         f"Acceptance theta: {posterior['results/block0/is_accepted'][:].mean()}"
@@ -444,8 +444,8 @@ if __name__ == "__main__":
     print(
         f"Acceptance occult E->I: {posterior['results/occult/E->I/is_accepted'][:].mean()}"
     )
-    print(
-        f"Acceptance occult I->R: {posterior['results/occult/I->R/is_accepted'][:].mean()}"
-    )
+    # print(
+    #     f"Acceptance occult I->R: {posterior['results/occult/I->R/is_accepted'][:].mean()}"
+    # )
 
     del posterior
