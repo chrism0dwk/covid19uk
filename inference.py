@@ -407,6 +407,12 @@ if __name__ == "__main__":
             ),
         )
         print(
+            "Acceptance move I->R:",
+            tf.reduce_mean(
+                tf.cast(results["move/I->R"]["is_accepted"], tf.float32)
+            ),
+        )
+        print(
             "Acceptance occult S->E:",
             tf.reduce_mean(
                 tf.cast(results["occult/S->E"]["is_accepted"], tf.float32)
@@ -416,6 +422,12 @@ if __name__ == "__main__":
             "Acceptance occult E->I:",
             tf.reduce_mean(
                 tf.cast(results["occult/E->I"]["is_accepted"], tf.float32)
+            ),
+        )
+        print(
+            "Acceptance occult I->R:",
+            tf.reduce_mean(
+                tf.cast(results["occult/I->R"]["is_accepted"], tf.float32)
             ),
         )
 
@@ -430,10 +442,16 @@ if __name__ == "__main__":
         f"Acceptance move E->I: {posterior['results/move/E->I/is_accepted'][:].mean()}"
     )
     print(
+        f"Acceptance move I->R: {posterior['results/move/I->R/is_accepted'][:].mean()}"
+    )
+    print(
         f"Acceptance occult S->E: {posterior['results/occult/S->E/is_accepted'][:].mean()}"
     )
     print(
         f"Acceptance occult E->I: {posterior['results/occult/E->I/is_accepted'][:].mean()}"
+    )
+    print(
+        f"Acceptance occult I->R: {posterior['results/occult/I->R/is_accepted'][:].mean()}"
     )
 
     del posterior
