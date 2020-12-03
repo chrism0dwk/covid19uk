@@ -172,7 +172,7 @@ if __name__ == "__main__":
         return fn
 
     def make_partially_observed_step(
-        target_event_id, prev_event_id=None, next_event_id=None, name=None
+        prev_event_id, target_event_id, next_event_id, name=None
     ):
         def fn(target_log_prob_fn, _):
             return tfp.mcmc.MetropolisHastings(
@@ -216,8 +216,8 @@ if __name__ == "__main__":
             GibbsKernel(
                 target_log_prob_fn=target_log_prob_fn,
                 kernel_list=[
-                    (0, make_partially_observed_step(0, None, 1, "se_events")),
-                    (0, make_partially_observed_step(1, 0, 2, "ei_events")),
+                    (0, make_partially_observed_step(None, 0, 1, "se_events")),
+                    (0, make_partially_observed_step(0, 1, 2, "ei_events")),
                     (0, make_partially_observed_step(1, 2, None, "ir_events")),
                     (0, make_occults_step(None, 0, 1, "se_occults")),
                     (0, make_occults_step(0, 1, 2, "ei_occults")),
@@ -269,7 +269,7 @@ if __name__ == "__main__":
         return results_dict
 
     # Build MCMC algorithm here.  This will be run in bursts for memory economy
-    @tf.function(autograph=False, experimental_compile=True)
+    @tf.function(autograph=True, experimental_compile=False)
     def sample(n_samples, init_state, thin=0, previous_results=None):
         with tf.name_scope("main_mcmc_sample_loop"):
 
