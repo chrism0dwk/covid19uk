@@ -5,6 +5,7 @@ import os
 from time import perf_counter
 import tqdm
 import yaml
+import pandas as pd
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -17,7 +18,7 @@ from gemlib.mcmc import MultiScanKernel
 from gemlib.mcmc import AdaptiveRandomWalkMetropolis
 from gemlib.mcmc import Posterior
 
-from covid.data import read_phe_cases, read_phe_neg_cases
+from covid.data import read_population, read_mobility
 from covid.cli_arg_parse import cli_args
 
 import model_spec
@@ -41,36 +42,29 @@ if __name__ == "__main__":
     with open(args.config, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
-    inference_period = [
-        np.datetime64(x) for x in config["settings"]["inference_period"]
-    ]
-
-    covar_data = model_spec.read_covariates(
-        config["data"],
-        date_low=inference_period[0],
-        date_high=inference_period[1],
+    cases = pd.read_csv(config["data"]["reported_cases"], index_col="lad19cd")
+    total_tests = pd.read_csv(
+        config["data"]["total_tests"], index_col="lad19cd"
     )
+    population = read_population(config["data"]["population_size"])
+    mobility = read_mobility(config["data"]["mobility_matrix"])
+    mobility_volume = np.ones(cases.shape[-1])
+    npi = pd.read_csv(
+        config["data"]["npi"], index_col=["date", "lad19cd", "variable"]
+    )
+    weekday = pd.date_range("2020-09-04", "2020-11-27").weekday < 5
 
-    # We load in cases and impute missing infections first, since this sets the
-    # time epoch which we are analysing.
-    cases = read_phe_cases(
-        config["data"]["reported_cases"],
-        date_low=inference_period[0],
-        date_high=inference_period[1],
-        date_type=config["data"]["case_date_type"],
-        pillar=config["data"]["pillar"],
-    ).astype(DTYPE)
-
-    neg_tests = read_phe_neg_cases(
-        config["data"]["negative_tests"],
-        date_low=inference_period[0],
-        date_high=inference_period[1],
-    ).astype(DTYPE)
-
-    covar_data["total_tests"] = cases + neg_tests
+    covar_data = {
+        "total_tests": total_tests.to_numpy().astype(DTYPE),
+        "C": mobility.to_numpy().astype(DTYPE),
+        "W": mobility_volume.astype(DTYPE),
+        "N": population.to_numpy().astype(DTYPE),
+        "L": npi.to_xarray().to_array("value")[0].astype(DTYPE),
+        "weekday": weekday,
+    }
 
     # Impute censored events, return cases
-    events = model_spec.impute_censored_events(cases)
+    events = model_spec.impute_censored_events(cases.to_numpy().astype(DTYPE))
 
     # Initial conditions are calculated by calculating the state
     # at the beginning of the inference period
