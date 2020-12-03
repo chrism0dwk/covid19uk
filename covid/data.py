@@ -137,6 +137,35 @@ due to missing values ({100. * (orig_len - line_listing.shape[0])/orig_len}%)"
     )
 
 
+def read_phe_neg_cases(path, date_low, date_high, ltlas=None):
+    """Reads negative test cases from PHE negative testing data
+
+    :param path: path to Negative testing data
+    :param date_low: lower date bound
+    :param date_high: upper date bound
+    :param returns: a Pandas data frame of LTLAs x dates
+    """
+
+    dat = pd.read_csv(path, usecols=["LTLA", "earliestspecimendate"])
+    dat.columns = ["lad19cd", "date"]
+    dat["date"] = pd.to_datetime(dat["date"], format="%Y-%m-%d")
+    dat["lad19cd"] = _merge_ltla(dat["lad19cd"])
+    dat = dat[(date_low <= dat["date"]) & (dat["date"] < date_high)]
+    counts = dat.groupby(["date", "lad19cd"]).size()
+    counts.name = "count"
+
+    dates = pd.date_range(date_low, date_high, closed="left")
+    if ltlas is None:
+        ltlas = counts.index.levels[1]
+    index = pd.MultiIndex.from_product(
+        [dates, ltlas], names=["date", "lad19cd"]
+    )
+    counts = counts.reindex(index, fill_value=0)
+    return counts.reset_index().pivot(
+        index="lad19cd", columns="date", values="count"
+    )
+
+
 def read_tier_restriction_data(
     tier_restriction_csv, lad19cd_lookup, date_low, date_high
 ):

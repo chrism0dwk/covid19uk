@@ -112,7 +112,6 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
         )
 
     def xi(beta1, sigma):
-        # sigma = tf.constant(0.1, dtype=DTYPE)
         phi = tf.constant(24.0, dtype=DTYPE)
         kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
         idx_pts = tf.cast(tf.range(num_steps // XI_FREQ) * XI_FREQ, dtype=DTYPE)
@@ -123,12 +122,6 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
         )
 
     def gamma0():
-        # return tfd.Gamma(
-        #     concentration=tf.constant(
-        #         priors["gamma"]["concentration"], dtype=DTYPE
-        #     ),
-        #     rate=tf.constant(priors["gamma"]["rate"], dtype=DTYPE),
-        # )
         return tfd.Normal(
             loc=tf.constant(0.0, dtype=DTYPE),
             scale=tf.constant(100.0, dtype=DTYPE),
@@ -209,6 +202,15 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             num_steps=num_steps,
         )
 
+    def y(seir):
+        """Observation noise process"""
+        p_hat = seir[..., -1] / covariates["total_tests"]
+
+        return tfd.Independent(
+            tfd.Binomial(total_count=covariates["total_tests"], probs=p_hat),
+            reinterpreted_batch_ndims=2,
+        )
+
     return tfd.JointDistributionNamed(
         dict(
             beta1=beta1,
@@ -219,6 +221,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             gamma0=gamma0,
             gamma1=gamma1,
             seir=seir,
+            y=y,
         )
     )
 

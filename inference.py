@@ -17,7 +17,7 @@ from gemlib.mcmc import MultiScanKernel
 from gemlib.mcmc import AdaptiveRandomWalkMetropolis
 from gemlib.mcmc import Posterior
 
-from covid.data import read_phe_cases
+from covid.data import read_phe_cases, read_phe_neg_cases
 from covid.cli_arg_parse import cli_args
 
 import model_spec
@@ -61,6 +61,14 @@ if __name__ == "__main__":
         pillar=config["data"]["pillar"],
     ).astype(DTYPE)
 
+    neg_tests = read_phe_neg_cases(
+        config["data"]["negative_tests"],
+        date_low=inference_period[0],
+        date_high=inference_period[1],
+    ).astype(DTYPE)
+
+    covar_data["total_tests"] = cases + neg_tests
+
     # Impute censored events, return cases
     events = model_spec.impute_censored_events(cases)
 
@@ -81,6 +89,7 @@ if __name__ == "__main__":
     start_time = state.shape[1] - cases.shape[1]
     initial_state = state[:, start_time, :]
     events = events[:, start_time:, :]
+    observed_events = events[..., 2]
     num_metapop = covar_data["N"].shape[0]
 
     ########################################################
@@ -114,6 +123,7 @@ if __name__ == "__main__":
                 beta1=block1[0],
                 xi=block1[1:],
                 seir=events,
+                y=observed_events,
             )
         )
 
@@ -191,7 +201,8 @@ if __name__ == "__main__":
                     ),
                     cumulative_event_offset=initial_state,
                     nmax=config["mcmc"]["occult_nmax"],
-                    t_range=(events.shape[1] - 21, events.shape[1]),
+                    # t_range=(events.shape[1] - 21, events.shape[1]),
+                    t_range=(0, events.shape[1]),
                     name=name,
                 ),
                 name=name,
@@ -207,8 +218,10 @@ if __name__ == "__main__":
                 kernel_list=[
                     (0, make_partially_observed_step(0, None, 1, "se_events")),
                     (0, make_partially_observed_step(1, 0, 2, "ei_events")),
+                    (0, make_partially_observed_step(1, 2, None, "ir_events")),
                     (0, make_occults_step(None, 0, 1, "se_occults")),
                     (0, make_occults_step(0, 1, 2, "ei_occults")),
+                    (0, make_occults_step(1, 2, None, "ir_occults")),
                 ],
                 name="gibbs1",
             ),
@@ -248,8 +261,10 @@ if __name__ == "__main__":
         res1 = res0[2].inner_results
         results_dict["move/S->E"] = get_move_results(res1[0])
         results_dict["move/E->I"] = get_move_results(res1[1])
-        results_dict["occult/S->E"] = get_move_results(res1[2])
-        results_dict["occult/E->I"] = get_move_results(res1[3])
+        results_dict["move/I->R"] = get_move_results(res1[2])
+        results_dict["occult/S->E"] = get_move_results(res1[3])
+        results_dict["occult/E->I"] = get_move_results(res1[4])
+        results_dict["occult/I->R"] = get_move_results(res1[5])
 
         return results_dict
 
