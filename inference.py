@@ -263,7 +263,7 @@ if __name__ == "__main__":
         return results_dict
 
     # Build MCMC algorithm here.  This will be run in bursts for memory economy
-    @tf.function(autograph=True, experimental_compile=False)
+    @tf.function(autograph=False, experimental_compile=True)
     def sample(n_samples, init_state, thin=0, previous_results=None):
         with tf.name_scope("main_mcmc_sample_loop"):
 
