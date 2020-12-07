@@ -7,7 +7,7 @@ data:
   reported_cases: data/Anonymised Combined Line List 20201109.csv
   case_date_type: specimen
   pillar: both
-  tier_restriction_csv: data/NPI_dataset_full_extract_03_12_2020 (3).csv
+  tier_restriction_csv: data/tidyLAD19Tiers.csv
   geopackage: data/UK2019mod_pop.gpkg
 
 parameter:

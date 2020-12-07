@@ -172,3 +172,36 @@ def read_tier_restriction_data(
     # Pack into [T, M, V] array.
     arr_data = data.to_xarray().to_array()
     return np.transpose(arr_data, axes=[1, 2, 0])
+
+
+def read_challen_tier_restriction(tier_restriction_csv, date_low, date_high):
+
+    tiers = pd.read_csv(tier_restriction_csv)
+    tiers["date"] = pd.to_datetime(tiers["date"], format="%Y-%m-%d")
+    tiers["code"] = _merge_ltla(tiers["code"])
+
+    # Separate out December tiers
+    tiers.loc[
+        (tiers["date"] > np.datetime64("2020-12-02"))
+        & (tiers["tier"] == "three"),
+        "tier",
+    ] = "dec_three"
+    tiers.loc[
+        (tiers["date"] > np.datetime64("2020-12-02"))
+        & (tiers["tier"] == "two"),
+        "tier",
+    ] = "dec_two"
+    tiers.loc[
+        (tiers["date"] > np.datetime64("2020-12-02"))
+        & (tiers["tier"] == "one"),
+        "tier",
+    ] = "dec_one"
+
+    index = pd.MultiIndex.from_frame(tiers[["date", "code", "tier"]])
+    index = index.sort_values()
+    index = index[~index.duplicated()]
+    ser = pd.Series(1.0, index=index, name="value")
+    ser = ser[date_low : (date_high - np.timedelta64(1, "D"))]
+    xarr = ser.to_xarray()
+    xarr.data[np.isnan(xarr.data)] = 0.0
+    return xarr.loc[..., ["two", "three", "dec_two", "dec_three"]]
