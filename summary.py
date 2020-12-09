@@ -63,7 +63,7 @@ def calc_R_it(param, events, init_state, covar_data, priors):
             beta3=beta3_,
             sigma=sigma_,
             gamma0=gamma0_,
-            xi=xi_[:-1],  # tf.reshape(xi_pred.sample(), [1]),
+            xi=xi_,
         )
         print("xi shape:", par["xi"].shape)
         ngm_fn = model_spec.next_generation_matrix_fn(covar_data, par)
@@ -107,7 +107,7 @@ def predicted_incidence(param, init_state, init_step, num_steps, priors):
             beta3=beta3_,
             gamma0=gamma0_,
             gamma1=gamma1_,
-            xi=xi_[:-1],
+            xi=xi_,
         )
 
         model = model_spec.CovidUK(

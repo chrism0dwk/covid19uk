@@ -3,7 +3,7 @@
 data:
   mobility_matrix: data/mergedflows.csv
   population_size: data/c2019modagepop.csv
-  commute_volume: data/201127_OFF_SEN_COVID19_road_traffic_national_table.xlsx
+  commute_volume: data/201204_OFF_SEN_COVID19_road_traffic_national_table.xlsx
   reported_cases: data/Anonymised Combined Line List 20201109.csv
   case_date_type: specimen
   pillar: both
