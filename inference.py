@@ -110,7 +110,7 @@ if __name__ == "__main__":
                 gamma0=block0[1],
                 gamma1=block0[2],
                 sigma=block0[3],
-                beta3=tf.concat([block0[4:6], [0.0]], axis=-1),
+                beta3=block0[4:],
                 beta1=block1[0],
                 xi=block1[1:],
                 seir=events,
@@ -142,7 +142,7 @@ if __name__ == "__main__":
                         tfp.bijectors.Exp(),
                         tfp.bijectors.Identity(),
                     ],
-                    block_sizes=[1, 2, 1, 2],
+                    block_sizes=[1, 2, 1, 4],
                 ),
                 name=name,
             )
@@ -296,7 +296,7 @@ if __name__ == "__main__":
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.2, 0.0, 0.0, 0.1, 0.0, 0.0], dtype=DTYPE),
+        np.array([0.6, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
         np.zeros(
             model.model["xi"](0.0, 0.1).event_shape[-1]
             # + model.model["beta3"]().event_shape[-1]

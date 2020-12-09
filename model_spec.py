@@ -96,12 +96,12 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
         )
 
     def beta3():
-        return tfd.Sample(
+        return tfd.Independent(
             tfd.Normal(
-                loc=tf.constant(0.0, dtype=DTYPE),
-                scale=tf.constant(100.0, dtype=DTYPE),
+                loc=tf.constant([0.0] * 4, dtype=DTYPE),
+                scale=tf.constant([1.0] * 4, dtype=DTYPE),
             ),
-            sample_shape=covariates["L"].shape[-1],
+            reinterpreted_batch_ndims=1,
         )
 
     def sigma():
