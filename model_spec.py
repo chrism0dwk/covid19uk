@@ -27,26 +27,24 @@ def read_covariates(paths, date_low, date_high):
     :returns: a dictionary of covariate information to be consumed by the model
               {'C': commute_matrix, 'W': traffic_flow, 'N': population_size}
     """
-    mobility = data.read_mobility(paths["mobility_matrix"])
-    popsize = data.read_population(paths["population_size"])
+    mobility = data.read_scotland_commute(paths["mobility_matrix"])
+    popsize = data.read_scotland_population(paths["population_size"])
     commute_volume = data.read_traffic_flow(
         paths["commute_volume"], date_low=date_low, date_high=date_high
     )
 
-    geo = gp.read_file(paths["geopackage"])
-    geo = geo.loc[geo["lad19cd"].str.startswith("E")]
-    tier_restriction = data.read_challen_tier_restriction(
-        paths["tier_restriction_csv"],
-        date_low,
-        date_high,
-    )
+    # geo = gp.read_file(paths["geopackage"])
+    # geo = geo.loc[geo["lad19cd"].str.startswith("E")]
+    # tier_restriction = data.read_challen_tier_restriction(
+    #     paths["tier_restriction_csv"], date_low, date_high,
+    # )
     weekday = pd.date_range(date_low, date_high).weekday < 5
 
     return dict(
         C=mobility.to_numpy().astype(DTYPE),
         W=commute_volume.to_numpy().astype(DTYPE),
         N=popsize.to_numpy().astype(DTYPE),
-        L=tier_restriction.astype(DTYPE),
+        # L=tier_restriction.astype(DTYPE),
         weekday=weekday.astype(DTYPE),
     )
 
@@ -95,14 +93,14 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             rate=tf.constant(10.0, dtype=DTYPE),
         )
 
-    def beta3():
-        return tfd.Independent(
-            tfd.Normal(
-                loc=tf.constant([0.0] * 4, dtype=DTYPE),
-                scale=tf.constant([1.0] * 4, dtype=DTYPE),
-            ),
-            reinterpreted_batch_ndims=1,
-        )
+    # def beta3():
+    #     return tfd.Independent(
+    #         tfd.Normal(
+    #             loc=tf.constant([0.0] * 4, dtype=DTYPE),
+    #             scale=tf.constant([1.0] * 4, dtype=DTYPE),
+    #         ),
+    #         reinterpreted_batch_ndims=1,
+    #     )
 
     def sigma():
         return tfd.Gamma(
@@ -132,15 +130,15 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             scale=tf.constant(100.0, dtype=DTYPE),
         )
 
-    def seir(beta2, beta3, xi, gamma0, gamma1):
+    def seir(beta2, xi, gamma0, gamma1):
         beta2 = tf.convert_to_tensor(beta2, DTYPE)
-        beta3 = tf.convert_to_tensor(beta3, DTYPE)
+        # beta3 = tf.convert_to_tensor(beta3, DTYPE)
         xi = tf.convert_to_tensor(xi, DTYPE)
         gamma0 = tf.convert_to_tensor(gamma0, DTYPE)
         gamma1 = tf.convert_to_tensor(gamma1, DTYPE)
 
-        L = tf.convert_to_tensor(covariates["L"], DTYPE)
-        L = L - tf.reduce_mean(L, axis=(0, 1))
+        # L = tf.convert_to_tensor(covariates["L"], DTYPE)
+        # L = L - tf.reduce_mean(L, axis=(0, 1))
 
         weekday = tf.convert_to_tensor(covariates["weekday"], DTYPE)
         weekday = weekday - tf.reduce_mean(weekday, axis=-1)
@@ -163,16 +161,16 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
             )
             xi_ = tf.gather(xi, xi_idx)
 
-            L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
-            Lt = tf.gather(L, L_idx)
-            xB = tf.linalg.matvec(Lt, beta3)
+            # L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
+            # Lt = tf.gather(L, L_idx)
+            # xB = tf.linalg.matvec(Lt, beta3)
 
             weekday_idx = tf.clip_by_value(
                 tf.cast(t, tf.int64), 0, weekday.shape[0] - 1
             )
             weekday_t = tf.gather(weekday, weekday_idx)
 
-            infec_rate = tf.math.exp(xi_ + xB) * (
+            infec_rate = tf.math.exp(xi_) * (
                 state[..., 2]
                 + beta2
                 * commute_volume
@@ -205,7 +203,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
         dict(
             beta1=beta1,
             beta2=beta2,
-            beta3=beta3,
+            # beta3=beta3,
             sigma=sigma,
             xi=xi,
             gamma0=gamma0,
@@ -230,8 +228,8 @@ def next_generation_matrix_fn(covar_data, param):
     """
 
     def fn(t, state):
-        L = tf.convert_to_tensor(covar_data["L"], DTYPE)
-        L = L - tf.reduce_mean(L, axis=(0, 1))
+        # L = tf.convert_to_tensor(covar_data["L"], DTYPE)
+        # L = L - tf.reduce_mean(L, axis=(0, 1))
 
         C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
         C = tf.linalg.set_diag(C, -tf.reduce_sum(C, axis=-2))
@@ -250,11 +248,11 @@ def next_generation_matrix_fn(covar_data, param):
         )
         xi = tf.gather(param["xi"], xi_idx)
 
-        L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
-        Lt = L[-1]  # Last timepoint
-        xB = tf.linalg.matvec(Lt, param["beta3"])
+        # L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
+        # Lt = L[-1]  # Last timepoint
+        # xB = tf.linalg.matvec(Lt, param["beta3"])
 
-        beta = tf.math.exp(xi + xB)
+        beta = tf.math.exp(xi)
 
         ngm = beta[:, tf.newaxis] * (
             tf.eye(Cstar.shape[0], dtype=state.dtype)

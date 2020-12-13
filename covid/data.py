@@ -4,6 +4,7 @@ well-known formats"""
 from warnings import warn
 import numpy as np
 import pandas as pd
+import geopandas as gp
 
 __all__ = [
     "read_mobility",
@@ -205,3 +206,63 @@ def read_challen_tier_restriction(tier_restriction_csv, date_low, date_high):
     xarr = ser.to_xarray()
     xarr.data[np.isnan(xarr.data)] = 0.0
     return xarr.loc[..., ["two", "three", "dec_two", "dec_three"]]
+
+
+def read_scotland_cases(filename, geodata, date_low, date_high):
+
+    cases = pd.read_excel(filename)
+    geo = gp.read_file(geodata)
+
+    cases = cases.drop(columns=["NA", "Grand Total"])
+    cases = cases.melt(id_vars="SpecimenDate")
+    cases.columns = ["date", "lad19nm", "count"]
+
+    # Remove total
+    cases = cases[cases["date"] != "Total"]
+
+    # Merge codes
+    cases = cases.merge(
+        geo["lad19cd"], left_on="lad19nm", right_on=geo["lad19nm"], how="inner"
+    )
+
+    # NaN --> 0
+    cases.loc[cases["count"].isna(), "count"] = 0.0
+
+    # Make index
+    cases["date"] = pd.to_datetime(cases["date"], format="%Y-%m-%d %HH:%MM:%SS")
+    one_day = pd.to_timedelta(1, "D")
+    cases.index = pd.MultiIndex.from_frame(cases[["date", "lad19cd"]])
+    cases.sort_index(inplace=True)
+
+    # Refine into MxT data structure
+    cases = cases["count"]
+    cases = cases[date_low : (date_high - one_day)]
+
+    return cases.reset_index().pivot(
+        index="lad19cd", columns="date", values="count"
+    )
+
+
+def read_scotland_commute(filename):
+
+    flow = pd.read_csv(filename)
+    flow = flow[
+        flow["From"].str.startswith("S") & flow["To"].str.startswith("S")
+    ]
+    flow = flow.pivot(index="To", columns="From", values="Flow")
+    flow.sort_index(axis=0, inplace=True)
+    flow.sort_index(axis=1, inplace=True)
+    flow[flow.isna()] = 0.0
+    return flow
+
+
+def read_scotland_population(path):
+    """Reads population CSV
+    :returns: a pandas Series indexed by LTLAs
+    """
+    pop = pd.read_csv(path, index_col="lad19cd")
+    pop = pop[pop.index.str.startswith("S")]
+    pop = pop.sum(axis=1)
+    pop = pop.sort_index()
+    pop.name = "n"
+    return pop

@@ -17,7 +17,7 @@ from gemlib.mcmc import MultiScanKernel
 from gemlib.mcmc import AdaptiveRandomWalkMetropolis
 from gemlib.mcmc import Posterior
 
-from covid.data import read_phe_cases
+from covid.data import read_scotland_cases
 from covid.cli_arg_parse import cli_args
 
 import model_spec
@@ -53,12 +53,11 @@ if __name__ == "__main__":
 
     # We load in cases and impute missing infections first, since this sets the
     # time epoch which we are analysing.
-    cases = read_phe_cases(
+    cases = read_scotland_cases(
         config["data"]["reported_cases"],
+        geodata=config["data"]["geopackage"],
         date_low=inference_period[0],
         date_high=inference_period[1],
-        date_type=config["data"]["case_date_type"],
-        pillar=config["data"]["pillar"],
     ).astype(DTYPE)
 
     # Impute censored events, return cases
@@ -110,7 +109,7 @@ if __name__ == "__main__":
                 gamma0=block0[1],
                 gamma1=block0[2],
                 sigma=block0[3],
-                beta3=block0[4:],
+                # beta3=block0[4:],
                 beta1=block1[0],
                 xi=block1[1:],
                 seir=events,
@@ -140,9 +139,8 @@ if __name__ == "__main__":
                         tfp.bijectors.Exp(),
                         tfp.bijectors.Identity(),
                         tfp.bijectors.Exp(),
-                        tfp.bijectors.Identity(),
                     ],
-                    block_sizes=[1, 2, 1, 4],
+                    block_sizes=[1, 2, 1],
                 ),
                 name=name,
             )
@@ -296,13 +294,8 @@ if __name__ == "__main__":
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.6, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
-        np.zeros(
-            model.model["xi"](0.0, 0.1).event_shape[-1]
-            # + model.model["beta3"]().event_shape[-1]
-            + 1,
-            dtype=DTYPE,
-        ),
+        np.array([0.6, 0.0, 0.0, 0.1], dtype=DTYPE),
+        np.zeros(model.model["xi"](0.0, 0.1).event_shape[-1] + 1, dtype=DTYPE,),
         events,
     ]
     print("Initial logpi:", logp(*current_state))
@@ -319,13 +312,13 @@ if __name__ == "__main__":
             "gamma0": (samples[0][:, 1], (NUM_BURST_SAMPLES,)),
             "gamma1": (samples[0][:, 2], (NUM_BURST_SAMPLES,)),
             "sigma": (samples[0][:, 3], (NUM_BURST_SAMPLES,)),
-            "beta3": (samples[0][:, 4:], (NUM_BURST_SAMPLES, 2)),
+            # "beta3": (samples[0][:, 4:], (NUM_BURST_SAMPLES, 2)),
             "beta1": (samples[1][:, 0], (NUM_BURST_SAMPLES,)),
             "xi": (
                 samples[1][:, 1:],
                 (NUM_BURST_SAMPLES, samples[1].shape[1] - 1),
             ),
-            "events": (samples[2], (NUM_BURST_SAMPLES, 64, 64, 1)),
+            "events": (samples[2], (NUM_BURST_SAMPLES, 32, 84, 1)),
         },
         results_dict=results,
         num_samples=NUM_SAVED_SAMPLES,
@@ -356,7 +349,7 @@ if __name__ == "__main__":
                 "gamma0": samples[0][:, 1],
                 "gamma1": samples[0][:, 2],
                 "sigma": samples[0][:, 3],
-                "beta3": samples[0][:, 4:],
+                # "beta3": samples[0][:, 4:],
                 "beta1": samples[1][:, 0],
                 "xi": samples[1][:, 1:],
                 "events": samples[2],
