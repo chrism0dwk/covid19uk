@@ -19,7 +19,7 @@ XI_FREQ = 14  # baseline transmission changes every 14 days
 NU = tf.constant(0.28, dtype=DTYPE)  # E->I rate assumed known.
 
 
-def read_covariates(paths, date_low, date_high):
+def read_covariates(config):
     """Loads covariate data
 
     :param paths: a dictionary of paths to data with keys {'mobility_matrix',
@@ -27,6 +27,9 @@ def read_covariates(paths, date_low, date_high):
     :returns: a dictionary of covariate information to be consumed by the model
               {'C': commute_matrix, 'W': traffic_flow, 'N': population_size}
     """
+    paths = config["data"]
+    date_low = np.datetime64(config["Global"]["inference_period"][0])
+    date_high = np.datetime64(config["Global"]["inference_period"][1])
     mobility = data.read_mobility(paths["mobility_matrix"])
     popsize = data.read_population(paths["population_size"])
     commute_volume = data.read_traffic_flow(
@@ -35,11 +38,12 @@ def read_covariates(paths, date_low, date_high):
 
     geo = gp.read_file(paths["geopackage"])
     geo = geo.loc[geo["lad19cd"].str.startswith("E")]
-    tier_restriction = data.read_challen_tier_restriction(
-        paths["tier_restriction_csv"],
-        date_low,
-        date_high,
-    )
+    # tier_restriction = data.read_challen_tier_restriction(
+    #     paths["tier_restriction_csv"],
+    #     date_low,
+    #     date_high,
+    # )
+    tier_restriction = data.TierData.process(config)[:, :, 2:]
     weekday = pd.date_range(date_low, date_high).weekday < 5
 
     return dict(

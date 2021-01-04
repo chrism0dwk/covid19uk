@@ -1,38 +1,29 @@
-# Covid_ODE model configuration
+# Covid stochastic model configuration
+
+Global:
+  prependID: False
+  prependDate: False
+  inference_period:
+    - 2020-10-11
+    - 2021-01-04
+  time_step: 1.
+
+
+GenerateOutput:
+  storeInputs: False
+  scrapedDataDir: scraped_data
+  storeProcessedInputs: False
+
 
 data:
   mobility_matrix: data/mergedflows.csv
   population_size: data/c2019modagepop.csv
-  commute_volume: data/201211_OFF_SEN_COVID19_road_traffic_national_table.xlsx
-  reported_cases: data/Anonymised Combined Line List 20201109.csv
+  commute_volume: data/201231_OFF_SEN_COVID19_road_traffic_national_table.xlsx
+  reported_cases: data/Anonymised Combined Line List 20201231.csv
   case_date_type: specimen
   pillar: both
-  tier_restriction_csv: data/tidyLAD19Tiers.csv
   geopackage: data/UK2019mod_pop.gpkg
 
-parameter:
-  beta1: 0.291   # R0 2.4
-  beta2: 0.876   # Contact with commuters 1/3rd of the time
-  beta3: 1.0   # lockdown vs normal
-  omega: 1.0   # Non-linearity parameter for commuting volume
-  nu: 0.5      # E -> I transition rate
-  gamma: 0.45  # I -> R transition rate
-  xi:
-    - 2.07
-    - 0.15
-    - -1.08
-    - -0.78
-    - -0.73
-    - -0.51
-
-settings:
-  inference_period:
-    - 2020-07-03
-    - 2020-09-29
-  time_step: 1.
-  prediction_period:
-    - 2020-02-19
-    - 2020-08-01
 
 mcmc:
   dmax: 84
@@ -48,8 +39,23 @@ mcmc:
       concentration: 2.0
       rate: 4.0
 
+
 output:
-  results_dir: $global_scratch/covid19/
+  results_dir: output/testing
   posterior: posterior.hd5
   national_rt: national_rt.xlsx
   geopackage: prediction.gpkg
+
+
+AreaCodeData:
+  input: json
+  address:  "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/LAD_APR_2019_UK_NC/FeatureServer/0/query?where=1%3D1&outFields=LAD19CD,LAD19NM&returnGeometry=false&returnDistinctValues=true&orderByFields=LAD19CD&outSR=4326&f=json"
+  format: ons
+  output: processed_data/processed_lad19cd.csv
+  regions: ["E"]
+
+
+TierData:
+  input: api
+  address: None
+  format: api

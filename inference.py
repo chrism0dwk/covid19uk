@@ -42,14 +42,10 @@ if __name__ == "__main__":
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     inference_period = [
-        np.datetime64(x) for x in config["settings"]["inference_period"]
+        np.datetime64(x) for x in config["Global"]["inference_period"]
     ]
 
-    covar_data = model_spec.read_covariates(
-        config["data"],
-        date_low=inference_period[0],
-        date_high=inference_period[1],
-    )
+    covar_data = model_spec.read_covariates(config)
 
     # We load in cases and impute missing infections first, since this sets the
     # time epoch which we are analysing.
