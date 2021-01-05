@@ -58,7 +58,7 @@ for key in ["reported_cases", "commute_volume", "case_date_type", "pillar"]:
         config["data"][key] = val
 
 if args.inference_period is not None:
-    config["settings"]["inference_period"] = [str(x) for x in args.inference_period]
+    config["Global"]["inference_period"] = [str(x) for x in args.inference_period]
 
 for key in ["results_dir"]:
     val = getattr(args, key)

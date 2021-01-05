@@ -65,13 +65,11 @@ with open(args.config, "r") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
 
     inference_period = [
-        np.datetime64(x) for x in config["settings"]["inference_period"]
+        np.datetime64(x) for x in config["Global"]["inference_period"]
     ]
 
 # Load covariate data
-covar_data = model_spec.read_covariates(
-    config["data"], date_low=inference_period[0], date_high=inference_period[1]
-)
+covar_data = model_spec.read_covariates(config)
 
 # Load posterior file
 posterior = h5py.File(
