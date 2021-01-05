@@ -100,7 +100,7 @@ class TierData:
         xarr = ser.to_xarray()
         xarr.data[np.isnan(xarr.data)] = 0.0
         # return [T, M, V] structure
-        return np.transpose(xarr, axes=[1, 0, 2])
+        return xarr.transpose("date", "lad19cd", "alert_level")
 
     def adapt_xarray(tiers, date_low, date_high, lads, settings):
         """
