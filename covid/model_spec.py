@@ -86,7 +86,7 @@ def conditional_gp(gp, observations, new_index_points):
     return tfd.GaussianProcessRegressionModel(**param)
 
 
-def CovidUK(covariates, initial_state, initial_step, num_steps, priors):
+def CovidUK(covariates, initial_state, initial_step, num_steps):
     def beta1():
         return tfd.Normal(
             loc=tf.constant(0.0, dtype=DTYPE),

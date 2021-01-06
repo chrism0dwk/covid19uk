@@ -9,6 +9,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+from covid.data import AreaCodeData
 from gemlib.util import compute_state
 from gemlib.mcmc import UncalibratedEventTimesUpdate
 from gemlib.mcmc import UncalibratedOccultUpdate, TransitionTopology
@@ -20,26 +21,20 @@ from gemlib.mcmc import Posterior
 from covid.data import read_phe_cases
 from covid.cli_arg_parse import cli_args
 
-import model_spec
-
-if tf.test.gpu_device_name():
-    print("Using GPU")
-else:
-    print("Using CPU")
-
+import covid.model_spec as model_spec
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
 DTYPE = model_spec.DTYPE
 
 
-if __name__ == "__main__":
+def run_mcmc(config):
+    """Constructs and runs the MCMC"""
 
-    # Read in settings
-    args = cli_args()
-
-    with open(args.config, "r") as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
+    if tf.test.gpu_device_name():
+        print("Using GPU")
+    else:
+        print("Using CPU")
 
     inference_period = [
         np.datetime64(x) for x in config["Global"]["inference_period"]
@@ -77,29 +72,18 @@ if __name__ == "__main__":
     start_time = state.shape[1] - cases.shape[1]
     initial_state = state[:, start_time, :]
     events = events[:, start_time:, :]
-    num_metapop = covar_data["N"].shape[0]
 
     ########################################################
-    # Build the model, and then construct the MCMC kernels #
+    # Construct the MCMC kernels #
     ########################################################
-    def convert_priors(node):
-        if isinstance(node, dict):
-            for k, v in node.items():
-                node[k] = convert_priors(v)
-            return node
-        return float(node)
-
     model = model_spec.CovidUK(
         covariates=covar_data,
         initial_state=initial_state,
         initial_step=0,
         num_steps=events.shape[1],
-        priors=convert_priors(config["mcmc"]["prior"]),
     )
 
-    # Full joint log posterior distribution
-    # $\pi(\theta, \xi, y^{se}, y^{ei} | y^{ir})$
-    def logp(block0, block1, events):
+    def joint_log_prob(block0, block1, events):
         return model.log_prob(
             dict(
                 beta2=block0[0],
@@ -257,7 +241,7 @@ if __name__ == "__main__":
             init_state = init_state.copy()
 
             gibbs_schema = GibbsKernel(
-                target_log_prob_fn=logp,
+                target_log_prob_fn=joint_log_prob,
                 kernel_list=[
                     (0, make_blk0_kernel(init_state[0].shape, "block0")),
                     (1, make_blk1_kernel(init_state[1].shape, "block1")),
@@ -278,11 +262,9 @@ if __name__ == "__main__":
 
             return samples, results, final_results
 
-    ####################################
-    # Construct bursted MCMC loop here #
-    ####################################
-
-    # MCMC Control
+    ###############################
+    # Construct bursted MCMC loop #
+    ###############################
     NUM_BURSTS = int(config["mcmc"]["num_bursts"])
     NUM_BURST_SAMPLES = int(config["mcmc"]["num_burst_samples"])
     NUM_EVENT_TIME_UPDATES = int(config["mcmc"]["num_event_time_updates"])
@@ -294,14 +276,12 @@ if __name__ == "__main__":
     current_state = [
         np.array([0.6, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
         np.zeros(
-            model.model["xi"](0.0, 0.1).event_shape[-1]
-            # + model.model["beta3"]().event_shape[-1]
-            + 1,
+            model.model["xi"](0.0, 0.1).event_shape[-1] + 1,
             dtype=DTYPE,
         ),
         events,
     ]
-    print("Initial logpi:", logp(*current_state))
+    print("Initial logpi:", joint_log_prob(*current_state))
 
     # Output file
     samples, results, _ = sample(1, current_state)
@@ -363,42 +343,11 @@ if __name__ == "__main__":
         end = perf_counter()
 
         print("Storage time:", end - start, "seconds")
-        print(
-            "Acceptance theta:",
-            tf.reduce_mean(
-                tf.cast(results["block0"]["is_accepted"], tf.float32)
-            ),
-        )
-        print(
-            "Acceptance xi:",
-            tf.reduce_mean(
-                tf.cast(results["block1"]["is_accepted"], tf.float32),
-            ),
-        )
-        print(
-            "Acceptance move S->E:",
-            tf.reduce_mean(
-                tf.cast(results["move/S->E"]["is_accepted"], tf.float32)
-            ),
-        )
-        print(
-            "Acceptance move E->I:",
-            tf.reduce_mean(
-                tf.cast(results["move/E->I"]["is_accepted"], tf.float32)
-            ),
-        )
-        print(
-            "Acceptance occult S->E:",
-            tf.reduce_mean(
-                tf.cast(results["occult/S->E"]["is_accepted"], tf.float32)
-            ),
-        )
-        print(
-            "Acceptance occult E->I:",
-            tf.reduce_mean(
-                tf.cast(results["occult/E->I"]["is_accepted"], tf.float32)
-            ),
-        )
+        for k, v in results:
+            print(
+                f"Acceptance {k}:",
+                tf.reduce_mean(tf.cast(v["is_accepted"], tf.float32)),
+            )
 
     print(
         f"Acceptance theta: {posterior['results/block0/is_accepted'][:].mean()}"
@@ -418,3 +367,14 @@ if __name__ == "__main__":
     )
 
     del posterior
+
+
+if __name__ == "__main__":
+
+    # Read in settings
+    args = cli_args()
+
+    with open(args.config, "r") as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+
+    run_mcmc(config)
