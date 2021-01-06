@@ -45,7 +45,7 @@ output:
   posterior: posterior.hd5
   national_rt: national_rt.xlsx
   geopackage: prediction.gpkg
-
+  posterior_predictive: posterior_predictive.pkl
 
 AreaCodeData:
   input: json

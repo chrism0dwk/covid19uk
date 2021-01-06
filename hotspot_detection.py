@@ -2,7 +2,7 @@
 
 import os
 import yaml
-import pkl
+import pickle as pkl
 import h5py
 import numpy as np
 import geopandas as gp
@@ -163,7 +163,10 @@ if __name__ == "__main__":
 
     with open(
         os.path.expandvars(
-            output_folder_path, config["output"]["posterior_predictive"]
-        )
+            os.path.join(
+                output_folder_path, config["output"]["posterior_predictive"]
+            )
+        ),
+        "wb",
     ) as f:
         pkl.dump(prediction, f)
