@@ -1,27 +1,20 @@
 """Hotspot detection given a posterior"""
-import argparse
+
 import os
 import yaml
+import pkl
 import h5py
 import numpy as np
-import pandas as pd
 import geopandas as gp
 
 import tensorflow as tf
 from gemlib.util import compute_state
 
 from covid.cli_arg_parse import cli_args
-from covid.summary import (
-    rayleigh_quotient,
-    power_iteration,
-)
-from covid.summary import mean_and_ci
 
 import model_spec
 
 DTYPE = model_spec.DTYPE
-
-GIS_TEMPLATE = "data/UK2019mod_pop.gpkg"
 
 
 @tf.function
@@ -100,13 +93,15 @@ if __name__ == "__main__":
 
     # Load covariate data
     covar_data = model_spec.read_covariates(config)
-    
-    # Load geopackage
-    geo = gp.read_file(
-        os.path.join(
-            config["output"]["results_dir"], config["output"]["geopackage"]
-        )
+
+    output_folder_path = config["output"]["results_dir"]
+    geopackage_path = os.path.expandvars(
+        os.path.join(output_folder_path, config["output"]["geopackage"])
     )
+
+    # Load geopackage
+    geo = gp.read_file(geopackage_path)
+
     geo = geo[geo["lad19cd"].str.startswith("E")]  # England only, for now.
     geo = geo.sort_values("lad19cd")
 
@@ -148,7 +143,7 @@ if __name__ == "__main__":
         param,
         init_state=state_timeseries[..., -14, :],
         init_step=state_timeseries.shape[-2] - 14,
-        num_steps=28,
+        num_steps=56,
         priors=config["mcmc"]["prior"],
     )
 
@@ -158,9 +153,17 @@ if __name__ == "__main__":
 
     geo["Pr(pred<obs)_7"] = q_obs7.numpy()
     geo["Pr(pred<obs)_14"] = q_obs14.numpy()
+
     geo.to_file(
         os.path.join(
             config["output"]["results_dir"], config["output"]["geopackage"]
         ),
         driver="GPKG",
     )
+
+    with open(
+        os.path.expandvars(
+            output_folder_path, config["output"]["posterior_predictive"]
+        )
+    ) as f:
+        pkl.dump(prediction, f)
