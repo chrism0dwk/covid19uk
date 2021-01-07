@@ -66,16 +66,6 @@ class AreaCodeData:
         if settings["format"] == "ons":
             print("Retrieving Area Code data from the ONS")
             data = response.json()
-
-            if config["GenerateOutput"]["storeInputs"]:
-                fn = format_output_filename(
-                    config["GenerateOutput"]["scrapedDataDir"]
-                    + "AreaCodeData_ONS.json",
-                    config,
-                )
-                with open(fn, "w") as f:
-                    json.dump(data, f)
-
             df = AreaCodeData.getJSON(json.dumps(data))
 
         return df
@@ -162,28 +152,22 @@ class AreaCodeData:
         """
         Adapt the area codes to the desired dataframe format
         """
-        output_settings = config["GenerateOutput"]
         settings = config["AreaCodeData"]
-        output = settings["output"]
         regions = settings["regions"]
 
         if settings["input"] == "processed":
             return df
 
         if settings["format"].lower() == "ons":
-            df = AreaCodeData.adapt_ons(df, regions, output, config)
+            df = AreaCodeData.adapt_ons(df, regions)
 
         # if we have a predefined list of LADs, filter them down
         if "lad19cds" in config:
             df = df[[x in config["lad19cds"] for x in df.lad19cd.values]]
 
-        if output_settings["storeProcessedInputs"] and output != "None":
-            output = format_output_filename(output, config)
-            df.to_csv(output, index=False)
-
         return df
 
-    def adapt_ons(df, regions, output, config):
+    def adapt_ons(df, regions):
         colnames = ["lad19cd", "name"]
         df.columns = colnames
         filters = df["lad19cd"].str.contains(str.join("|", regions))

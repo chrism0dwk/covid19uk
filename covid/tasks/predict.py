@@ -1,5 +1,7 @@
 """Run predictions for COVID-19 model"""
 
+import numpy as np
+import xarray
 import pickle as pkl
 import tensorflow as tf
 
@@ -20,17 +22,17 @@ def predicted_incidence(posterior_samples, covar_data, init_step, num_steps):
     """
 
     def sim_fn(args):
-        beta1_, beta2_, beta3_, sigma_, gamma0_, gamma1_, init_ = args
+        beta1_, beta2_, beta3_, sigma_, xi_, gamma0_, gamma1_, init_ = args
 
         par = dict(
             beta1=beta1_,
             beta2=beta2_,
             beta3=beta3_,
+            sigma=sigma_,
             xi=xi_,
             gamma0=gamma0_,
             gamma1=gamma1_,
         )
-
         model = model_spec.CovidUK(
             covar_data,
             initial_state=init_,
@@ -41,7 +43,7 @@ def predicted_incidence(posterior_samples, covar_data, init_step, num_steps):
         return sim["seir"]
 
     posterior_state = compute_state(
-        covar_data["init_state"],
+        posterior_samples["init_state"],
         posterior_samples["seir"],
         model_spec.STOICHIOMETRY,
     )
@@ -75,14 +77,26 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
     samples = read_pkl(posterior_samples)
 
     if initial_step < 0:
-        initial_step = samples["events"].shape[-2] + initial_step
+        initial_step = samples["seir"].shape[-2] + initial_step
+
+    del covar_data["date_range"]
 
     prediction = predicted_incidence(
         samples, covar_data, initial_step, num_steps
     )
 
+    prediction = xarray.DataArray(
+        prediction,
+        coords=[
+            np.arange(prediction.shape[0]),
+            covar_data["locations"]["lad19cd"],
+            np.arange(prediction.shape[2]),
+            np.arange(prediction.shape[3]),
+        ],
+        dims=("iteration", "location", "time", "event"),
+    )
     with open(output_file, "wb") as f:
-        pkl.dump(prediction.numpy(), f)
+        pkl.dump(prediction, f)
 
 
 if __name__ == "__main__":

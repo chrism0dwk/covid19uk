@@ -2,23 +2,27 @@
 
 import os
 import yaml
+import pandas as pd
 import ruffus as rf
 
-from covid.model_spec import gather_data
 from covid.tasks import (
-    inference,
+    assemble_data,
+    mcmc,
     thin_posterior,
     next_generation_matrix,
     overall_rt,
     predict,
-    geopackage,
-    #    lancs_spreadsheet,
+    summarize,
+    within_between,
+    case_exceedance,
+    summary_geopackage,
+    # lancs_spreadsheet,
 )
 
 
-def import_global_config(args):
+def import_global_config(config_file):
 
-    with open(args.config, "r") as f:
+    with open(config_file, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     return config
@@ -42,75 +46,75 @@ if __name__ == "__main__":
 
     # Output paths
     BASEDIR = os.path.expandvars(cli_options.results_directory)
-    p = lambda fn: os.path.join(BASEDIR, fn)
+
+    def work_dir(fn):
+        return os.path.join(BASEDIR, fn)
 
     # Pipeline starts here
     @rf.mkdir(BASEDIR)
-    @rf.originate(p("config.yaml"), global_config)
-    def save_config(output_file, global_config):
-        with open(output_file, "w"):
-            yaml.dump(global_config)
+    @rf.originate(work_dir("config.yaml"), global_config)
+    def save_config(output_file, config):
+        with open(output_file, "w") as f:
+            yaml.dump(config, f)
 
     @rf.transform(
         save_config,
         rf.formatter(),
-        p("pipeline_data.pkl"),
+        work_dir("pipeline_data.pkl"),
         global_config,
     )
-    def process_data(input_file, output_file, global_config):
-        data = gather_data(global_config)
-        with open(output_file, "wb") as f:
-            pkl.dump(data, f)
+    def process_data(input_file, output_file, config):
+        assemble_data(output_file, config["ProcessData"])
 
-    rf.transform(
-        inference,
+    @rf.transform(
         process_data,
         rf.formatter(),
-        p("posterior.hd5"),
-        global_config["Inference"],
+        work_dir("posterior.hd5"),
+        global_config,
     )
+    def run_mcmc(input_file, output_file, config):
+        mcmc(input_file, output_file, config["Mcmc"])
 
-    rf.transform(
-        thin_posterior,
-        input=inference,
+    @rf.transform(
+        input=run_mcmc,
         filter=rf.formatter(),
-        output=p("thin_samples.pkl"),
-        indices=range(6000, 10000, 10),
+        output=work_dir("thin_samples.pkl"),
     )
+    def thin_samples(input_file, output_file):
+        thin_posterior(input_file, output_file, range(100))
 
     # Rt related steps
     rf.transform(
-        next_generation_matrix,
-        input=[process_data, thin_posterior],
+        input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=p("ngm.pkl"),
-    )
+        output=work_dir("ngm.pkl"),
+    )(next_generation_matrix)
 
     rf.transform(
-        overall_rt,
         input=next_generation_matrix,
         filter=rf.formatter(),
-        output=p("national_rt.xlsx"),
-    )
+        output=work_dir("national_rt.xlsx"),
+    )(overall_rt)
 
     # In-sample prediction
     @rf.transform(
-        input=[process_data, thin_posterior],
+        input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=p("insample7.pkl"),
+        output=work_dir("insample7.pkl"),
     )
     def insample7(input_files, output_file):
-        return predict(
+        predict(
             data=input_files[0],
             posterior_samples=input_files[1],
             output_file=output_file,
-            timespan=[-7, -1],
+            initial_step=-8,
+            num_steps=28,
         )
 
     @rf.transform(
-        input=[process_data, thin_posterior],
+        input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=p("insample14.pkl"),
+        output=work_dir("insample14.pkl"),
     )
     def insample14(input_files, output_file):
         return predict(
@@ -118,14 +122,14 @@ if __name__ == "__main__":
             posterior_samples=input_files[1],
             output_file=output_file,
             initial_step=-14,
-            num_steps=14,
+            num_steps=28,
         )
 
     # Medium-term prediction
     @rf.transform(
-        input=[process_data, thin_posterior],
+        input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=p("medium_term.pkl"),
+        output=work_dir("medium_term.pkl"),
     )
     def medium_term(input_files, output_file):
         return predict(
@@ -133,16 +137,68 @@ if __name__ == "__main__":
             posterior_samples=input_files[1],
             output_file=output_file,
             initial_step=-1,
-            num_steps=56,
+            num_steps=61,
         )
 
-    # Assemble
+    # Summarisation
     rf.transform(
-        geopackage,
-        input=[next_generation_matrix, insample7, medium_term],
+        input=next_generation_matrix,
         filter=rf.formatter(),
-        output=p("prediction.gpkg"),
-        config=global_config["Geopackage"],
-    )
+        output=work_dir("rt_summary.csv"),
+    )(summarize.rt)
 
-    rf.cmdline(cli_options)
+    rf.transform(
+        input=medium_term,
+        filter=rf.formatter(),
+        output=work_dir("infec_incidence_summary.csv"),
+    )(summarize.infec_incidence)
+
+    rf.transform(
+        input=[[process_data, thin_samples, medium_term]],
+        filter=rf.formatter(),
+        output=work_dir("prevalence_summary.csv"),
+    )(summarize.prevalence)
+
+    rf.transform(
+        input=[[process_data, thin_samples]],
+        filter=rf.formatter(),
+        output=work_dir("within_between_summary.csv"),
+    )(within_between)
+
+    @rf.transform(
+        input=[[process_data, insample7, insample14]],
+        filter=rf.formatter(),
+        output=work_dir("exceedance_summary.csv"),
+    )
+    def exceedance(input_files, output_file):
+        exceed7 = case_exceedance((input_files[0], input_files[1]), 7)
+        exceed14 = case_exceedance((input_files[0], input_files[2]), 14)
+        df = pd.DataFrame(
+            {"Pr(pred<obs)_7": exceed7, "Pr(pred<obs)_14": exceed14}
+        )
+        df.to_csv(output_file)
+
+    # @rf.transform(
+    #     input=[[process_data, insample7, insample14, medium_term]],
+    #     filter=rf.formatter(),
+    #     output=work_dir("total_predictive_timeseries.pdf")
+    # )(total_predictive_timeseries)
+
+    # Geopackage
+    rf.transform(
+        [
+            [
+                process_data,
+                summarize.rt,
+                summarize.infec_incidence,
+                summarize.prevalence,
+                within_between,
+                exceedance,
+            ]
+        ],
+        rf.formatter(),
+        work_dir("prediction.gpkg"),
+        global_config["Geopackage"],
+    )(summary_geopackage)
+
+    rf.cmdline.run(cli_options)

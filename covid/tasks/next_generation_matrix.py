@@ -1,8 +1,8 @@
 """Calculates and saves a next generation matrix"""
 
-import argparse
-import yaml
+import numpy as np
 import pickle as pkl
+import xarray
 import tensorflow as tf
 
 
@@ -10,7 +10,7 @@ from covid import model_spec
 from gemlib.util import compute_state
 
 
-def calc_posterior_ngm(param, events, init_state, covar_data):
+def calc_posterior_ngm(samples, covar_data):
     """Calculates effective reproduction number for batches of metapopulations
     :param theta: a tensor of batched theta parameters [B] + theta.shape
     :param xi: a tensor of batched xi parameters [B] + xi.shape
@@ -23,15 +23,10 @@ def calc_posterior_ngm(param, events, init_state, covar_data):
     def r_fn(args):
         beta1_, beta2_, beta3_, sigma_, xi_, gamma0_, events_ = args
         t = events_.shape[-2] - 1
-        state = compute_state(init_state, events_, model_spec.STOICHIOMETRY)
-        state = tf.gather(state, t, axis=-2)  # State on final inference day
-
-        model = model_spec.CovidUK(
-            covariates=covar_data,
-            initial_state=init_state,
-            initial_step=0,
-            num_steps=events_.shape[-2],
+        state = compute_state(
+            samples["init_state"], events_, model_spec.STOICHIOMETRY
         )
+        state = tf.gather(state, t, axis=-2)  # State on final inference day
 
         par = dict(
             beta1=beta1_,
@@ -48,13 +43,13 @@ def calc_posterior_ngm(param, events, init_state, covar_data):
     return tf.vectorized_map(
         r_fn,
         elems=(
-            param["beta1"],
-            param["beta2"],
-            param["beta3"],
-            param["sigma"],
-            param["xi"],
-            param["gamma0"],
-            events,
+            samples["beta1"],
+            samples["beta2"],
+            samples["beta3"],
+            samples["sigma"],
+            samples["xi"],
+            samples["gamma0"],
+            samples["seir"],
         ),
     )
 
@@ -65,13 +60,19 @@ def next_generation_matrix(input_files, output_file):
         covar_data = pkl.load(f)
 
     with open(input_files[1], "rb") as f:
-        param = pkl.load(f)
+        samples = pkl.load(f)
 
     # Compute ngm posterior
-    ngm = calc_posterior_ngm(
-        param, param["events"], param["init_state"], covar_data
+    ngm = calc_posterior_ngm(samples, covar_data).numpy()
+    ngm = xarray.DataArray(
+        ngm,
+        coords=[
+            np.arange(ngm.shape[0]),
+            covar_data["locations"]["lad19cd"],
+            covar_data["locations"]["lad19cd"],
+        ],
+        dims=["iteration", "dest", "src"],
     )
-
     # Output
     with open(output_file, "wb") as f:
         pkl.dump(ngm, f)
@@ -79,4 +80,26 @@ def next_generation_matrix(input_files, output_file):
 
 if __name__ == "__main__":
 
-    next_generation_matrix(input_files, output_file)
+    from argparse import ArgumentParser
+
+    parser = ArgumentParser()
+    parser.add_argument(
+        "-s",
+        "--samples",
+        type=str,
+        description="A pickle file with MCMC samples",
+        required=True,
+    )
+    parser.add_argument(
+        "-d",
+        "--data",
+        type=str,
+        decription="A data glob pickle file",
+        require=True,
+    )
+    parser.add_argument(
+        "-o", "--output", type=str, description="The output file", require=True
+    )
+    args = parser.parse_args()
+
+    next_generation_matrix([args.data, args.samples], args.output)

@@ -8,7 +8,7 @@ import pickle as pkl
 import matplotlib.pyplot as plt
 
 from covid.cli_arg_parse import cli_args
-from model_spec import read_covariates
+from model_spec import gather_data
 from covid.data import read_phe_cases
 from covid.data import AreaCodeData
 
@@ -88,10 +88,7 @@ def main(config):
     for i in range(cases.shape[0]):
         title = lads["name"].iloc[i]
         plot_timeseries(
-            pred_quants[:, i, :14],
-            cases.iloc[i, -14:],
-            dates,
-            title,
+            pred_quants[:, i, :14], cases.iloc[i, -14:], dates, title,
         )
         plt.savefig(results_dir.joinpath(f"{lads['lad19cd'].iloc[i]}.png"))
 

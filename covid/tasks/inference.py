@@ -2,6 +2,8 @@
 # pylint: disable=E402
 
 import os
+import h5py
+import pickle as pkl
 from time import perf_counter
 import tqdm
 import yaml
@@ -9,7 +11,6 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from covid.data import AreaCodeData
 from gemlib.util import compute_state
 from gemlib.mcmc import UncalibratedEventTimesUpdate
 from gemlib.mcmc import UncalibratedOccultUpdate, TransitionTopology
@@ -18,9 +19,6 @@ from gemlib.mcmc import MultiScanKernel
 from gemlib.mcmc import AdaptiveRandomWalkMetropolis
 from gemlib.mcmc import Posterior
 
-from covid.data import read_phe_cases
-from covid.cli_arg_parse import cli_args
-
 import covid.model_spec as model_spec
 
 tfd = tfp.distributions
@@ -28,7 +26,7 @@ tfb = tfp.bijectors
 DTYPE = model_spec.DTYPE
 
 
-def run_mcmc(config):
+def mcmc(data_file, output_file, config):
     """Constructs and runs the MCMC"""
 
     if tf.test.gpu_device_name():
@@ -36,24 +34,13 @@ def run_mcmc(config):
     else:
         print("Using CPU")
 
-    inference_period = [
-        np.datetime64(x) for x in config["Global"]["inference_period"]
-    ]
-
-    covar_data = model_spec.read_covariates(config)
+    with open(data_file, "rb") as f:
+        data = pkl.load(f)
 
     # We load in cases and impute missing infections first, since this sets the
     # time epoch which we are analysing.
-    cases = read_phe_cases(
-        config["data"]["reported_cases"],
-        date_low=inference_period[0],
-        date_high=inference_period[1],
-        date_type=config["data"]["case_date_type"],
-        pillar=config["data"]["pillar"],
-    ).astype(DTYPE)
-
     # Impute censored events, return cases
-    events = model_spec.impute_censored_events(cases)
+    events = model_spec.impute_censored_events(data["cases"].astype(DTYPE))
 
     # Initial conditions are calculated by calculating the state
     # at the beginning of the inference period
@@ -63,13 +50,13 @@ def run_mcmc(config):
     # to set up a sensible initial state.
     state = compute_state(
         initial_state=tf.concat(
-            [covar_data["N"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])],
+            [data["N"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])],
             axis=-1,
         ),
         events=events,
         stoichiometry=model_spec.STOICHIOMETRY,
     )
-    start_time = state.shape[1] - cases.shape[1]
+    start_time = state.shape[1] - data["cases"].shape[1]
     initial_state = state[:, start_time, :]
     events = events[:, start_time:, :]
 
@@ -77,7 +64,7 @@ def run_mcmc(config):
     # Construct the MCMC kernels #
     ########################################################
     model = model_spec.CovidUK(
-        covariates=covar_data,
+        covariates=data,
         initial_state=initial_state,
         initial_step=0,
         num_steps=events.shape[1],
@@ -152,9 +139,9 @@ def run_mcmc(config):
                     prev_event_id=prev_event_id,
                     next_event_id=next_event_id,
                     initial_state=initial_state,
-                    dmax=config["mcmc"]["dmax"],
-                    mmax=config["mcmc"]["m"],
-                    nmax=config["mcmc"]["nmax"],
+                    dmax=config["dmax"],
+                    mmax=config["m"],
+                    nmax=config["nmax"],
                 ),
                 name=name,
             )
@@ -170,7 +157,7 @@ def run_mcmc(config):
                         prev_event_id, target_event_id, next_event_id
                     ),
                     cumulative_event_offset=initial_state,
-                    nmax=config["mcmc"]["occult_nmax"],
+                    nmax=config["occult_nmax"],
                     t_range=(events.shape[1] - 21, events.shape[1]),
                     name=name,
                 ),
@@ -181,7 +168,7 @@ def run_mcmc(config):
 
     def make_event_multiscan_kernel(target_log_prob_fn, _):
         return MultiScanKernel(
-            config["mcmc"]["num_event_time_updates"],
+            config["num_event_time_updates"],
             GibbsKernel(
                 target_log_prob_fn=target_log_prob_fn,
                 kernel_list=[
@@ -234,7 +221,7 @@ def run_mcmc(config):
         return results_dict
 
     # Build MCMC algorithm here.  This will be run in bursts for memory economy
-    @tf.function(autograph=False, experimental_compile=True)
+    @tf.function  # (autograph=False, experimental_compile=True)
     def sample(n_samples, init_state, thin=0, previous_results=None):
         with tf.name_scope("main_mcmc_sample_loop"):
 
@@ -265,9 +252,8 @@ def run_mcmc(config):
     ###############################
     # Construct bursted MCMC loop #
     ###############################
-    NUM_BURSTS = int(config["mcmc"]["num_bursts"])
-    NUM_BURST_SAMPLES = int(config["mcmc"]["num_burst_samples"])
-    NUM_EVENT_TIME_UPDATES = int(config["mcmc"]["num_event_time_updates"])
+    NUM_BURSTS = int(config["num_bursts"])
+    NUM_BURST_SAMPLES = int(config["num_burst_samples"])
     NUM_SAVED_SAMPLES = NUM_BURST_SAMPLES * NUM_BURSTS
 
     # RNG stuff
@@ -286,10 +272,7 @@ def run_mcmc(config):
     # Output file
     samples, results, _ = sample(1, current_state)
     posterior = Posterior(
-        os.path.join(
-            os.path.expandvars(config["output"]["results_dir"]),
-            config["output"]["posterior"],
-        ),
+        output_file,
         sample_dict={
             "beta2": (samples[0][:, 0], (NUM_BURST_SAMPLES,)),
             "gamma0": (samples[0][:, 1], (NUM_BURST_SAMPLES,)),
@@ -307,19 +290,21 @@ def run_mcmc(config):
         num_samples=NUM_SAVED_SAMPLES,
     )
     posterior._file.create_dataset("initial_state", data=initial_state)
-    posterior._file.create_dataset("config", data=yaml.dump(config))
-
+    posterior._file.create_dataset(
+        "date_range",
+        data=np.array(data["date_range"]).astype(h5py.string_dtype()),
+    )
     # We loop over successive calls to sample because we have to dump results
     #   to disc, or else end OOM (even on a 32GB system).
     # with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
     final_results = None
     for i in tqdm.tqdm(
-        range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES * config["mcmc"]["thin"]
+        range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES * config["thin"]
     ):
         samples, results, final_results = sample(
             NUM_BURST_SAMPLES,
             init_state=current_state,
-            thin=config["mcmc"]["thin"] - 1,
+            thin=config["thin"] - 1,
             previous_results=final_results,
         )
         current_state = [s[-1] for s in samples]
@@ -343,7 +328,8 @@ def run_mcmc(config):
         end = perf_counter()
 
         print("Storage time:", end - start, "seconds")
-        for k, v in results:
+        print("Results type: ", type(results))
+        for k, v in results.items():
             print(
                 f"Acceptance {k}:",
                 tf.reduce_mean(tf.cast(v["is_accepted"], tf.float32)),
@@ -371,10 +357,21 @@ def run_mcmc(config):
 
 if __name__ == "__main__":
 
-    # Read in settings
-    args = cli_args()
+    from argparse import ArgumentParser
+
+    parser = ArgumentParser(description="Run MCMC inference algorithm")
+    parser.add_argument(
+        "-c", "--config", type=str, help="Config file", required=True
+    )
+    parser.add_argument(
+        "-o", "--output", type=str, help="Output file", required=True
+    )
+    parser.add_argument(
+        "data_file", type=str, help="Data pickle file", required=True
+    )
+    args = parser.parse_args()
 
     with open(args.config, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
-    run_mcmc(config)
+    mcmc(args.data_file, args.output, config["Mcmc"])

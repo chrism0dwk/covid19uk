@@ -1,7 +1,6 @@
 """Implements the COVID SEIR model as a TFP Joint Distribution"""
 
 import pandas as pd
-import geopandas as gp
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -19,7 +18,7 @@ XI_FREQ = 14  # baseline transmission changes every 14 days
 NU = tf.constant(0.28, dtype=DTYPE)  # E->I rate assumed known.
 
 
-def read_covariates(config):
+def gather_data(config):
     """Loads covariate data
 
     :param paths: a dictionary of paths to data with keys {'mobility_matrix',
@@ -27,31 +26,36 @@ def read_covariates(config):
     :returns: a dictionary of covariate information to be consumed by the model
               {'C': commute_matrix, 'W': traffic_flow, 'N': population_size}
     """
-    paths = config["data"]
-    date_low = np.datetime64(config["Global"]["inference_period"][0])
-    date_high = np.datetime64(config["Global"]["inference_period"][1])
-    mobility = data.read_mobility(paths["mobility_matrix"])
-    popsize = data.read_population(paths["population_size"])
+
+    date_low = np.datetime64(config["date_range"][0])
+    date_high = np.datetime64(config["date_range"][1])
+    mobility = data.read_mobility(config["mobility_matrix"])
+    popsize = data.read_population(config["population_size"])
     commute_volume = data.read_traffic_flow(
-        paths["commute_volume"], date_low=date_low, date_high=date_high
+        config["commute_volume"], date_low=date_low, date_high=date_high
     )
 
-    geo = gp.read_file(paths["geopackage"])
-    geo = geo.loc[geo["lad19cd"].str.startswith("E")]
-    # tier_restriction = data.read_challen_tier_restriction(
-    #     paths["tier_restriction_csv"],
-    #     date_low,
-    #     date_high,
-    # )
+    locations = data.AreaCodeData.process(config)
     tier_restriction = data.TierData.process(config)[:, :, 2:]
+    date_range = [date_low, date_high]
     weekday = pd.date_range(date_low, date_high).weekday < 5
 
+    cases = data.read_phe_cases(
+        config["reported_cases"],
+        date_low,
+        date_high,
+        pillar=config["pillar"],
+        date_type=config["case_date_type"],
+    )
     return dict(
         C=mobility.to_numpy().astype(DTYPE),
         W=commute_volume.to_numpy().astype(DTYPE),
         N=popsize.to_numpy().astype(DTYPE),
         L=tier_restriction.astype(DTYPE),
         weekday=weekday.astype(DTYPE),
+        date_range=date_range,
+        locations=locations,
+        cases=cases,
     )
 
 
@@ -143,6 +147,15 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         gamma0 = tf.convert_to_tensor(gamma0, DTYPE)
         gamma1 = tf.convert_to_tensor(gamma1, DTYPE)
 
+        C = tf.convert_to_tensor(covariates["C"], dtype=DTYPE)
+        C = tf.linalg.set_diag(C, tf.zeros(C.shape[0], dtype=DTYPE))
+
+        Cstar = C + tf.transpose(C)
+        Cstar = tf.linalg.set_diag(Cstar, -tf.reduce_sum(C, axis=-2))
+
+        W = tf.convert_to_tensor(tf.squeeze(covariates["W"]), dtype=DTYPE)
+        N = tf.convert_to_tensor(tf.squeeze(covariates["N"]), dtype=DTYPE)
+
         L = tf.convert_to_tensor(covariates["L"], DTYPE)
         L = L - tf.reduce_mean(L, axis=(0, 1))
 
@@ -150,14 +163,6 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         weekday = weekday - tf.reduce_mean(weekday, axis=-1)
 
         def transition_rate_fn(t, state):
-            C = tf.convert_to_tensor(covariates["C"], dtype=DTYPE)
-            C = tf.linalg.set_diag(C, tf.zeros(C.shape[0], dtype=DTYPE))
-
-            Cstar = C + tf.transpose(C)
-            Cstar = tf.linalg.set_diag(Cstar, -tf.reduce_sum(C, axis=-2))
-
-            W = tf.constant(np.squeeze(covariates["W"]), dtype=DTYPE)
-            N = tf.constant(np.squeeze(covariates["N"]), dtype=DTYPE)
 
             w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
             commute_volume = tf.gather(W, w_idx)
@@ -166,7 +171,6 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
                 dtype=tf.int64,
             )
             xi_ = tf.gather(xi, xi_idx)
-
             L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
             Lt = tf.gather(L, L_idx)
             xB = tf.linalg.matvec(Lt, beta3)
