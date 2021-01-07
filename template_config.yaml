@@ -59,3 +59,7 @@ TierData:
   input: api
   address: None
   format: api
+
+
+NextGenerationMatrix:
+  output_file: next_generation_matrix.pkl
