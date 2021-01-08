@@ -26,7 +26,7 @@ tfb = tfp.bijectors
 DTYPE = model_spec.DTYPE
 
 
-def mcmc(data_file, output_file, config):
+def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     """Constructs and runs the MCMC"""
 
     if tf.test.gpu_device_name():
@@ -221,7 +221,7 @@ def mcmc(data_file, output_file, config):
         return results_dict
 
     # Build MCMC algorithm here.  This will be run in bursts for memory economy
-    @tf.function  # (autograph=False, experimental_compile=True)
+    @tf.function(autograph=use_autograph, experimental_compile=use_xla)
     def sample(n_samples, init_state, thin=0, previous_results=None):
         with tf.name_scope("main_mcmc_sample_loop"):
 
@@ -328,7 +328,6 @@ def mcmc(data_file, output_file, config):
         end = perf_counter()
 
         print("Storage time:", end - start, "seconds")
-        print("Results type: ", type(results))
         for k, v in results.items():
             print(
                 f"Acceptance {k}:",
