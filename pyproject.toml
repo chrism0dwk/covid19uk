@@ -21,6 +21,7 @@ tf-nightly = "2.5.0.dev20201027"
 gemlib = {git = "http://fhm-chicas-code.lancs.ac.uk/GEM/gemlib.git"}
 xarray = "^0.16.1"
 seaborn = "^0.11.0"
+ruffus = "^2.8.4"
 
 [tool.poetry.dev-dependencies]
 ipython = "^7.18.1"

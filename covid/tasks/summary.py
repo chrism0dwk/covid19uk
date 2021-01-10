@@ -170,7 +170,7 @@ if __name__ == "__main__":
     ]
 
     # Load covariate data
-    covar_data = model_spec.read_covariates(config)
+    covar_data = model_spec.gather_data(config)
 
     # Load posterior file
     posterior_path = os.path.join(
@@ -178,9 +178,7 @@ if __name__ == "__main__":
     )
     print("Using posterior:", posterior_path)
     posterior = h5py.File(
-        os.path.expandvars(
-            posterior_path,
-        ),
+        os.path.expandvars(posterior_path,),
         "r",
         rdcc_nbytes=1024 ** 3,
         rdcc_nslots=1e6,
@@ -191,12 +189,8 @@ if __name__ == "__main__":
     param = dict(
         beta1=posterior["samples/beta1"][idx],
         beta2=posterior["samples/beta2"][idx],
-        beta3=posterior["samples/beta3"][
-            idx,
-        ],
-        sigma=posterior["samples/sigma"][
-            idx,
-        ],
+        beta3=posterior["samples/beta3"][idx,],
+        sigma=posterior["samples/sigma"][idx,],
         xi=posterior["samples/xi"][idx],
         gamma0=posterior["samples/gamma0"][idx],
         gamma1=posterior["samples/gamma1"][idx],

@@ -1,31 +1,34 @@
 # Covid stochastic model configuration
 
-Global:
-  prependID: False
-  prependDate: False
-  inference_period:
-    - 2020-10-11
-    - 2021-01-04
-  time_step: 1.
-
-
-GenerateOutput:
-  storeInputs: False
-  scrapedDataDir: scraped_data
-  storeProcessedInputs: False
-
-
-data:
+ProcessData:
+  date_range:
+    - 2020-10-09
+    - 2021-01-01
   mobility_matrix: data/mergedflows.csv
   population_size: data/c2019modagepop.csv
   commute_volume: data/201231_OFF_SEN_COVID19_road_traffic_national_table.xlsx
-  reported_cases: data/Anonymised Combined Line List 20201231.csv
-  case_date_type: specimen
-  pillar: both
-  geopackage: data/UK2019mod_pop.gpkg
 
+  CasesData:
+    input: csv
+    address: data/Anonymised Combined Line List 20210104.csv
+    pillars:
+      - Pillar 1
+      - Pillar 2
+    measure: specimen
+    format: phe
+ 
+  AreaCodeData:
+    input: json
+    address:  "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/LAD_APR_2019_UK_NC/FeatureServer/0/query?where=1%3D1&outFields=LAD19CD,LAD19NM&returnGeometry=false&returnDistinctValues=true&orderByFields=LAD19CD&outSR=4326&f=json"
+    format: ons
+    regions: ["E"]
 
-mcmc:
+  TierData:
+    input: api
+    address: None # Rip from gov.uk
+    format: api
+
+Mcmc:
   dmax: 84
   nmax: 50
   m: 1
@@ -34,28 +37,12 @@ mcmc:
   num_bursts: 200
   num_burst_samples: 50
   thin: 20
-  prior:
-    gamma:
-      concentration: 2.0
-      rate: 4.0
 
+ThinPosterior:
+  start: 6000
+  end: 10000
+  by: 10
 
-output:
-  results_dir: output/testing
-  posterior: posterior.hd5
-  national_rt: national_rt.xlsx
-  geopackage: prediction.gpkg
-  posterior_predictive: posterior_predictive.pkl
-
-AreaCodeData:
-  input: json
-  address:  "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/LAD_APR_2019_UK_NC/FeatureServer/0/query?where=1%3D1&outFields=LAD19CD,LAD19NM&returnGeometry=false&returnDistinctValues=true&orderByFields=LAD19CD&outSR=4326&f=json"
-  format: ons
-  output: processed_data/processed_lad19cd.csv
-  regions: ["E"]
-
-
-TierData:
-  input: api
-  address: None
-  format: api
+Geopackage:
+  base_geopackage: data/UK2019mod_pop.gpkg
+  base_layer: UK2019mod_pop_xgen

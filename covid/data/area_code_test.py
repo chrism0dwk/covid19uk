@@ -14,12 +14,6 @@ def test_url():
             "output": "processed_data/processed_lad19cd.csv",
             "regions": ["E"],
         },
-        "GenerateOutput": {
-            "storeInputs": True,
-            "scrapedDataDir": "scraped_data",
-            "storeProcessedInputs": True,
-        },
-        "Global": {"prependID": False, "prependDate": False},
     }
 
     df = AreaCodeData.process(config)

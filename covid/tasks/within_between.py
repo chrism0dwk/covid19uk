@@ -1,16 +1,12 @@
 """Creates a medium term prediction"""
 
-import os
-import yaml
+import pickle as pkl
 import numpy as np
-import h5py
-import geopandas as gp
-
+import pandas as pd
 import tensorflow as tf
 
-from covid.cli_arg_parse import cli_args
 from gemlib.util import compute_state
-import model_spec
+from covid import model_spec
 
 
 def make_within_rate_fns(covariates, beta2):
@@ -59,58 +55,57 @@ def calc_pressure_components(covariates, beta2, state):
     return tf.vectorized_map(atomic_fn, elems=(beta2, state))
 
 
-args = cli_args()
+def within_between(input_files, output_file):
+    """Calculates PAF for within- and between-location infection.
 
-with open(args.config, "r") as f:
-    config = yaml.load(f, Loader=yaml.FullLoader)
+    :param input_files: a list of [data pickle, posterior samples pickle]
+    :param output_file: a csv with within/between summary
+    """
 
-    inference_period = [
-        np.datetime64(x) for x in config["Global"]["inference_period"]
-    ]
+    with open(input_files[0], "rb") as f:
+        covar_data = pkl.load(f)
 
-# Load covariate data
-covar_data = model_spec.read_covariates(config)
+    with open(input_files[1], "rb") as f:
+        samples = pkl.load(f)
 
-# Load posterior file
-posterior = h5py.File(
-    os.path.expandvars(
-        os.path.join(
-            config["output"]["results_dir"], config["output"]["posterior"]
-        )
-    ),
-    "r",
-    rdcc_nbytes=1024 ** 3,
-    rdcc_nslots=1e6,
-)
-
-# Pre-determined thinning of posterior (better done in MCMC?)
-idx = range(6000, 10000, 10)
-beta2 = posterior["samples/beta2"][idx]
-events = posterior["samples/events"][idx]
-init_state = posterior["initial_state"][:]
-state_timeseries = compute_state(init_state, events, model_spec.STOICHIOMETRY)
-
-within, between = calc_pressure_components(
-    covar_data, beta2, state_timeseries[..., -1, :]
-)
-
-gpkg = gp.read_file(
-    os.path.join(
-        config["output"]["results_dir"], config["output"]["geopackage"]
+    beta2 = samples["beta2"]
+    events = samples["seir"]
+    init_state = samples["init_state"]
+    state_timeseries = compute_state(
+        init_state, events, model_spec.STOICHIOMETRY
     )
-)
-gpkg = gpkg[gpkg["lad19cd"].str.startswith("E")]
-gpkg = gpkg.sort_values("lad19cd")
 
-print("Within shape:", within.shape)
+    within, between = calc_pressure_components(
+        covar_data, beta2, state_timeseries[..., -1, :]
+    )
 
-gpkg["within_mean"] = np.mean(within, axis=0)
-gpkg["between_mean"] = np.mean(between, axis=0)
-gpkg["p_within_gt_between"] = np.mean(within > between)
+    df = pd.DataFrame(
+        dict(
+            within_mean=np.mean(within, axis=0),
+            between_mean=np.mean(between, axis=0),
+            p_within_gt_between=np.mean(within > between),
+        ),
+        index=pd.Index(covar_data["locations"]["lad19cd"], name="location"),
+    )
+    df.to_csv(output_file)
 
-gpkg.to_file(
-    os.path.join(
-        config["output"]["results_dir"], config["output"]["geopackage"]
-    ),
-    driver="GPKG",
-)
+
+if __name__ == "__main__":
+
+    from argparse import ArgumentParser
+
+    parser = ArgumentParser()
+    parser.add_argument(
+        "-d", "--datafile", type=str, help="Data pickle file", requied=True
+    )
+    parser.add_argument(
+        "-s",
+        "--samples",
+        type=str,
+        help="Posterior samples pickle",
+        required=True,
+    )
+    parser.add_argument("-o", "--output", type=str, help="Output csv")
+    args = parser.parse_args()
+
+    within_between([args.datafile, args.samples], args.output)

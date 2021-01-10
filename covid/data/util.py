@@ -55,16 +55,8 @@ def merge_lad_values(df):
 
 
 def get_date_low_high(config):
-    if "dates" in config:
-        low = config["dates"]["low"]
-        high = config["dates"]["high"]
-    else:
-        inference_period = [
-            np.datetime64(x) for x in config["Global"]["inference_period"]
-        ]
-        low = inference_period[0]
-        high = inference_period[1]
-    return (low, high)
+    date_range = [np.datetime64(x) for x in config["date_range"]]
+    return tuple(date_range)
 
 
 def check_date_format(df):
