@@ -2,6 +2,7 @@
 
 import os
 import yaml
+import pandas as pd
 import ruffus as rf
 
 
@@ -59,8 +60,9 @@ def run_pipeline(global_config, results_directory, cli_options):
         input=run_mcmc,
         filter=rf.formatter(),
         output=wd("thin_samples.pkl"),
+        extras=[global_config],
     )
-    def thin_samples(input_file, output_file):
+    def thin_samples(input_file, output_file, config):
         thin_posterior(input_file, output_file, config["ThinPosterior"])
 
     # Rt related steps
