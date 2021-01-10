@@ -10,6 +10,7 @@ import covid.tasks.summarize as summarize
 from covid.tasks.within_between import within_between
 from covid.tasks.case_exceedance import case_exceedance
 from covid.tasks.summary_geopackage import summary_geopackage
+from covid.tasks.insample_predictive_timeseries import insample_predictive_timeseries
 
 __all__ = [
     "assemble_data",
@@ -22,4 +23,5 @@ __all__ = [
     "within_between",
     "case_exceedance",
     "summary_geopackage",
+    "insample_predictive_timeseries",
 ]

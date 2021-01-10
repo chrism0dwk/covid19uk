@@ -16,7 +16,7 @@ from covid.tasks import (
     within_between,
     case_exceedance,
     summary_geopackage,
-    # lancs_spreadsheet,
+    insample_predictive_timeseries,
 )
 
 
@@ -179,12 +179,17 @@ if __name__ == "__main__":
         )
         df.to_csv(output_file)
 
-    # @rf.transform(
-    #     input=[[process_data, insample7, insample14, medium_term]],
-    #     filter=rf.formatter(),
-    #     output=work_dir("total_predictive_timeseries.pdf")
-    # )(total_predictive_timeseries)
-
+    # Plot in-sample
+    @rf.transform(
+        input=[insample7, insample14],
+        filter=rf.formatter(".+/insample(?P<LAG>\d+).pkl"),
+        add_inputs=rf.add_inputs(process_data),
+        output="{path[0]}/insample_plots{LAG[0]}",
+        extras=["{LAG[0]}"],
+    )
+    def plot_insample_predictive_timeseries(input_files, output_dir, lag):
+        insample_predictive_timeseries(input_files, output_dir, lag)
+    
     # Geopackage
     rf.transform(
         [
