@@ -81,7 +81,7 @@ if __name__ == "__main__":
         output=work_dir("thin_samples.pkl"),
     )
     def thin_samples(input_file, output_file):
-        thin_posterior(input_file, output_file, range(100))
+        thin_posterior(input_file, output_file, config["ThinPosterior"])
 
     # Rt related steps
     rf.transform(
@@ -174,7 +174,8 @@ if __name__ == "__main__":
         exceed7 = case_exceedance((input_files[0], input_files[1]), 7)
         exceed14 = case_exceedance((input_files[0], input_files[2]), 14)
         df = pd.DataFrame(
-            {"Pr(pred<obs)_7": exceed7, "Pr(pred<obs)_14": exceed14}
+            {"Pr(pred<obs)_7": exceed7, "Pr(pred<obs)_14": exceed14},
+            index=exceed7.coords["location"],
         )
         df.to_csv(output_file)
 

@@ -2,15 +2,24 @@
 
 ProcessData:
   date_range:
-    - 2020-10-11
-    - 2021-01-04
+    - 2020-10-09
+    - 2021-01-01
   mobility_matrix: data/mergedflows.csv
   population_size: data/c2019modagepop.csv
   commute_volume: data/201231_OFF_SEN_COVID19_road_traffic_national_table.xlsx
-  reported_cases: data/Anonymised Combined Line List 20201231.csv
+  reported_cases: data/Anonymised Combined Line List 20210104.csv
   case_date_type: specimen
   pillar: both
 
+  CasesData:
+    input: csv
+    address: data/Anonymised Combined Line List 20210104.csv
+    pillars:
+      - Pillar 1
+      - Pillar 2
+    measure: specimen
+    format: phe
+ 
   AreaCodeData:
     input: json
     address:  "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/LAD_APR_2019_UK_NC/FeatureServer/0/query?where=1%3D1&outFields=LAD19CD,LAD19NM&returnGeometry=false&returnDistinctValues=true&orderByFields=LAD19CD&outSR=4326&f=json"
@@ -28,12 +37,15 @@ Mcmc:
   m: 1
   occult_nmax: 15
   num_event_time_updates: 35
-  num_bursts: 1
-  num_burst_samples: 100
-  thin: 1
+  num_bursts: 200
+  num_burst_samples: 50
+  thin: 20
+
+ThinPosterior:
+  start: 6000
+  end: 10000
+  by: 10
 
 Geopackage:
   base_geopackage: data/UK2019mod_pop.gpkg
-
-NextGenerationMatrix:
-  output_file: next_generation_matrix.pkl
+  base_layer: UK2019mod_pop_xgen

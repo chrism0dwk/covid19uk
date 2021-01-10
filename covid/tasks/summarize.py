@@ -22,10 +22,12 @@ def rt(input_file, output_file):
 
     rt = np.sum(ngm, axis=-2)
     rt_summary = mean_and_ci(rt, name="Rt")
-
+    exceed = np.mean(rt > 1.0, axis=0)
+    
     rt_summary = pd.DataFrame(
         rt_summary, index=pd.Index(ngm.coords["dest"], name="location")
     )
+    rt_summary['Rt_exceed'] = exceed
     rt_summary.to_csv(output_file)
 
 
@@ -55,7 +57,7 @@ def infec_incidence(input_file, output_file):
     )
     for t in timepoints[1:]:
         tmp = pd.DataFrame(
-            pred_events(prediction[..., offset:t, 2], name=f"cases{t}"),
+            pred_events(prediction[..., offset:t, 2], name=f"cases{t-offset}"),
             index=idx,
         )
         abs_incidence = pd.concat([abs_incidence, tmp], axis="columns")

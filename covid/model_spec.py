@@ -40,13 +40,14 @@ def gather_data(config):
     date_range = [date_low, date_high]
     weekday = pd.date_range(date_low, date_high).weekday < 5
 
-    cases = data.read_phe_cases(
-        config["reported_cases"],
-        date_low,
-        date_high,
-        pillar=config["pillar"],
-        date_type=config["case_date_type"],
-    )
+    cases = data.CasesData.process(config).to_xarray()
+    # cases = data.read_phe_cases(
+    #     config['reported_cases'],
+    #     date_low,
+    #     date_high,
+    #     pillar=config['pillar'],
+    #     date_type=config['case_date_type'],
+    # )
     return dict(
         C=mobility.to_numpy().astype(DTYPE),
         W=commute_volume.to_numpy().astype(DTYPE),

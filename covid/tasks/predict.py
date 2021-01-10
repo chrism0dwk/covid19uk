@@ -9,7 +9,6 @@ from covid import model_spec
 from gemlib.util import compute_state
 
 
-@tf.function
 def predicted_incidence(posterior_samples, covar_data, init_step, num_steps):
     """Runs the simulation forward in time from `init_state` at time `init_time`
        for `num_steps`.
@@ -21,6 +20,7 @@ def predicted_incidence(posterior_samples, covar_data, init_step, num_steps):
               transitions
     """
 
+    @tf.function
     def sim_fn(args):
         beta1_, beta2_, beta3_, sigma_, xi_, gamma0_, gamma1_, init_ = args
 

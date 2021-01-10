@@ -1,7 +1,6 @@
 """MCMC Test Rig for COVID-19 UK model"""
 # pylint: disable=E402
 
-import os
 import h5py
 import pickle as pkl
 from time import perf_counter
@@ -40,6 +39,7 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     # We load in cases and impute missing infections first, since this sets the
     # time epoch which we are analysing.
     # Impute censored events, return cases
+    print("Data shape:", data['cases'].shape)
     events = model_spec.impute_censored_events(data["cases"].astype(DTYPE))
 
     # Initial conditions are calculated by calculating the state
@@ -85,14 +85,6 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
         )
 
     # Build Metropolis within Gibbs sampler
-    #
-    # Kernels are:
-    #     Q(\theta, \theta^\prime)
-    #     Q(\xi, \xi^\prime)
-    #     Q(Z^{se}, Z^{se\prime}) (partially-censored)
-    #     Q(Z^{ei}, Z^{ei\prime}) (partially-censored)
-    #     Q(Z^{se}, Z^{se\prime}) (occult)
-    #     Q(Z^{ei}, Z^{ei\prime}) (occult)
     def make_blk0_kernel(shape, name):
         def fn(target_log_prob_fn, _):
             return tfp.mcmc.TransformedTransitionKernel(

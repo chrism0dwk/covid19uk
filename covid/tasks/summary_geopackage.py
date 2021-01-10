@@ -30,7 +30,7 @@ def summary_geopackage(input_files, output_file, config):
         data = pkl.load(f)
 
     # Load and filter geopackage
-    geo = gp.read_file(config["base_geopackage"])
+    geo = gp.read_file(config["base_geopackage"], layer=config["base_layer"])
     geo = geo[geo["lad19cd"].isin(data["locations"]["lad19cd"])]
     geo = geo.sort_values(by="lad19cd")
 
