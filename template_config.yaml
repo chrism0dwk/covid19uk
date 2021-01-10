@@ -7,9 +7,6 @@ ProcessData:
   mobility_matrix: data/mergedflows.csv
   population_size: data/c2019modagepop.csv
   commute_volume: data/201231_OFF_SEN_COVID19_road_traffic_national_table.xlsx
-  reported_cases: data/Anonymised Combined Line List 20210104.csv
-  case_date_type: specimen
-  pillar: both
 
   CasesData:
     input: csv

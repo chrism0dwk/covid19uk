@@ -1,9 +1,9 @@
-"""A Ruffus-ised pipeline for COVID-19 analysis"""
+"""Represents the analytic pipeline as a ruffus chain"""
 
 import os
 import yaml
-import pandas as pd
 import ruffus as rf
+
 
 from covid.tasks import (
     assemble_data,
@@ -19,40 +19,20 @@ from covid.tasks import (
     insample_predictive_timeseries,
 )
 
-
-def import_global_config(config_file):
-
-    with open(config_file, "r") as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
-
-    return config
+__all__ = ["run_pipeline"]
 
 
-def join_and_expand(path1, path2):
-    return os.path.expand(os.path.join(path1, path2))
+def _make_append_work_dir(work_dir):
+    return lambda filename: os.path.expandvars(os.path.join(work_dir, filename))
 
 
-if __name__ == "__main__":
+def run_pipeline(global_config, results_directory, cli_options):
 
-    argparser = rf.cmdline.get_argparse(description="COVID-19 pipeline")
-    argparser.add_argument(
-        "-c", "--config", type=str, help="global configuration file"
-    )
-    argparser.add_argument(
-        "-r", "--results-directory", type=str, help="pipeline results directory"
-    )
-    cli_options = argparser.parse_args()
-    global_config = import_global_config(cli_options.config)
-
-    # Output paths
-    BASEDIR = os.path.expandvars(cli_options.results_directory)
-
-    def work_dir(fn):
-        return os.path.join(BASEDIR, fn)
+    wd = _make_append_work_dir(results_directory)
 
     # Pipeline starts here
-    @rf.mkdir(BASEDIR)
-    @rf.originate(work_dir("config.yaml"), global_config)
+    @rf.mkdir(results_directory)
+    @rf.originate(wd("config.yaml"), global_config)
     def save_config(output_file, config):
         with open(output_file, "w") as f:
             yaml.dump(config, f)
@@ -60,7 +40,7 @@ if __name__ == "__main__":
     @rf.transform(
         save_config,
         rf.formatter(),
-        work_dir("pipeline_data.pkl"),
+        wd("pipeline_data.pkl"),
         global_config,
     )
     def process_data(input_file, output_file, config):
@@ -69,7 +49,7 @@ if __name__ == "__main__":
     @rf.transform(
         process_data,
         rf.formatter(),
-        work_dir("posterior.hd5"),
+        wd("posterior.hd5"),
         global_config,
     )
     def run_mcmc(input_file, output_file, config):
@@ -78,7 +58,7 @@ if __name__ == "__main__":
     @rf.transform(
         input=run_mcmc,
         filter=rf.formatter(),
-        output=work_dir("thin_samples.pkl"),
+        output=wd("thin_samples.pkl"),
     )
     def thin_samples(input_file, output_file):
         thin_posterior(input_file, output_file, config["ThinPosterior"])
@@ -87,20 +67,20 @@ if __name__ == "__main__":
     rf.transform(
         input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=work_dir("ngm.pkl"),
+        output=wd("ngm.pkl"),
     )(next_generation_matrix)
 
     rf.transform(
         input=next_generation_matrix,
         filter=rf.formatter(),
-        output=work_dir("national_rt.xlsx"),
+        output=wd("national_rt.xlsx"),
     )(overall_rt)
 
     # In-sample prediction
     @rf.transform(
         input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=work_dir("insample7.pkl"),
+        output=wd("insample7.pkl"),
     )
     def insample7(input_files, output_file):
         predict(
@@ -114,7 +94,7 @@ if __name__ == "__main__":
     @rf.transform(
         input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=work_dir("insample14.pkl"),
+        output=wd("insample14.pkl"),
     )
     def insample14(input_files, output_file):
         return predict(
@@ -129,7 +109,7 @@ if __name__ == "__main__":
     @rf.transform(
         input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=work_dir("medium_term.pkl"),
+        output=wd("medium_term.pkl"),
     )
     def medium_term(input_files, output_file):
         return predict(
@@ -144,31 +124,31 @@ if __name__ == "__main__":
     rf.transform(
         input=next_generation_matrix,
         filter=rf.formatter(),
-        output=work_dir("rt_summary.csv"),
+        output=wd("rt_summary.csv"),
     )(summarize.rt)
 
     rf.transform(
         input=medium_term,
         filter=rf.formatter(),
-        output=work_dir("infec_incidence_summary.csv"),
+        output=wd("infec_incidence_summary.csv"),
     )(summarize.infec_incidence)
 
     rf.transform(
         input=[[process_data, thin_samples, medium_term]],
         filter=rf.formatter(),
-        output=work_dir("prevalence_summary.csv"),
+        output=wd("prevalence_summary.csv"),
     )(summarize.prevalence)
 
     rf.transform(
         input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=work_dir("within_between_summary.csv"),
+        output=wd("within_between_summary.csv"),
     )(within_between)
 
     @rf.transform(
         input=[[process_data, insample7, insample14]],
         filter=rf.formatter(),
-        output=work_dir("exceedance_summary.csv"),
+        output=wd("exceedance_summary.csv"),
     )
     def exceedance(input_files, output_file):
         exceed7 = case_exceedance((input_files[0], input_files[1]), 7)
@@ -189,7 +169,7 @@ if __name__ == "__main__":
     )
     def plot_insample_predictive_timeseries(input_files, output_dir, lag):
         insample_predictive_timeseries(input_files, output_dir, lag)
-    
+
     # Geopackage
     rf.transform(
         [
@@ -203,7 +183,7 @@ if __name__ == "__main__":
             ]
         ],
         rf.formatter(),
-        work_dir("prediction.gpkg"),
+        wd("prediction.gpkg"),
         global_config["Geopackage"],
     )(summary_geopackage)
 
