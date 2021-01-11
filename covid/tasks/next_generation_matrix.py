@@ -1,7 +1,7 @@
 """Calculates and saves a next generation matrix"""
 
-import numpy as np
 import pickle as pkl
+import numpy as np
 import xarray
 import tensorflow as tf
 

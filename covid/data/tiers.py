@@ -69,38 +69,39 @@ class TierData:
         """
         tiers["date"] = pd.to_datetime(tiers["date"], format="%Y-%m-%d")
         tiers["lad19cd"] = merge_lad_codes(tiers["areaCode"])
-        tiers["alert_level"] = tiers["alertLevel"]
+        tiers["alert_level"] = tiers["alertLevel"].astype(int)
         tiers = tiers[["date", "lad19cd", "alert_level"]]
 
         if len(lads) > 0:
             tiers = tiers[tiers["lad19cd"].isin(lads)]
+        tiers = tiers.drop_duplicates()
 
+        tiers_wide = tiers.pivot(
+            index="date", columns="lad19cd", values="alert_level"
+        )
+        tiers_wide = tiers_wide.sort_index()
+
+        # Fill in time gaps
         date_range = pd.date_range(date_low, date_high - np.timedelta64(1, "D"))
+        tiers_wide = tiers_wide.reindex(
+            pd.Index(date_range, name="date"), method="ffill"
+        )
+        tiers_wide = tiers_wide.backfill()
 
-        def interpolate(df):
-            df.index = pd.Index(pd.to_datetime(df["date"]), name="date")
-            df = df.drop(columns="date").sort_index()
-            df = df.reindex(date_range)
-            df["alert_level"] = (
-                df["alert_level"].ffill().backfill().astype("int")
-            )
-            return df[["alert_level"]]
-
-        tiers = tiers.groupby(["lad19cd"]).apply(interpolate)
+        tiers = tiers_wide.melt(
+            value_name="alert_level", var_name="lad19cd", ignore_index=False
+        )
         tiers = tiers.reset_index()
-        tiers.columns = ["lad19cd", "date", "alert_level"]
+        tiers["alert_level"] = tiers["alert_level"].astype(np.int32)
 
+        # Convert to xarray to create table of factors
         index = pd.MultiIndex.from_frame(tiers)
         index = index.sort_values()
-        index = index[~index.duplicated()]
-        ser = pd.Series(1, index=index, name="value")
-        ser = ser.loc[
-            pd.IndexSlice[:, date_low : (date_high - np.timedelta64(1, "D")), :]
-        ]
+        ser = pd.Series(1, index=index, name="value").astype(int)
         xarr = ser.to_xarray()
-        xarr.data[np.isnan(xarr.data)] = 0.0
-        # return [T, M, V] structure
-        return xarr.transpose("date", "lad19cd", "alert_level")
+        xarr = xarr.fillna(0.0)
+        # return [date, location, alert_level] structure
+        return xarr
 
     def adapt_xarray(tiers, date_low, date_high, lads, settings):
         """

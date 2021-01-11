@@ -36,18 +36,13 @@ def gather_data(config):
     )
 
     locations = data.AreaCodeData.process(config)
-    tier_restriction = data.TierData.process(config)[:, :, 2:]
+    tier_restriction = data.TierData.process(config)[:, :, [0, 2, 3, 4, 5]]
     date_range = [date_low, date_high]
-    weekday = pd.date_range(date_low, date_high).weekday < 5
+    weekday = (
+        pd.date_range(date_low, date_high - np.timedelta64(1, "D")).weekday < 5
+    )
 
     cases = data.CasesData.process(config).to_xarray()
-    # cases = data.read_phe_cases(
-    #     config['reported_cases'],
-    #     date_low,
-    #     date_high,
-    #     pillar=config['pillar'],
-    #     date_type=config['case_date_type'],
-    # )
     return dict(
         C=mobility.to_numpy().astype(DTYPE),
         W=commute_volume.to_numpy().astype(DTYPE),
@@ -107,8 +102,10 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
     def beta3():
         return tfd.Independent(
             tfd.Normal(
-                loc=tf.constant([0.0] * 4, dtype=DTYPE),
-                scale=tf.constant([1.0] * 4, dtype=DTYPE),
+                loc=tf.constant([0.0] * covariates["L"].shape[-1], dtype=DTYPE),
+                scale=tf.constant(
+                    [1.0] * covariates["L"].shape[-1], dtype=DTYPE
+                ),
             ),
             reinterpreted_batch_ndims=1,
         )

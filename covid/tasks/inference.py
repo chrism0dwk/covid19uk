@@ -101,7 +101,7 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
                         tfp.bijectors.Exp(),
                         tfp.bijectors.Identity(),
                     ],
-                    block_sizes=[1, 2, 1, 4],
+                    block_sizes=[1, 2, 1, 5],
                 ),
                 name=name,
             )
@@ -252,7 +252,7 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.6, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
+        np.array([0.6, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
         np.zeros(
             model.model["xi"](0.0, 0.1).event_shape[-1] + 1,
             dtype=DTYPE,
