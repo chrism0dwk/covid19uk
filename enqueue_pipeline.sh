@@ -17,8 +17,8 @@ for PILLAR in both 1 2
 do
     for CASE_DATE_TYPE in specimen
     do
-	RESULTS_DIR=$global_scratch/covid19/${DATE_HIGH}_${PILLAR}_${CASE_DATE_TYPE}_nl
-	JOB_NAME="covid_${DATE_HIGH}_${PILLAR}_${CASE_DATE_TYPE}"	
+	RESULTS_DIR=$global_scratch/covid19/${DATE_HIGH}_${PILLAR}_${CASE_DATE_TYPE}_notier
+	JOB_NAME="covid_${DATE_HIGH}_${PILLAR}_${CASE_DATE_TYPE}_notier"	
 	qsub -N $JOB_NAME covid_pipeline.sge \
 	     --reported-cases "$CASES_FILE" \
 	     --commute-volume "$COMMUTE_VOL_FILE" \
