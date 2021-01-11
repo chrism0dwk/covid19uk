@@ -21,40 +21,44 @@ if __name__ == "__main__":
     # Ruffus wrapper around argparse used to give us ruffus
     # cmd line switches as well as our own config
     argparser = rf.cmdline.get_argparse(description="COVID-19 pipeline")
-    argparser.add_argument(
+    data_args = argparser.add_argument_group(
+        "Data options", "Options controlling input data"
+    )
+
+    data_args.add_argument(
         "-c",
         "--config",
         type=str,
         help="global configuration file",
         required=True,
     )
-    argparser.add_argument(
+    data_args.add_argument(
         "-r",
         "--results-directory",
         type=str,
         help="pipeline results directory",
         required=True,
     )
-    argparser.add_argument(
+    data_args.add_argument(
         "--date-range",
-        type=lambda s: datetime.datetime.strptime(s, '%Y-%m-%d'),
+        type=lambda s: datetime.datetime.strptime(s, "%Y-%m-%d"),
         nargs=2,
         help="Date range [low high)",
         metavar="ISO6801",
     )
-    argparser.add_argument(
+    data_args.add_argument(
         "--reported-cases", type=str, help="Path to case file"
     )
-    argparser.add_argument(
+    data_args.add_argument(
         "--commute-volume", type=str, help="Path to commute volume file"
     )
-    argparser.add_argument(
+    data_args.add_argument(
         "--case-date-type",
         type=str,
         help="Case date type (specimen | report)",
         choices=["specimen", "report"],
     )
-    argparser.add_argument(
+    data_args.add_argument(
         "--pillar", type=str, help="Pillar", choices=["both", "1", "2"]
     )
 
