@@ -77,7 +77,6 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
                 gamma0=block0[1],
                 gamma1=block0[2],
                 sigma=block0[3],
-                beta3=tf.zeros([5], dtype=DTYPE), #  block0[4:],
                 beta1=block1[0],
                 xi=block1[1:],
                 seir=events,

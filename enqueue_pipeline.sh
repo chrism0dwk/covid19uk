@@ -2,18 +2,18 @@
 
 # Enqueues COVID-19 pipelines
 
-CASES_FILE="data/Anonymised Combined Line List 20210108.csv"
-COMMUTE_VOL_FILE="data/210108_OFF_SEN_COVID19_road_traffic_national_table.xlsx"
-DATE_LOW="2020-10-13"
-DATE_HIGH="2021-01-05"
+CASES_FILE="data/Anonymised Combined Line List 20210125.csv"
+COMMUTE_VOL_FILE="data/210122_OFF_SEN_COVID19_road_traffic_national_table.xlsx"
+DATE_LOW="2020-10-30"
+DATE_HIGH="2021-01-22"
 
 TEMPLATE_CONFIG=template_config.yaml
-
+JSV_SCRIPT=/usr/shared_apps/packages/sge-8.1.9-gpu/default/common/sge_request.jsv.2.0b
 
 # Job submisison
 switch-gpu
 
-for PILLAR in both 1 2
+for PILLAR in both 1
 do
     for CASE_DATE_TYPE in specimen
     do

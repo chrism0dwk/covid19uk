@@ -36,7 +36,7 @@ def gather_data(config):
     )
 
     locations = data.AreaCodeData.process(config)
-    tier_restriction = data.TierData.process(config)[:, :, [0, 2, 3, 4, 5]]
+    tier_restriction = data.TierData.process(config)[:, :, [0, 2, 3, 4]]
     date_range = [date_low, date_high]
     weekday = (
         pd.date_range(date_low, date_high - np.timedelta64(1, "D")).weekday < 5
@@ -99,17 +99,6 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             rate=tf.constant(10.0, dtype=DTYPE),
         )
 
-    def beta3():
-        return tfd.Independent(
-            tfd.Normal(
-                loc=tf.constant([0.0] * covariates["L"].shape[-1], dtype=DTYPE),
-                scale=tf.constant(
-                    [1.0] * covariates["L"].shape[-1], dtype=DTYPE
-                ),
-            ),
-            reinterpreted_batch_ndims=1,
-        )
-
     def sigma():
         return tfd.Gamma(
             concentration=tf.constant(2.0, dtype=DTYPE),
@@ -138,9 +127,8 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             scale=tf.constant(100.0, dtype=DTYPE),
         )
 
-    def seir(beta2, beta3, xi, gamma0, gamma1):
+    def seir(beta2, xi, gamma0, gamma1):
         beta2 = tf.convert_to_tensor(beta2, DTYPE)
-        beta3 = tf.convert_to_tensor(beta3, DTYPE)
         xi = tf.convert_to_tensor(xi, DTYPE)
         gamma0 = tf.convert_to_tensor(gamma0, DTYPE)
         gamma1 = tf.convert_to_tensor(gamma1, DTYPE)
@@ -154,9 +142,6 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         W = tf.convert_to_tensor(tf.squeeze(covariates["W"]), dtype=DTYPE)
         N = tf.convert_to_tensor(tf.squeeze(covariates["N"]), dtype=DTYPE)
 
-        L = tf.convert_to_tensor(covariates["L"], DTYPE)
-        L = L - tf.reduce_mean(L, axis=(0, 1))
-
         weekday = tf.convert_to_tensor(covariates["weekday"], DTYPE)
         weekday = weekday - tf.reduce_mean(weekday, axis=-1)
 
@@ -169,16 +154,13 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
                 dtype=tf.int64,
             )
             xi_ = tf.gather(xi, xi_idx)
-            L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
-            Lt = tf.gather(L, L_idx)
-            xB = tf.linalg.matvec(Lt, beta3)
 
             weekday_idx = tf.clip_by_value(
                 tf.cast(t, tf.int64), 0, weekday.shape[0] - 1
             )
             weekday_t = tf.gather(weekday, weekday_idx)
 
-            infec_rate = tf.math.exp(xi_ + xB) * (
+            infec_rate = tf.math.exp(xi_) * (
                 state[..., 2]
                 + beta2
                 * commute_volume
@@ -211,7 +193,6 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         dict(
             beta1=beta1,
             beta2=beta2,
-            beta3=beta3,
             sigma=sigma,
             xi=xi,
             gamma0=gamma0,
