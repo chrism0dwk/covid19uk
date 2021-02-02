@@ -80,7 +80,7 @@ def summary_longformat(input_files, output_file):
 
     # Medium term prevalence
     prev_df = prevalence(medium_term, data["N"])
-    prev_df["value_name"] = "Prevalence"
+    prev_df["value_name"] = "prevalence"
     df = pd.concat([df, prev_df], axis="index")
 
     # Rt
@@ -96,6 +96,7 @@ def summary_longformat(input_files, output_file):
     return make_dstl_template(
         group="Lancaster",
         model="SpatialStochasticSEIR",
+        scenario="Nowcast",
         creation_date=date.today(),
         version=model_spec.VERSION,
         age_band="All",
@@ -107,4 +108,4 @@ def summary_longformat(input_files, output_file):
             "0.5": df["0.5"],
             "0.95": df["0.95"],
         },
-    ).to_excel(output_file)
+    ).to_excel(output_file, index=False)

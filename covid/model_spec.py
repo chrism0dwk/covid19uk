@@ -10,6 +10,8 @@ from covid.util import impute_previous_cases
 import covid.data as data
 
 tfd = tfp.distributions
+
+VERSION = 0.3
 DTYPE = np.float64
 
 STOICHIOMETRY = np.array([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])

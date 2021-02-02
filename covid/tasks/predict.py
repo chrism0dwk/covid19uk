@@ -61,7 +61,7 @@ def predicted_incidence(posterior_samples, covar_data, init_step, num_steps):
         ),
         fn_output_signature=(tf.float64),
     )
-    return events
+    return init_state, events
 
 
 def read_pkl(filename):
@@ -77,22 +77,27 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
     if initial_step < 0:
         initial_step = samples["seir"].shape[-2] + initial_step
 
+    dates = np.arange(covar_data["date_range"][0] + np.timedelta64(initial_step, "D"),
+                      covar_data["date_range"][0] + np.timedelta64(initial_step + num_steps, "D"),
+                      np.timedelta64(1, "D"))
     del covar_data["date_range"]
 
-    prediction = predicted_incidence(
+    estimated_init_state, predicted_events = predicted_incidence(
         samples, covar_data, initial_step, num_steps
     )
 
     prediction = xarray.DataArray(
-        prediction,
+        predicted_events,
         coords=[
-            np.arange(prediction.shape[0]),
+            np.arange(predicted_events.shape[0]),
             covar_data["locations"]["lad19cd"],
-            np.arange(prediction.shape[2]),
-            np.arange(prediction.shape[3]),
+            dates,
+            np.arange(predicted_events.shape[3]),
         ],
         dims=("iteration", "location", "time", "event"),
     )
+    prediction.attrs["initial_state"] = estimated_init_state
+
     with open(output_file, "wb") as f:
         pkl.dump(prediction, f)
 
