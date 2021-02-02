@@ -9,19 +9,19 @@ ProcessData:
   commute_volume: data/201231_OFF_SEN_COVID19_road_traffic_national_table.xlsx
 
   CasesData:
-    input: csv
-    address: data/Anonymised Combined Line List 20210104.csv
+    input: url
+    address: https://api.coronavirus.data.gov.uk/v2/data?areaType=ltla&metric=newCasesBySpecimenDate&format=json
     pillars:
       - Pillar 1
       - Pillar 2
     measure: specimen
-    format: phe
+    format: json
  
   AreaCodeData:
     input: json
     address:  "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/LAD_APR_2019_UK_NC/FeatureServer/0/query?where=1%3D1&outFields=LAD19CD,LAD19NM&returnGeometry=false&returnDistinctValues=true&orderByFields=LAD19CD&outSR=4326&f=json"
     format: ons
-    regions: ["E"]
+    regions: ["S"]
 
   TierData:
     input: api

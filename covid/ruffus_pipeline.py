@@ -18,6 +18,7 @@ from covid.tasks import (
     case_exceedance,
     summary_geopackage,
     insample_predictive_timeseries,
+    summary_longformat,
 )
 
 __all__ = ["run_pipeline"]
@@ -188,5 +189,14 @@ def run_pipeline(global_config, results_directory, cli_options):
         wd("prediction.gpkg"),
         global_config["Geopackage"],
     )(summary_geopackage)
+
+    rf.cmdline.run(cli_options)
+
+    # DSTL Summary
+    rf.transform(
+        [[process_data, insample14, medium_term, next_generation_matrix]],
+        rf.formatter(),
+        wd("summary_longformat.xlsx"),
+    )(summary_longformat)
 
     rf.cmdline.run(cli_options)

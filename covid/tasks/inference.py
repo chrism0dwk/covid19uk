@@ -39,7 +39,7 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     # We load in cases and impute missing infections first, since this sets the
     # time epoch which we are analysing.
     # Impute censored events, return cases
-    print("Data shape:", data['cases'].shape)
+    print("Data shape:", data["cases"].shape)
     events = model_spec.impute_censored_events(data["cases"].astype(DTYPE))
 
     # Initial conditions are calculated by calculating the state
@@ -98,9 +98,9 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
                         tfp.bijectors.Exp(),
                         tfp.bijectors.Identity(),
                         tfp.bijectors.Exp(),
-                        #tfp.bijectors.Identity(),
+                        # tfp.bijectors.Identity(),
                     ],
-                    block_sizes=[1, 2, 1], #, 5],
+                    block_sizes=[1, 2, 1],  # , 5],
                 ),
                 name=name,
             )
@@ -251,7 +251,9 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     tf.random.set_seed(2)
 
     current_state = [
-        np.array([0.6, 0.0, 0.0, 0.1], dtype=DTYPE), #, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
+        np.array(
+            [0.6, 0.0, 0.0, 0.1], dtype=DTYPE
+        ),  # , 0.0, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
         np.zeros(
             model.model["xi"](0.0, 0.1).event_shape[-1] + 1,
             dtype=DTYPE,
@@ -269,13 +271,16 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
             "gamma0": (samples[0][:, 1], (NUM_BURST_SAMPLES,)),
             "gamma1": (samples[0][:, 2], (NUM_BURST_SAMPLES,)),
             "sigma": (samples[0][:, 3], (NUM_BURST_SAMPLES,)),
-            "beta3": (tf.zeros([1,5], dtype=DTYPE), (NUM_BURST_SAMPLES, 2)), #(samples[0][:, 4:], (NUM_BURST_SAMPLES, 2)),
+            "beta3": (
+                tf.zeros([1, 5], dtype=DTYPE),
+                (NUM_BURST_SAMPLES, 2),
+            ),  # (samples[0][:, 4:], (NUM_BURST_SAMPLES, 2)),
             "beta1": (samples[1][:, 0], (NUM_BURST_SAMPLES,)),
             "xi": (
                 samples[1][:, 1:],
                 (NUM_BURST_SAMPLES, samples[1].shape[1] - 1),
             ),
-            "events": (samples[2], (NUM_BURST_SAMPLES, 64, 64, 1)),
+            "events": (samples[2], (NUM_BURST_SAMPLES, 32, 32, 1)),
         },
         results_dict=results,
         num_samples=NUM_SAVED_SAMPLES,
@@ -308,7 +313,9 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
                 "gamma0": samples[0][:, 1],
                 "gamma1": samples[0][:, 2],
                 "sigma": samples[0][:, 3],
-                "beta3": tf.zeros([samples[0].shape[0], 5], dtype=DTYPE), #samples[0][:, 4:],
+                "beta3": tf.zeros(
+                    [samples[0].shape[0], 5], dtype=DTYPE
+                ),  # samples[0][:, 4:],
                 "beta1": samples[1][:, 0],
                 "xi": samples[1][:, 1:],
                 "events": samples[2],

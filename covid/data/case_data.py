@@ -1,5 +1,8 @@
 """Loads COVID-19 case data"""
 
+from warnings import warn
+import requests
+import json
 import numpy as np
 import pandas as pd
 
@@ -42,7 +45,10 @@ class CasesData:
         """
         Placeholder, in case we wish to interface with an API.
         """
-        pass
+        response = requests.get(url)
+        content = json.loads(response.content)
+        df = pd.read_json(json.dumps(content["body"]))
+        return df
 
     def getCSV(file):
         """
@@ -110,8 +116,33 @@ class CasesData:
                 measure,
                 areacodes,
             )
+        elif (settings["input"] == "url") and (settings["format"] == "json"):
+            df = CasesData.adapt_gov_api(
+                df, date_low, date_high, pillars, measure, areacodes
+            )
 
         return df
+
+    def adapt_gov_api(df, date_low, date_high, pillars, measure, areacodes):
+
+        warn("Using API data: 'pillar' and 'measure' will be ignored")
+
+        df = df.rename(
+            columns={"areaCode": "location", "newCasesBySpecimenDate": "cases"}
+        )
+        df = df[["location", "date", "cases"]]
+        df["date"] = pd.to_datetime(df["date"])
+        df["location"] = merge_lad_codes(df["location"])
+        df = df[df["location"].isin(areacodes)]
+        df.index = pd.MultiIndex.from_frame(df[["location", "date"]])
+        df = df.sort_index()
+
+        dates = pd.date_range(date_low, date_high, closed="left")
+        multi_index = pd.MultiIndex.from_product([areacodes, dates])
+        ser = df["cases"].reindex(multi_index, fill_value=0.0)
+        ser.index.names = ["location", "date"]
+        ser.name = "cases"
+        return ser
 
     def adapt_phe(df, date_low, date_high, pillars, measure, areacodes):
         """
@@ -156,12 +187,11 @@ class CasesData:
 
         # Fill in all dates, and add 0s for empty counts
         dates = pd.date_range(date_low, date_high, closed="left")
-        indexes = [(lad19, date) for date in dates for lad19 in areacodes]
         multi_indexes = pd.MultiIndex.from_product(
             [areacodes, dates], names=["location", "date"]
         )
         results = df["cases"].reindex(multi_indexes, fill_value=0.0)
-        return results
+        return results.sort_index()
 
     def process(config):
         df = CasesData.get(config)

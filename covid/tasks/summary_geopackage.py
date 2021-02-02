@@ -34,8 +34,6 @@ def summary_geopackage(input_files, output_file, config):
     geo = geo[geo["lad19cd"].isin(data["locations"]["lad19cd"])]
     geo = geo.sort_values(by="lad19cd")
 
-    geo["current_alert_level"] = _tier_enum(data["L"])
-
     # Dump data into the geopackage
     while len(input_files) > 0:
         fn = input_files.pop()

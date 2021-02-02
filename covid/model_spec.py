@@ -29,14 +29,18 @@ def gather_data(config):
 
     date_low = np.datetime64(config["date_range"][0])
     date_high = np.datetime64(config["date_range"][1])
-    mobility = data.read_mobility(config["mobility_matrix"])
-    popsize = data.read_population(config["population_size"])
+    locations = data.AreaCodeData.process(config)
+    mobility = data.read_mobility(
+        config["mobility_matrix"], locations["lad19cd"]
+    )
+    popsize = data.read_population(
+        config["population_size"], locations["lad19cd"]
+    )
     commute_volume = data.read_traffic_flow(
         config["commute_volume"], date_low=date_low, date_high=date_high
     )
 
-    locations = data.AreaCodeData.process(config)
-    tier_restriction = data.TierData.process(config)[:, :, [0, 2, 3, 4]]
+    # tier_restriction = data.TierData.process(config)[:, :, [0, 2, 3, 4]]
     date_range = [date_low, date_high]
     weekday = (
         pd.date_range(date_low, date_high - np.timedelta64(1, "D")).weekday < 5
@@ -47,7 +51,6 @@ def gather_data(config):
         C=mobility.to_numpy().astype(DTYPE),
         W=commute_volume.to_numpy().astype(DTYPE),
         N=popsize.to_numpy().astype(DTYPE),
-        L=tier_restriction.astype(DTYPE),
         weekday=weekday.astype(DTYPE),
         date_range=date_range,
         locations=locations,
@@ -217,9 +220,6 @@ def next_generation_matrix_fn(covar_data, param):
     """
 
     def fn(t, state):
-        L = tf.convert_to_tensor(covar_data["L"], DTYPE)
-        L = L - tf.reduce_mean(L, axis=(0, 1))
-
         C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
         C = tf.linalg.set_diag(C, -tf.reduce_sum(C, axis=-2))
         C = tf.linalg.set_diag(C, tf.zeros(C.shape[0], dtype=DTYPE))
@@ -237,13 +237,9 @@ def next_generation_matrix_fn(covar_data, param):
         )
         xi = tf.gather(param["xi"], xi_idx)
 
-        L_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, L.shape[0] - 1)
-        Lt = L[-1]  # Last timepoint
-        xB = tf.linalg.matvec(Lt, param["beta3"])
+        beta = tf.math.exp(xi)
 
-        beta = tf.math.exp(xi + xB)
-
-        ngm = beta[:, tf.newaxis] * (
+        ngm = beta * (
             tf.eye(Cstar.shape[0], dtype=state.dtype)
             + param["beta2"] * commute_volume * Cstar / N[tf.newaxis, :]
         )

@@ -22,12 +22,11 @@ def predicted_incidence(posterior_samples, covar_data, init_step, num_steps):
 
     @tf.function
     def sim_fn(args):
-        beta1_, beta2_, beta3_, sigma_, xi_, gamma0_, gamma1_, init_ = args
+        beta1_, beta2_, sigma_, xi_, gamma0_, gamma1_, init_ = args
 
         par = dict(
             beta1=beta1_,
             beta2=beta2_,
-            beta3=beta3_,
             sigma=sigma_,
             xi=xi_,
             gamma0=gamma0_,
@@ -54,7 +53,6 @@ def predicted_incidence(posterior_samples, covar_data, init_step, num_steps):
         elems=(
             posterior_samples["beta1"],
             posterior_samples["beta2"],
-            posterior_samples["beta3"],
             posterior_samples["sigma"],
             posterior_samples["xi"],
             posterior_samples["gamma0"],
