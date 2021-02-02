@@ -13,19 +13,20 @@ __all__ = [
 ]
 
 
-def read_mobility(path):
+def read_mobility(path, locations):
     """Reads in CSV with mobility matrix.
 
     CSV format: <To>,<id>,<id>,....
                 <id>,<val>,<val>,...
                  ...
-
+    :param path: path to CSV file
+    :param locations: a list of locations to use
     :returns: a numpy matrix sorted by <id> on both rows and cols.
     """
     mobility = pd.read_csv(path)
+    print("Locations: ", locations)
     mobility = mobility[
-        mobility["From"].str.startswith("E")
-        & mobility["To"].str.startswith("E")
+        mobility["From"].isin(locations) & mobility["To"].isin(locations)
     ]
     mobility = mobility.sort_values(["From", "To"])
     mobility = mobility.groupby(["From", "To"]).agg({"Flow": sum}).reset_index()
@@ -34,12 +35,14 @@ def read_mobility(path):
     return mob_matrix
 
 
-def read_population(path):
+def read_population(path, locations):
     """Reads population CSV
+    :param path: CSV file
+    :param locations: locations to use
     :returns: a pandas Series indexed by LTLAs
     """
     pop = pd.read_csv(path, index_col="lad19cd")
-    pop = pop[pop.index.str.startswith("E")]
+    pop = pop[pop.index.isin(locations)]
     pop = pop.sum(axis=1)
     pop = pop.sort_index()
     pop.name = "n"
