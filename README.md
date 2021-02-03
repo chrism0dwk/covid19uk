@@ -111,7 +111,6 @@ LAD: Local Authority District
 * `pyproject.py` a PEP518-compliant file describing the `poetry` build system and dependencies.
 
 ## Example data files
-* `data/example_cases.csv` a file containing example case data for 43 local authorities in England collected and present of PHE's [website](https://coronavirus.data.gov.uk)
 * `data/c2019modagepop.csv` a file containing local authority population data in the UK, taken from ONS prediction for December 2019.  Local authorities [City of Westminster, City of London] and [Cornwall, Isles of Scilly] have been aggregated to meet commute data processing requirements. 
 * `data/mergedflows.csv` inter local authority mobility matrix taken from UK Census 2011 commuting data and aggregated up from Middle Super Output Area level (respecting aggregated LADs as above).
 * `data/UK2019mod_pop.gpkg` a geopackage containing UK Local Authority Districts (2019) polygons together with population and areal metrics.
