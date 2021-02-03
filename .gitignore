@@ -1,0 +1,4 @@
+*~
+__pycache__
+poetry.lock
+.ruffus_history.sqlite
