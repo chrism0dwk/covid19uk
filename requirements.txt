@@ -1,4 +1,0 @@
-matplotlib
-pyreadr
-PyYAML
-geopandas

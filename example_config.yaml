@@ -1,28 +1,45 @@
-# Covid_ODE model configuration
+# Covid stochastic model configuration
 
-data:
-  mobility_matrix: data/example_mobility.csv
-  population_size: data/example_population.csv
-  commute_volume: data/example_traffic_flow.csv
-  reported_cases: data/example_cases.csv
+ProcessData:
+  date_range:
+    - 2020-10-09
+    - 2021-01-01
+  mobility_matrix: data/mergedflows.csv
+  population_size: data/c2019modagepop.csv
+  commute_volume:   # Can be replaced by DfT traffic flow data - contact authors <c.jewell@lancaster.ac.uk>
 
-parameter:
-  beta1: 0.6    # R0 2.4
-  beta2: 0.5   # Contact with commuters 1/3rd of the time
-  beta3: 1.0    # lockdown vs normal
-  nu: 0.5      # E -> I transition rate
-  gamma: 0.25   # I -> R transition rate
+  CasesData:
+    input: url
+    address: https://api.coronavirus.data.gov.uk/v2/data?areaType=ltla&metric=newCasesBySpecimenDate&format=json
+    pillars: None  # Capability to filter Pillar 1 and 2 testing data from PHE confidential line listing
+    measure: None  # Capability to filter date of test report from PHE confidential line listing
+    format: json
+ 
+  AreaCodeData:
+    input: json
+    address:  "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/LAD_APR_2019_UK_NC/FeatureServer/0/query?where=1%3D1&outFields=LAD19CD,LAD19NM&returnGeometry=false&returnDistinctValues=true&orderByFields=LAD19CD&outSR=4326&f=json"
+    format: ons
+    regions:
+      - S  # Scotland
+      - E  # England
+      - W  # Wales
+      - NI # Northern Ireland
 
-mcmc:
-  dmax: 21
-  nmax: 50
-  m: 1
-  occult_nmax: 15
-  num_event_time_updates: 5
-  num_bursts: 10
-  num_burst_samples: 100
-  thin: 1
-  
-output:
-  posterior: example_posterior.h5
+Mcmc:
+  dmax: 84  # Max distance to move events
+  nmax: 50  # Max num events per metapopulation/time to move
+  m: 1      # Number of metapopulations to move
+  occult_nmax: 15  # Max number of occults to add/delete per metapop/time
+  num_event_time_updates: 35  # Num event and occult updates per sweep of Gibbs MCMC sampler.
+  num_bursts: 200  # Number of MCMC bursts of `num_burst_samples` 
+  num_burst_samples: 50  # Number of MCMC samples per burst
+  thin: 20  # Thin MCMC samples every `thin` iterations
 
+ThinPosterior:  # Post-process further chain thinning HDF5 -> .pkl.
+  start: 6000
+  end: 10000
+  by: 10
+
+Geopackage:  # covid.tasks.summary_geopackage
+  base_geopackage: data/UK2019mod_pop.gpkg
+  base_layer: UK2019mod_pop_xgen
