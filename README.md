@@ -61,19 +61,19 @@ national reproduction number estimate.
 
 6. Prediction: `covid.tasks.predict` calculates the Bayesian predictive distribution of the epidemic given the observed
 data and joint posterior distribution.  This is used in two ways:
-   a. in-sample predictions are made for the latest 7 and 14 day time intervals in the observed data time window.  These
+   - in-sample predictions are made for the latest 7 and 14 day time intervals in the observed data time window.  These
     are saved as `<output_dir>/insample7.pkl` and `<output_dir>/insample14.pkl` `xarray` data structures. 
-   b. medium-term predictions are made by simulating forward 56 days from the last+1 day of the observed data time window.  These is saved as `<output_dir>/medium_term.pkl` `xarray` data structure. 
+   - medium-term predictions are made by simulating forward 56 days from the last+1 day of the observed data time window.  These is saved as `<output_dir>/medium_term.pkl` `xarray` data structure. 
 
 7. Summary output:
-   a. LAD-level reproduction number: `covid.tasks.summarize.rt` takes the column sums of the next generation matrix as the
+   - LAD-level reproduction number: `covid.tasks.summarize.rt` takes the column sums of the next generation matrix as the
 LAD-level reproduction number.  This is saved in `<output_dir>/rt_summary.csv`.
-   b. Incidence summary: `covid.tasks.summarize.infec_incidence` calculates mean and quantile information for the medium term prediction, `<output_dir>/infec_incidence_summary.csv`.
-   c. Prevalence summary: `covid.tasks.summarize.prevalence` calculated the predicted prevalence of COVID-19 infection
+   - Incidence summary: `covid.tasks.summarize.infec_incidence` calculates mean and quantile information for the medium term prediction, `<output_dir>/infec_incidence_summary.csv`.
+   - Prevalence summary: `covid.tasks.summarize.prevalence` calculated the predicted prevalence of COVID-19 infection
 (model E+I compartments) at LAD level, `<output_dir>/prevalence_summary.csv`.
-   d. Population attributable risk fraction for infection: `covid.tasks.within_between` calculates the population
+   - Population attributable risk fraction for infection: `covid.tasks.within_between` calculates the population
 attributable fraction of within-LAD versus between-LAD infection risk, `<output_dir>/within_between_summary.csv`.
-   e. Case exceedance: `covid.tasks.case_exceedance` calculates the probability that observed cases in the last 7 and 14
+   - Case exceedance: `covid.tasks.case_exceedance` calculates the probability that observed cases in the last 7 and 14
  days of the observed timeseries exceeding the predictive distribution.  This highlights regions that are behaving
  atypically given the model, `<output_dir>/exceedance_summary.csv`.
 
