@@ -56,6 +56,12 @@ def read_traffic_flow(
     :param path: path to a traffic flow CSV with <date>,<Car> columns
     :returns: a Pandas timeseries
     """
+    if path is None:
+        dates = np.arange(date_low, date_high, np.timedelta64(1, "D"))
+        return pd.DataFrame(np.ones(dates.shape[0], np.float64),
+                            index=dates,
+                            columns=["percent"])
+    
     commute_raw = pd.read_excel(
         path, index_col="Date", skiprows=5, usecols=["Date", "Cars"]
     )

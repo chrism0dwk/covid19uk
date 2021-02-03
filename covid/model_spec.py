@@ -11,7 +11,7 @@ import covid.data as data
 
 tfd = tfp.distributions
 
-VERSION = 0.3
+VERSION = 0.5.0
 DTYPE = np.float64
 
 STOICHIOMETRY = np.array([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])
