@@ -24,7 +24,7 @@ Office for National Statistics Open Geography Portal](https://geoportal.statisti
 ### Quickstart
 ```bash
 $ poetry install  # Python dependencies
-$ python -m covid.pipeline --config example_config.yaml --results-dir <output_dir>
+$ poetry run python -m covid.pipeline --config example_config.yaml --results-dir <output_dir>
 ```
 
 The global pipeline configuration file `example_config.yaml` contains sections for pipeline
