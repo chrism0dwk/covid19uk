@@ -14,12 +14,9 @@ from covid.formats import make_dstl_template
 
 def xarray2summarydf(arr):
     mean = arr.mean(dim="iteration").to_dataset(name="value")
-    quantiles = arr.quantile(q=[0.05, 0.5, 0.95], dim="iteration").to_dataset(
-        dim="quantile"
-    )
-    ds = mean.merge(quantiles).rename_vars(
-        {0.05: "0.05", 0.5: "0.5", 0.95: "0.95"}
-    )
+    q = np.arange(start=0.05, stop=1.0, step=0.05)
+    quantiles = arr.quantile(q=q, dim="iteration").to_dataset(dim="quantile")
+    ds = mean.merge(quantiles).rename_vars({qi: f"{qi:.2f}" for qi in q})
     return ds.to_dataframe().reset_index()
 
 
@@ -93,6 +90,8 @@ def summary_longformat(input_files, output_file):
     rt_summary["time"] = data["date_range"][1]
     df = pd.concat([df, rt_summary], axis="index")
 
+    quantiles = df.columns[df.columns.str.startswith("0.")]
+
     return make_dstl_template(
         group="Lancaster",
         model="SpatialStochasticSEIR",
@@ -103,9 +102,5 @@ def summary_longformat(input_files, output_file):
         geography=df["location"],
         value_date=df["time"],
         value_type=df["value_name"],
-        quantiles={
-            "0.05": df["0.05"],
-            "0.5": df["0.5"],
-            "0.95": df["0.95"],
-        },
+        quantiles={q: df[q] for q in quantiles},
     ).to_excel(output_file, index=False)
