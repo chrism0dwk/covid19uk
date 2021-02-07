@@ -4,6 +4,9 @@ version = "0.5.0"
 description = "Spatial stochastic SEIR analysis of COVID-19 in the UK"
 authors = ["Chris Jewell <c.jewell@lancaster.ac.uk>"]
 license = "MIT"
+packages = [
+    {include = "covid"}
+]
 
 [tool.poetry.dependencies]
 python = "^3.7"
