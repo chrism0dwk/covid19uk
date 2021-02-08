@@ -10,6 +10,7 @@ from covid.model_spec import STOICHIOMETRY
 
 SUMMARY_DAYS = np.array([1, 7, 14, 28, 35, 42, 49, 56], np.int32)
 
+
 def rt(input_file, output_file):
     """Reads an array of next generation matrices and
        outputs mean (ci) local Rt values.
@@ -24,11 +25,11 @@ def rt(input_file, output_file):
     rt = np.sum(ngm, axis=-2)
     rt_summary = mean_and_ci(rt, name="Rt")
     exceed = np.mean(rt > 1.0, axis=0)
-    
+
     rt_summary = pd.DataFrame(
         rt_summary, index=pd.Index(ngm.coords["dest"], name="location")
     )
-    rt_summary['Rt_exceed'] = exceed
+    rt_summary["Rt_exceed"] = exceed
     rt_summary.to_csv(output_file)
 
 
@@ -54,7 +55,8 @@ def infec_incidence(input_file, output_file):
     idx = prediction.coords["location"]
 
     abs_incidence = pd.DataFrame(
-        pred_events(prediction[..., offset:5, 2], name="cases"), index=idx
+        pred_events(prediction[..., offset : (offset + 1), 2], name="cases"),
+        index=idx,
     )
     for t in timepoints[1:]:
         tmp = pd.DataFrame(
@@ -64,6 +66,10 @@ def infec_incidence(input_file, output_file):
         abs_incidence = pd.concat([abs_incidence, tmp], axis="columns")
 
     abs_incidence.to_csv(output_file)
+
+
+def weekly_pred_cases_per_100k(input_files, output_file):
+    pass
 
 
 def prevalence(input_files, output_file):
