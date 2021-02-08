@@ -102,5 +102,6 @@ def summary_longformat(input_files, output_file):
         geography=df["location"],
         value_date=df["time"],
         value_type=df["value_name"],
+        value=df["value"],
         quantiles={q: df[q] for q in quantiles},
     ).to_excel(output_file, index=False)
