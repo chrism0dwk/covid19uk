@@ -8,6 +8,7 @@ from gemlib.util import compute_state
 from covid.summary import mean_and_ci
 from covid.model_spec import STOICHIOMETRY
 
+SUMMARY_DAYS = np.array([1, 7, 14, 28, 35, 42, 49, 56], np.int32)
 
 def rt(input_file, output_file):
     """Reads an array of next generation matrices and
@@ -43,7 +44,7 @@ def infec_incidence(input_file, output_file):
         prediction = pkl.load(f)
 
     offset = 4
-    timepoints = np.array([1, 7, 14, 28, 56], np.int32) + offset
+    timepoints = SUMMARY_DAYS + offset
 
     # Absolute incidence
     def pred_events(events, name=None):
@@ -73,7 +74,7 @@ def prevalence(input_files, output_file):
     :param output_file: a csv containing prevalence summary
     """
     offset = 4  # Account for recording lag
-    timepoints = np.array([0, 7, 14, 28, 56], np.int32) + offset
+    timepoints = SUMMARY_DAYS + offset
 
     with open(input_files[0], "rb") as f:
         data = pkl.load(f)
