@@ -8,7 +8,7 @@ from gemlib.util import compute_state
 from covid.summary import mean_and_ci
 from covid.model_spec import STOICHIOMETRY
 
-SUMMARY_DAYS = np.array([1, 7, 14, 28, 35, 42, 49, 56], np.int32)
+SUMMARY_DAYS = np.array([1, 7, 14, 21, 28, 35, 42, 49, 56], np.int32)
 
 
 def rt(input_file, output_file):
