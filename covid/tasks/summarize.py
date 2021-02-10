@@ -68,10 +68,6 @@ def infec_incidence(input_file, output_file):
     abs_incidence.to_csv(output_file)
 
 
-def weekly_pred_cases_per_100k(input_files, output_file):
-    pass
-
-
 def prevalence(input_files, output_file):
     """Reconstruct predicted prevalence from
        original data and projection.
