@@ -40,6 +40,28 @@ def prevalence(events, popsize):
     return xarray2summarydf(prev_per_1e5)
 
 
+def weekly_pred_cases_per_100k(prediction, popsize):
+    with open(input_file, "rb") as f:
+        prediction = pkl.load(f)
+    prediction = prediction[..., 2]
+    prediction = prediction.reset_coords(drop=True)
+
+    weeks = range(0, prediction.coords["time"].shape[0], 7)[:-1]
+    week_incidence = [
+        prediction[..., week : (week + 7)].sum(dim="time") for week in weeks
+    ]
+    week_incidence = xarray.concat(
+        week_incidence, dim=prediction.coords["time"][weeks]
+    )
+    week_incidence = week_incidence.transpose(
+        *prediction.dims, transpose_coords=True
+    )
+    week_incidence = (
+        week_incidence / popsize[np.newaxis, :, np.newaxis] * 100000
+    )
+    return xarray2summarydf(week_incidence)
+
+
 def summary_longformat(input_files, output_file):
     """Draws together pipeline results into a long format
        csv file.
@@ -74,6 +96,11 @@ def summary_longformat(input_files, output_file):
     medium_df = xarray2summarydf(medium_term[..., 2].reset_coords(drop=True))
     medium_df["value_name"] = "Cases"
     df = pd.concat([df, medium_df], axis="index")
+
+    # Weekly incidence per 100k
+    weekly_incidence = weekly_pred_cases_per_100k(medium_term, data["N"])
+    weekly_incidence["value_name"] = "weekly_cases_per_100k"
+    df = pd.concat([df, weekly_incidence], axis="index")
 
     # Medium term prevalence
     prev_df = prevalence(medium_term, data["N"])
