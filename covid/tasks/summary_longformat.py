@@ -41,11 +41,13 @@ def prevalence(events, popsize):
 
 
 def weekly_pred_cases_per_100k(prediction, popsize):
-    with open(input_file, "rb") as f:
-        prediction = pkl.load(f)
-    prediction = prediction[..., 2]
+    """Returns weekly number of cases per 100k of population"""
+    
+    prediction = prediction[..., 2] # Case removals
     prediction = prediction.reset_coords(drop=True)
 
+    # TODO: Find better way to sum up into weeks other than
+    # a list comprehension.
     weeks = range(0, prediction.coords["time"].shape[0], 7)[:-1]
     week_incidence = [
         prediction[..., week : (week + 7)].sum(dim="time") for week in weeks
@@ -56,6 +58,7 @@ def weekly_pred_cases_per_100k(prediction, popsize):
     week_incidence = week_incidence.transpose(
         *prediction.dims, transpose_coords=True
     )
+    # Divide by population sizes
     week_incidence = (
         week_incidence / popsize[np.newaxis, :, np.newaxis] * 100000
     )
