@@ -282,7 +282,7 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
             ),
             "events": (
                 samples[2],
-                (NUM_BURST_SAMPLES, min(32, events.shape[1]), 32, 1),
+                (NUM_BURST_SAMPLES, min(32, events.shape[0]), 32, 1),
             ),
         },
         results_dict=results,
