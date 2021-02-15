@@ -280,7 +280,10 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
                 samples[1][:, 1:],
                 (NUM_BURST_SAMPLES, samples[1].shape[1] - 1),
             ),
-            "events": (samples[2], (NUM_BURST_SAMPLES, 32, 32, 1)),
+            "events": (
+                samples[2],
+                (NUM_BURST_SAMPLES, min(32, events.shape[1]), 32, 1),
+            ),
         },
         results_dict=results,
         num_samples=NUM_SAVED_SAMPLES,
