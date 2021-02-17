@@ -90,7 +90,7 @@ def run_pipeline(global_config, results_directory, cli_options):
             data=input_files[0],
             posterior_samples=input_files[1],
             output_file=output_file,
-            initial_step=-8,
+            initial_step=-7,
             num_steps=28,
         )
 
