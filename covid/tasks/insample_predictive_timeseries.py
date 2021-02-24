@@ -98,3 +98,28 @@ def insample_predictive_timeseries(input_files, output_dir, lag):
         )
         plt.savefig(output_dir.joinpath(f"{location.data}.png"))
         plt.close()
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--data_pkl", type=str, required=True, help="Pipeline data pickle"
+    )
+    parser.add_argument(
+        "--insample",
+        type=str,
+        required=True,
+        help="Insample prediction netCDF4",
+    )
+    parser.add_argument(
+        "--output-dir", type=str, required=True, help="Output directory"
+    )
+    parser.add_argument("--lag", type=int, required=True, help="Lag")
+    args = parser.parse_args()
+
+    insample_predictive_timeseries(
+        [args.insample, args.data_pkl], args.output_dir, args.lag
+    )

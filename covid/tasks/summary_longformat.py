@@ -50,7 +50,11 @@ def weekly_pred_cases_per_100k(prediction, popsize):
 
     # TODO: Find better way to sum up into weeks other than
     # a list comprehension.
-    weeks = range(0, prediction.coords["time"].shape[0], 7)[:-1]
+    dates = pd.DatetimeIndex(prediction.coords["time"].data)
+    first_sunday_index = np.where(dates.weekday == 6)[0][0]
+    weeks = range(first_sunday_index, prediction.coords["time"].shape[0], 7)[
+        :-1
+    ]
     week_incidence = [
         prediction[..., week : (week + 7)].sum(dim="time") for week in weeks
     ]
