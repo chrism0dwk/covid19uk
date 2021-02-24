@@ -70,7 +70,7 @@ def run_pipeline(global_config, results_directory, cli_options):
     rf.transform(
         input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=wd("ngm.pkl"),
+        output=wd("ngm.nc"),
     )(next_generation_matrix)
 
     rf.transform(
@@ -83,7 +83,7 @@ def run_pipeline(global_config, results_directory, cli_options):
     @rf.transform(
         input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=wd("insample7.pkl"),
+        output=wd("insample7.nc"),
     )
     def insample7(input_files, output_file):
         predict(
@@ -97,7 +97,7 @@ def run_pipeline(global_config, results_directory, cli_options):
     @rf.transform(
         input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=wd("insample14.pkl"),
+        output=wd("insample14.nc"),
     )
     def insample14(input_files, output_file):
         return predict(
@@ -112,7 +112,7 @@ def run_pipeline(global_config, results_directory, cli_options):
     @rf.transform(
         input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=wd("medium_term.pkl"),
+        output=wd("medium_term.nc"),
     )
     def medium_term(input_files, output_file):
         return predict(
@@ -137,7 +137,7 @@ def run_pipeline(global_config, results_directory, cli_options):
     )(summarize.infec_incidence)
 
     rf.transform(
-        input=[[process_data, thin_samples, medium_term]],
+        input=[[process_data, medium_term]],
         filter=rf.formatter(),
         output=wd("prevalence_summary.csv"),
     )(summarize.prevalence)
@@ -165,7 +165,7 @@ def run_pipeline(global_config, results_directory, cli_options):
     # Plot in-sample
     @rf.transform(
         input=[insample7, insample14],
-        filter=rf.formatter(".+/insample(?P<LAG>\d+).pkl"),
+        filter=rf.formatter(".+/insample(?P<LAG>\d+).nc"),
         add_inputs=rf.add_inputs(process_data),
         output="{path[0]}/insample_plots{LAG[0]}",
         extras=["{LAG[0]}"],

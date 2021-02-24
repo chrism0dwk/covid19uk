@@ -2,6 +2,7 @@
 
 import numpy as np
 import pickle as pkl
+import xarray
 import pandas as pd
 
 from gemlib.util import compute_state
@@ -19,8 +20,7 @@ def rt(input_file, output_file):
     :param output_file: a .csv of mean (ci) values
     """
 
-    with open(input_file, "rb") as f:
-        ngm = pkl.load(f)
+    ngm = xarray.open_dataset(input_file)["ngm"]
 
     rt = np.sum(ngm, axis=-2)
     rt_summary = mean_and_ci(rt, name="Rt")
@@ -41,8 +41,7 @@ def infec_incidence(input_file, output_file):
     :param output_file: csv with prediction summaries
     """
 
-    with open(input_file, "rb") as f:
-        prediction = pkl.load(f)
+    prediction = xarray.open_dataset(input_file)["events"]
 
     offset = 4
     timepoints = SUMMARY_DAYS + offset
@@ -72,7 +71,7 @@ def prevalence(input_files, output_file):
     """Reconstruct predicted prevalence from
        original data and projection.
 
-    :param input_files: a list of [data pickle, samples pickle, prediction  pickle]
+    :param input_files: a list of [data pickle, prediction netCDF]
     :param output_file: a csv containing prevalence summary
     """
     offset = 4  # Account for recording lag
@@ -81,17 +80,10 @@ def prevalence(input_files, output_file):
     with open(input_files[0], "rb") as f:
         data = pkl.load(f)
 
-    with open(input_files[1], "rb") as f:
-        samples = pkl.load(f)
+    prediction = xarray.open_dataset(input_files[1])
 
-    with open(input_files[2], "rb") as f:
-        prediction = pkl.load(f)
-
-    insample_state = compute_state(
-        samples["init_state"], samples["seir"], STOICHIOMETRY
-    )
     predicted_state = compute_state(
-        insample_state[..., -1, :], prediction, STOICHIOMETRY
+        prediction["initial_state"], prediction["events"], STOICHIOMETRY
     )
 
     def calc_prev(state, name=None):
