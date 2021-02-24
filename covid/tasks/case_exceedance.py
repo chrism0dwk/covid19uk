@@ -2,7 +2,7 @@
 
 import numpy as np
 import pickle as pkl
-import pandas as pd
+import xarray
 
 
 def case_exceedance(input_files, lag):
@@ -17,8 +17,7 @@ def case_exceedance(input_files, lag):
     with open(data_file, "rb") as f:
         data = pkl.load(f)
 
-    with open(prediction_file, "rb") as f:
-        prediction = pkl.load(f)
+    prediction = xarray.open_dataset(prediction_file)["events"]
 
     modelled_cases = np.sum(prediction[..., :lag, -1], axis=-1)
     observed_cases = np.sum(data["cases"][:, -lag:], axis=-1)

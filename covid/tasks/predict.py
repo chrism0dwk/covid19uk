@@ -96,10 +96,19 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
         ],
         dims=("iteration", "location", "time", "event"),
     )
-    prediction.attrs["initial_state"] = estimated_init_state
-
-    with open(output_file, "wb") as f:
-        pkl.dump(prediction, f)
+    estimated_init_state = xarray.DataArray(
+        estimated_init_state,
+        coords=[
+            np.arange(estimated_init_state.shape[0]),
+            covar_data["locations"]["lad19cd"],
+            np.arange(estimated_init_state.shape[-1]),
+        ],
+        dims=("iteration", "location", "state"),
+    )
+    ds = xarray.Dataset(
+        {"events": prediction, "initial_state": estimated_init_state}
+    )
+    ds.to_netcdf(output_file)
 
 
 if __name__ == "__main__":
