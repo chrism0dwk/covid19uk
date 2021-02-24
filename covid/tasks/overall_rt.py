@@ -1,7 +1,7 @@
 """Calculates overall Rt given a posterior next generation matix"""
 
 import numpy as np
-import pickle as pkl
+import xarray
 import pandas as pd
 
 from covid.summary import (
@@ -12,9 +12,7 @@ from covid.summary import (
 
 def overall_rt(next_generation_matrix, output_file):
 
-    with open(next_generation_matrix, "rb") as f:
-        ngms = pkl.load(f)
-
+    ngms = xarray.open_dataset(next_generation_matrix)["ngm"]
     b, _ = power_iteration(ngms)
     rt = rayleigh_quotient(ngms, b)
     q = np.arange(0.05, 1.0, 0.05)

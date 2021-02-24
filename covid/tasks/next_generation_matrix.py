@@ -73,9 +73,10 @@ def next_generation_matrix(input_files, output_file):
         ],
         dims=["iteration", "dest", "src"],
     )
+    ngm = xarray.Dataset({"ngm": ngm})
+
     # Output
-    with open(output_file, "wb") as f:
-        pkl.dump(ngm, f)
+    ngm.to_netcdf(output_file)
 
 
 if __name__ == "__main__":

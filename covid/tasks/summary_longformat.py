@@ -20,14 +20,16 @@ def xarray2summarydf(arr):
     return ds.to_dataframe().reset_index()
 
 
-def prevalence(events, popsize):
-    prev = compute_state(events.attrs["initial_state"], events, STOICHIOMETRY)
+def prevalence(prediction, popsize):
+    prev = compute_state(
+        prediction["initial_state"], prediction["events"], STOICHIOMETRY
+    )
     prev = xarray.DataArray(
         prev.numpy(),
         coords=[
             np.arange(prev.shape[0]),
-            events.coords["location"],
-            events.coords["time"],
+            prediction.coords["location"],
+            prediction.coords["time"],
             np.arange(prev.shape[-1]),
         ],
         dims=["iteration", "location", "time", "state"],
@@ -42,8 +44,8 @@ def prevalence(events, popsize):
 
 def weekly_pred_cases_per_100k(prediction, popsize):
     """Returns weekly number of cases per 100k of population"""
-    
-    prediction = prediction[..., 2] # Case removals
+
+    prediction = prediction[..., 2]  # Case removals
     prediction = prediction.reset_coords(drop=True)
 
     # TODO: Find better way to sum up into weeks other than
@@ -87,21 +89,25 @@ def summary_longformat(input_files, output_file):
     df["0.95"] = np.nan
 
     # Insample predictive incidence
-    with open(input_files[1], "rb") as f:
-        insample = pkl.load(f)
-    insample_df = xarray2summarydf(insample[..., 2].reset_coords(drop=True))
+    insample = xarray.open_dataset(input_files[1])
+    insample_df = xarray2summarydf(
+        insample["events"][..., 2].reset_coords(drop=True)
+    )
     insample_df["value_name"] = "insample14_Cases"
     df = pd.concat([df, insample_df], axis="index")
 
     # Medium term incidence
-    with open(input_files[2], "rb") as f:
-        medium_term = pkl.load(f)
-    medium_df = xarray2summarydf(medium_term[..., 2].reset_coords(drop=True))
+    medium_term = xarray.open_dataset(input_files[2])
+    medium_df = xarray2summarydf(
+        medium_term["events"][..., 2].reset_coords(drop=True)
+    )
     medium_df["value_name"] = "Cases"
     df = pd.concat([df, medium_df], axis="index")
 
     # Weekly incidence per 100k
-    weekly_incidence = weekly_pred_cases_per_100k(medium_term, data["N"])
+    weekly_incidence = weekly_pred_cases_per_100k(
+        medium_term["events"], data["N"]
+    )
     weekly_incidence["value_name"] = "weekly_cases_per_100k"
     df = pd.concat([df, weekly_incidence], axis="index")
 
@@ -111,8 +117,7 @@ def summary_longformat(input_files, output_file):
     df = pd.concat([df, prev_df], axis="index")
 
     # Rt
-    with open(input_files[3], "rb") as f:
-        ngms = pkl.load(f)
+    ngms = xarray.load_dataset(input_files[3])["ngm"]
     rt = ngms.sum(dim="dest")
     rt = rt.rename({"src": "location"})
     rt_summary = xarray2summarydf(rt)
