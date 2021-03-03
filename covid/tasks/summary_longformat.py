@@ -76,9 +76,10 @@ def summary_longformat(input_files, output_file):
        csv file.
 
     :param input_files: a list of filenames [data_pkl,
-                                             insample14_pkl,
-                                             medium_term_pred_pkl,
-                                             ngm_pkl]
+                                             insample7_nc
+                                             insample14_nc,
+                                             medium_term_pred_nc,
+                                             ngm_nc]
     :param output_file: the output CSV with columns `[date,
                         location,value_name,value,q0.025,q0.975]`
     """
@@ -97,11 +98,18 @@ def summary_longformat(input_files, output_file):
     insample_df = xarray2summarydf(
         insample["events"][..., 2].reset_coords(drop=True)
     )
+    insample_df["value_name"] = "insample7_Cases"
+    df = pd.concat([df, insample_df], axis="index")
+
+    insample = xarray.open_dataset(input_files[2])
+    insample_df = xarray2summarydf(
+        insample["events"][..., 2].reset_coords(drop=True)
+    )
     insample_df["value_name"] = "insample14_Cases"
     df = pd.concat([df, insample_df], axis="index")
 
     # Medium term incidence
-    medium_term = xarray.open_dataset(input_files[2])
+    medium_term = xarray.open_dataset(input_files[3])
     medium_df = xarray2summarydf(
         medium_term["events"][..., 2].reset_coords(drop=True)
     )
@@ -121,7 +129,7 @@ def summary_longformat(input_files, output_file):
     df = pd.concat([df, prev_df], axis="index")
 
     # Rt
-    ngms = xarray.load_dataset(input_files[3])["ngm"]
+    ngms = xarray.load_dataset(input_files[4])["ngm"]
     rt = ngms.sum(dim="dest")
     rt = rt.rename({"src": "location"})
     rt_summary = xarray2summarydf(rt)
@@ -144,3 +152,33 @@ def summary_longformat(input_files, output_file):
         value=df["value"],
         quantiles={q: df[q] for q in quantiles},
     ).to_excel(output_file, index=False)
+
+
+if __name__ == "__main__":
+
+    import os
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--output", "-o", type=str, required=True, help="Output file"
+    )
+    parser.add_argument(
+        "resultsdir",
+        type=str,
+        help="Results directory",
+    )
+    args = parser.parse_args()
+
+    input_files = [
+        os.path.join(args.resultsdir, d)
+        for d in [
+            "pipeline_data.pkl",
+            "insample7.nc",
+            "insample14.nc",
+            "medium_term.nc",
+            "ngm.nc",
+        ]
+    ]
+
+    summary_longformat(input_files, args.output)
