@@ -116,6 +116,13 @@ def summary_longformat(input_files, output_file):
     medium_df["value_name"] = "absolute_incidence"
     df = pd.concat([df, medium_df], axis="index")
 
+    # Cumulative cases
+    medium_df = xarray2summarydf(
+        medium_term["events"][..., 2].cumsum(dim="time").reset_coords(drop=True)
+    )
+    medium_df["value_name"] = "cumulative_absolute_incidence"
+    df = pd.concat([df, medium_df], axis="index")
+
     # Medium term incidence per 100k
     medium_df = xarray2summarydf(
         (
