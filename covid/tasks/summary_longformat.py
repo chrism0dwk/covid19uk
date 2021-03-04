@@ -108,12 +108,23 @@ def summary_longformat(input_files, output_file):
     insample_df["value_name"] = "insample14_Cases"
     df = pd.concat([df, insample_df], axis="index")
 
-    # Medium term incidence
+    # Medium term absolute incidence
     medium_term = xarray.open_dataset(input_files[3])
     medium_df = xarray2summarydf(
         medium_term["events"][..., 2].reset_coords(drop=True)
     )
-    medium_df["value_name"] = "Cases"
+    medium_df["value_name"] = "absolute_incidence"
+    df = pd.concat([df, medium_df], axis="index")
+
+    # Medium term incidence per 100k
+    medium_df = xarray2summarydf(
+        (
+            medium_term["events"][..., 2].reset_coords(drop=True)
+            / data["N"][np.newaxis, :, np.newaxis]
+        )
+        * 100000
+    )
+    medium_df["value_name"] = "incidence_per_100k"
     df = pd.concat([df, medium_df], axis="index")
 
     # Weekly incidence per 100k
