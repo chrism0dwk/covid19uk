@@ -86,6 +86,7 @@ class CasesData:
         check_date_bounds(df, date_low, date_high)
         check_date_format(df)
         check_lad19cd_format(df)
+        df = df.rename(columns={"date": "time"})
         return True
 
     def adapt(df, config):
@@ -140,7 +141,7 @@ class CasesData:
         dates = pd.date_range(date_low, date_high, closed="left")
         multi_index = pd.MultiIndex.from_product([areacodes, dates])
         ser = df["cases"].reindex(multi_index, fill_value=0.0)
-        ser.index.names = ["location", "date"]
+        ser.index.names = ["location", "time"]
         ser.name = "cases"
         return ser
 
@@ -182,13 +183,13 @@ class CasesData:
             df = df.groupby(["lad19cd", "lab_report_date"]).count()
             df = df.rename(columns={"specimen_date": "cases"})
 
-        df.index.names = ["lad19cd", "date"]
+        df.index.names = ["lad19cd", "time"]
         df = df.sort_index()
 
         # Fill in all dates, and add 0s for empty counts
         dates = pd.date_range(date_low, date_high, closed="left")
         multi_indexes = pd.MultiIndex.from_product(
-            [areacodes, dates], names=["location", "date"]
+            [areacodes, dates], names=["location", "time"]
         )
         results = df["cases"].reindex(multi_indexes, fill_value=0.0)
         return results.sort_index()

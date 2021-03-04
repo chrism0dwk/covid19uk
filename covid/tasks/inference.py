@@ -1,9 +1,11 @@
 """MCMC Test Rig for COVID-19 UK model"""
 # pylint: disable=E402
 
-import h5py
 import pickle as pkl
 from time import perf_counter
+
+import h5py
+import xarray
 import tqdm
 import yaml
 import numpy as np
@@ -33,14 +35,14 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     else:
         print("Using CPU")
 
-    with open(data_file, "rb") as f:
-        data = pkl.load(f)
+    data = xarray.open_dataset(data_file, group="constant_data")
+    cases = xarray.open_dataset(data_file, group="observations")["cases"]
 
     # We load in cases and impute missing infections first, since this sets the
     # time epoch which we are analysing.
     # Impute censored events, return cases
-    print("Data shape:", data["cases"].shape)
-    events = model_spec.impute_censored_events(data["cases"].astype(DTYPE))
+    print("Data shape:", cases.shape)
+    events = model_spec.impute_censored_events(cases.astype(DTYPE))
 
     # Initial conditions are calculated by calculating the state
     # at the beginning of the inference period
@@ -50,13 +52,16 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     # to set up a sensible initial state.
     state = compute_state(
         initial_state=tf.concat(
-            [data["N"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])],
+            [
+                tf.constant(data["N"], DTYPE)[:, tf.newaxis],
+                tf.zeros_like(events[:, 0, :]),
+            ],
             axis=-1,
         ),
         events=events,
         stoichiometry=model_spec.STOICHIOMETRY,
     )
-    start_time = state.shape[1] - data["cases"].shape[1]
+    start_time = state.shape[1] - cases.shape[1]
     initial_state = state[:, start_time, :]
     events = events[:, start_time:, :]
 
@@ -251,10 +256,10 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     tf.random.set_seed(2)
 
     current_state = [
-        np.array(
+        tf.constant(
             [0.6, 0.0, 0.0, 0.1], dtype=DTYPE
         ),  # , 0.0, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
-        np.zeros(
+        tf.zeros(
             model.model["xi"](0.0, 0.1).event_shape[-1] + 1,
             dtype=DTYPE,
         ),
@@ -267,32 +272,20 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     posterior = Posterior(
         output_file,
         sample_dict={
-            "beta2": (samples[0][:, 0], (NUM_BURST_SAMPLES,)),
-            "gamma0": (samples[0][:, 1], (NUM_BURST_SAMPLES,)),
-            "gamma1": (samples[0][:, 2], (NUM_BURST_SAMPLES,)),
-            "sigma": (samples[0][:, 3], (NUM_BURST_SAMPLES,)),
-            "beta3": (
-                tf.zeros([1, 5], dtype=DTYPE),
-                (NUM_BURST_SAMPLES, 2),
-            ),  # (samples[0][:, 4:], (NUM_BURST_SAMPLES, 2)),
-            "beta1": (samples[1][:, 0], (NUM_BURST_SAMPLES,)),
-            "xi": (
-                samples[1][:, 1:],
-                (NUM_BURST_SAMPLES, samples[1].shape[1] - 1),
-            ),
-            "events": (
-                samples[2],
-                (NUM_BURST_SAMPLES, min(32, events.shape[0]), 32, 1),
-            ),
+            "beta2": samples[0][:, 0],
+            "gamma0": samples[0][:, 1],
+            "gamma1": samples[0][:, 2],
+            "sigma": samples[0][:, 3],
+            "beta3": tf.zeros([1, 5], dtype=DTYPE),
+            "beta1": samples[1][:, 0],
+            "xi": samples[1][:, 1:],
+            "events": samples[2],
         },
         results_dict=results,
         num_samples=NUM_SAVED_SAMPLES,
     )
     posterior._file.create_dataset("initial_state", data=initial_state)
-    posterior._file.create_dataset(
-        "date_range",
-        data=np.array(data["date_range"]).astype(h5py.string_dtype()),
-    )
+
     # We loop over successive calls to sample because we have to dump results
     #   to disc, or else end OOM (even on a 32GB system).
     # with tf.profiler.experimental.Profile("/tmp/tf_logdir"):

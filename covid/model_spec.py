@@ -2,6 +2,7 @@
 
 import pandas as pd
 import numpy as np
+import xarray
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -43,20 +44,30 @@ def gather_data(config):
     )
 
     # tier_restriction = data.TierData.process(config)[:, :, [0, 2, 3, 4]]
-    date_range = [date_low, date_high]
-    weekday = (
-        pd.date_range(date_low, date_high - np.timedelta64(1, "D")).weekday < 5
+    dates = pd.date_range(*config["date_range"], closed="left")
+    weekday = xarray.DataArray(
+        dates.weekday < 5,
+        name="weekday",
+        dims=["time"],
+        coords=[dates.to_numpy()],
     )
 
     cases = data.CasesData.process(config).to_xarray()
-    return dict(
-        C=mobility.to_numpy().astype(DTYPE),
-        W=commute_volume.to_numpy().astype(DTYPE),
-        N=popsize.to_numpy().astype(DTYPE),
-        weekday=weekday.astype(DTYPE),
-        date_range=date_range,
-        locations=locations,
-        cases=cases,
+    return (
+        xarray.Dataset(
+            dict(
+                C=mobility.astype(DTYPE),
+                W=commute_volume.astype(DTYPE),
+                N=popsize.astype(DTYPE),
+                weekday=weekday.astype(DTYPE),
+                locations=xarray.DataArray(
+                    locations["name"],
+                    dims=["location"],
+                    coords=[locations["lad19cd"]],
+                ),
+            )
+        ),
+        xarray.Dataset(dict(cases=cases)),
     )
 
 

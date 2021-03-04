@@ -6,6 +6,7 @@ import pickle as pkl
 import tensorflow as tf
 
 from covid import model_spec
+from covid.util import copy_nc_attrs
 from gemlib.util import compute_state
 
 
@@ -71,16 +72,19 @@ def read_pkl(filename):
 
 def predict(data, posterior_samples, output_file, initial_step, num_steps):
 
-    covar_data = read_pkl(data)
+    covar_data = xarray.open_dataset(data, group="constant_data")
+    cases = xarray.open_dataset(data, group="observations")
     samples = read_pkl(posterior_samples)
 
     if initial_step < 0:
         initial_step = samples["seir"].shape[-2] + initial_step
 
-    dates = np.arange(covar_data["date_range"][0] + np.timedelta64(initial_step, "D"),
-                      covar_data["date_range"][0] + np.timedelta64(initial_step + num_steps, "D"),
-                      np.timedelta64(1, "D"))
-    del covar_data["date_range"]
+    origin_date = np.array(cases.coords["time"][0])
+    dates = np.arange(
+        origin_date + np.timedelta64(initial_step, "D"),
+        origin_date + np.timedelta64(initial_step + num_steps, "D"),
+        np.timedelta64(1, "D"),
+    )
 
     estimated_init_state, predicted_events = predicted_incidence(
         samples, covar_data, initial_step, num_steps
@@ -90,7 +94,7 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
         predicted_events,
         coords=[
             np.arange(predicted_events.shape[0]),
-            covar_data["locations"]["lad19cd"],
+            covar_data.coords["location"],
             dates,
             np.arange(predicted_events.shape[3]),
         ],
@@ -100,7 +104,7 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
         estimated_init_state,
         coords=[
             np.arange(estimated_init_state.shape[0]),
-            covar_data["locations"]["lad19cd"],
+            covar_data.coords["location"],
             np.arange(estimated_init_state.shape[-1]),
         ],
         dims=("iteration", "location", "state"),
@@ -108,7 +112,9 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
     ds = xarray.Dataset(
         {"events": prediction, "initial_state": estimated_init_state}
     )
-    ds.to_netcdf(output_file)
+    ds.to_netcdf(output_file, group="predictions")
+    ds.close()
+    copy_nc_attrs(data, output_file)
 
 
 if __name__ == "__main__":
