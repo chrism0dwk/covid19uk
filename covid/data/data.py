@@ -3,6 +3,7 @@ well-known formats"""
 
 from warnings import warn
 import numpy as np
+import xarray
 import pandas as pd
 
 __all__ = [
@@ -13,7 +14,7 @@ __all__ = [
 ]
 
 
-def read_mobility(path, locations):
+def read_mobility(path, locations=None):
     """Reads in CSV with mobility matrix.
 
     CSV format: <To>,<id>,<id>,....
@@ -24,29 +25,36 @@ def read_mobility(path, locations):
     :returns: a numpy matrix sorted by <id> on both rows and cols.
     """
     mobility = pd.read_csv(path)
-    print("Locations: ", locations)
-    mobility = mobility[
-        mobility["From"].isin(locations) & mobility["To"].isin(locations)
-    ]
-    mobility = mobility.sort_values(["From", "To"])
-    mobility = mobility.groupby(["From", "To"]).agg({"Flow": sum}).reset_index()
-    mob_matrix = mobility.pivot(index="To", columns="From", values="Flow")
+    mobility = mobility.rename(columns={"From": "src", "To": "dest"})
+    if locations is not None:
+        mobility = mobility[
+            mobility["src"].isin(locations) & mobility["dest"].isin(locations)
+        ]
+    mobility = mobility.sort_values(["src", "dest"])
+    mobility = (
+        mobility.groupby(["src", "dest"]).agg({"Flow": sum}).reset_index()
+    )
+    mob_matrix = mobility.pivot(index="dest", columns="src", values="Flow")
     mob_matrix[mob_matrix.isna()] = 0.0
-    return mob_matrix
+    return xarray.DataArray(
+        mob_matrix, dims=["location_dest", "location_src"], name="mobility"
+    )
 
 
-def read_population(path, locations):
+def read_population(path, locations=None):
     """Reads population CSV
     :param path: CSV file
     :param locations: locations to use
     :returns: a pandas Series indexed by LTLAs
     """
     pop = pd.read_csv(path, index_col="lad19cd")
-    pop = pop[pop.index.isin(locations)]
+    if locations is not None:
+        pop = pop[pop.index.isin(locations)]
     pop = pop.sum(axis=1)
     pop = pop.sort_index()
-    pop.name = "n"
-    return pop
+    pop.name = "population"
+    pop.index.name = "location"
+    return xarray.DataArray(pop)
 
 
 def read_traffic_flow(
@@ -58,10 +66,13 @@ def read_traffic_flow(
     """
     if path is None:
         dates = np.arange(date_low, date_high, np.timedelta64(1, "D"))
-        return pd.DataFrame(np.ones(dates.shape[0], np.float64),
-                            index=dates,
-                            columns=["percent"])
-    
+        return xarray.DataArray(
+            np.ones(dates.shape[0], np.float64),
+            name="flow",
+            dims=["date"],
+            coords=[dates],
+        )
+
     commute_raw = pd.read_excel(
         path, index_col="Date", skiprows=5, usecols=["Date", "Cars"]
     )
@@ -76,8 +87,8 @@ def read_traffic_flow(
     commute[commute.index < commute_raw.index[0]] = commute_raw.iloc[0, 0]
     commute[commute.index > commute_raw.index[-1]] = commute_raw.iloc[-1, 0]
     commute["Cars"] = commute["Cars"] / 100.0
-    commute.columns = ["percent"]
-    return commute
+    commute.columns = ["flow"]
+    return xarray.DataArray(commute)
 
 
 def _merge_ltla(series):

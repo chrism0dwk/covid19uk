@@ -36,7 +36,7 @@ def prevalence(prediction, popsize):
     )
     prev_per_1e5 = (
         prev[..., 1:3].sum(dim="state").reset_coords(drop=True)
-        / popsize[np.newaxis, :, np.newaxis]
+        / np.array(popsize)[np.newaxis, :, np.newaxis]
         * 100000
     )
     return xarray2summarydf(prev_per_1e5)
@@ -66,7 +66,7 @@ def weekly_pred_cases_per_100k(prediction, popsize):
     )
     # Divide by population sizes
     week_incidence = (
-        week_incidence / popsize[np.newaxis, :, np.newaxis] * 100000
+        week_incidence / np.array(popsize)[np.newaxis, :, np.newaxis] * 100000
     )
     return xarray2summarydf(week_incidence)
 
@@ -84,24 +84,24 @@ def summary_longformat(input_files, output_file):
                         location,value_name,value,q0.025,q0.975]`
     """
 
-    with open(input_files[0], "rb") as f:
-        data = pkl.load(f)
-    da = data["cases"].rename({"date": "time"})
-    df = da.to_dataframe(name="value").reset_index()
+    data = xarray.open_dataset(input_files[0], group="constant_data")
+    cases = xarray.open_dataset(input_files[0], group="observations")["cases"]
+
+    df = cases.to_dataframe(name="value").reset_index()
     df["value_name"] = "newCasesBySpecimenDate"
     df["0.05"] = np.nan
     df["0.5"] = np.nan
     df["0.95"] = np.nan
 
     # Insample predictive incidence
-    insample = xarray.open_dataset(input_files[1])
+    insample = xarray.open_dataset(input_files[1], group="predictions")
     insample_df = xarray2summarydf(
         insample["events"][..., 2].reset_coords(drop=True)
     )
     insample_df["value_name"] = "insample7_Cases"
     df = pd.concat([df, insample_df], axis="index")
 
-    insample = xarray.open_dataset(input_files[2])
+    insample = xarray.open_dataset(input_files[2], group="predictions")
     insample_df = xarray2summarydf(
         insample["events"][..., 2].reset_coords(drop=True)
     )
@@ -109,7 +109,7 @@ def summary_longformat(input_files, output_file):
     df = pd.concat([df, insample_df], axis="index")
 
     # Medium term absolute incidence
-    medium_term = xarray.open_dataset(input_files[3])
+    medium_term = xarray.open_dataset(input_files[3], group="predictions")
     medium_df = xarray2summarydf(
         medium_term["events"][..., 2].reset_coords(drop=True)
     )
@@ -127,7 +127,7 @@ def summary_longformat(input_files, output_file):
     medium_df = xarray2summarydf(
         (
             medium_term["events"][..., 2].reset_coords(drop=True)
-            / data["N"][np.newaxis, :, np.newaxis]
+            / np.array(data["N"])[np.newaxis, :, np.newaxis]
         )
         * 100000
     )
@@ -147,12 +147,14 @@ def summary_longformat(input_files, output_file):
     df = pd.concat([df, prev_df], axis="index")
 
     # Rt
-    ngms = xarray.load_dataset(input_files[4])["ngm"]
+    ngms = xarray.load_dataset(input_files[4], group="posterior_predictive")[
+        "ngm"
+    ]
     rt = ngms.sum(dim="dest")
     rt = rt.rename({"src": "location"})
     rt_summary = xarray2summarydf(rt)
     rt_summary["value_name"] = "R"
-    rt_summary["time"] = data["date_range"][1]
+    rt_summary["time"] = cases.coords["time"].data[-1] + np.timedelta64(1, "D")
     df = pd.concat([df, rt_summary], axis="index")
 
     quantiles = df.columns[df.columns.str.startswith("0.")]

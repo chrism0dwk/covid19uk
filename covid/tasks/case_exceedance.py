@@ -14,15 +14,14 @@ def case_exceedance(input_files, lag):
     """
     data_file, prediction_file = input_files
 
-    with open(data_file, "rb") as f:
-        data = pkl.load(f)
+    data = xarray.open_dataset(data_file, group="observations")
 
-    prediction = xarray.open_dataset(prediction_file)["events"]
+    prediction = xarray.open_dataset(prediction_file, group="predictions")[
+        "events"
+    ]
 
     modelled_cases = np.sum(prediction[..., :lag, -1], axis=-1)
     observed_cases = np.sum(data["cases"][:, -lag:], axis=-1)
-    if observed_cases.dims[0] == "lad19cd":
-        observed_cases = observed_cases.rename({"lad19cd": "location"})
     exceedance = np.mean(modelled_cases < observed_cases, axis=0)
 
     return exceedance

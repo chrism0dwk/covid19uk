@@ -4,12 +4,22 @@ import yaml
 import numpy as np
 import pandas as pd
 import h5py
+import xarray
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability.python.internal import dtype_util
 
 tfd = tfp.distributions
 tfs = tfp.stats
+
+
+def copy_nc_attrs(src, dest):
+    """Copies dataset attributes between two NetCDF datasets"""
+    with xarray.open_dataset(src) as s:
+        attrs = s.attrs
+    # Write empty root dataset with attributes
+    ds = xarray.Dataset(attrs=attrs)
+    ds.to_netcdf(dest, mode="a")
 
 
 def load_config(config_filename):
