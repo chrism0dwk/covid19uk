@@ -57,20 +57,17 @@ def run_pipeline(global_config, results_directory, cli_options):
 
     # Pipeline starts here
     @rf.mkdir(results_directory)
-    @rf.originate(wd("inferencedata.nc"), global_config)
-    def process_data(output_file, config):
-        _create_nc_file(output_file, pipeline_meta)
-        assemble_data(output_file, config["ProcessData"])
-
-    @rf.transform(
-        process_data,
-        rf.formatter(),
-        wd("config.yaml"),
-        global_config,
-    )
-    def save_config(input_file, output_file, config):
+    @rf.originate(wd("config.yaml"), global_config)
+    def save_config(output_file, config):
         with open(output_file, "w") as f:
             yaml.dump(config, f)
+
+    @rf.follows(save_config)
+    @rf.originate(wd("inferencedata.nc"), global_config)
+    def process_data(output_file, config):
+
+        _create_nc_file(output_file, pipeline_meta)
+        assemble_data(output_file, config["ProcessData"])
 
     @rf.transform(
         process_data,
