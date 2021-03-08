@@ -65,18 +65,13 @@ def insample_predictive_timeseries(input_files, output_dir, lag):
     prediction_file, data_file = input_files
     lag = int(lag)
 
-    prediction = xarray.open_dataset(prediction_file)["events"]
+    prediction = xarray.open_dataset(prediction_file, group="predictions")[
+        "events"
+    ]
     prediction = prediction[..., :lag, -1]  # Just removals
 
-    with open(data_file, "rb") as f:
-        data = pkl.load(f)
-
-    cases = data["cases"]
-    lads = data["locations"]
-
-    # TODO remove legacy code!
-    if "lad19cd" in cases.dims:
-        cases = cases.rename({"lad19cd": "location"})
+    cases = xarray.open_dataset(data_file, group="observations")["cases"]
+    lads = xarray.open_dataset(data_file, group="constant_data")["locations"]
 
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
@@ -93,8 +88,8 @@ def insample_predictive_timeseries(input_files, output_dir, lag):
             pred_mean.loc[location, :],
             pred_quants.loc[:, location, :],
             cases.loc[location][-lag:],
-            cases.coords["date"][-lag:],
-            lads.loc[lads["lad19cd"] == location, "name"].iloc[0],
+            cases.coords["time"][-lag:],
+            lads.loc[location].data,
         )
         plt.savefig(output_dir.joinpath(f"{location.data}.png"))
         plt.close()

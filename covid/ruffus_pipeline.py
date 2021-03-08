@@ -2,6 +2,10 @@
 
 import os
 import yaml
+from datetime import datetime
+from uuid import uuid1
+import json
+import netCDF4 as nc
 import pandas as pd
 import ruffus as rf
 
@@ -28,9 +32,28 @@ def _make_append_work_dir(work_dir):
     return lambda filename: os.path.expandvars(os.path.join(work_dir, filename))
 
 
+def _create_metadata(config):
+    return dict(
+        pipeline_id=uuid1().hex,
+        created_at=str(datetime.now()),
+        inference_library="GEM",
+        inference_library_version="0.1.alpha0",
+        pipeline_config=json.dumps(config, default=str),
+    )
+
+
+def _create_nc_file(output_file, meta_data_dict):
+    nc_file = nc.Dataset(output_file, "w", format="NETCDF4")
+    for k, v in meta_data_dict.items():
+        setattr(nc_file, k, v)
+    nc_file.close()
+
+
 def run_pipeline(global_config, results_directory, cli_options):
 
     wd = _make_append_work_dir(results_directory)
+
+    pipeline_meta = _create_metadata(global_config)
 
     # Pipeline starts here
     @rf.mkdir(results_directory)
@@ -39,13 +62,11 @@ def run_pipeline(global_config, results_directory, cli_options):
         with open(output_file, "w") as f:
             yaml.dump(config, f)
 
-    @rf.transform(
-        save_config,
-        rf.formatter(),
-        wd("pipeline_data.pkl"),
-        global_config,
-    )
-    def process_data(input_file, output_file, config):
+    @rf.follows(save_config)
+    @rf.originate(wd("inferencedata.nc"), global_config)
+    def process_data(output_file, config):
+
+        _create_nc_file(output_file, pipeline_meta)
         assemble_data(output_file, config["ProcessData"])
 
     @rf.transform(
@@ -194,7 +215,15 @@ def run_pipeline(global_config, results_directory, cli_options):
 
     # DSTL Summary
     rf.transform(
-        [[process_data, insample14, medium_term, next_generation_matrix]],
+        [
+            [
+                process_data,
+                insample7,
+                insample14,
+                medium_term,
+                next_generation_matrix,
+            ]
+        ],
         rf.formatter(),
         wd("summary_longformat.xlsx"),
     )(summary_longformat)

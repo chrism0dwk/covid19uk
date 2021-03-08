@@ -36,7 +36,7 @@ def prevalence(prediction, popsize):
     )
     prev_per_1e5 = (
         prev[..., 1:3].sum(dim="state").reset_coords(drop=True)
-        / popsize[np.newaxis, :, np.newaxis]
+        / np.array(popsize)[np.newaxis, :, np.newaxis]
         * 100000
     )
     return xarray2summarydf(prev_per_1e5)
@@ -66,7 +66,7 @@ def weekly_pred_cases_per_100k(prediction, popsize):
     )
     # Divide by population sizes
     week_incidence = (
-        week_incidence / popsize[np.newaxis, :, np.newaxis] * 100000
+        week_incidence / np.array(popsize)[np.newaxis, :, np.newaxis] * 100000
     )
     return xarray2summarydf(week_incidence)
 
@@ -76,36 +76,62 @@ def summary_longformat(input_files, output_file):
        csv file.
 
     :param input_files: a list of filenames [data_pkl,
-                                             insample14_pkl,
-                                             medium_term_pred_pkl,
-                                             ngm_pkl]
+                                             insample7_nc
+                                             insample14_nc,
+                                             medium_term_pred_nc,
+                                             ngm_nc]
     :param output_file: the output CSV with columns `[date,
                         location,value_name,value,q0.025,q0.975]`
     """
 
-    with open(input_files[0], "rb") as f:
-        data = pkl.load(f)
-    da = data["cases"].rename({"date": "time"})
-    df = da.to_dataframe(name="value").reset_index()
+    data = xarray.open_dataset(input_files[0], group="constant_data")
+    cases = xarray.open_dataset(input_files[0], group="observations")["cases"]
+
+    df = cases.to_dataframe(name="value").reset_index()
     df["value_name"] = "newCasesBySpecimenDate"
     df["0.05"] = np.nan
     df["0.5"] = np.nan
     df["0.95"] = np.nan
 
     # Insample predictive incidence
-    insample = xarray.open_dataset(input_files[1])
+    insample = xarray.open_dataset(input_files[1], group="predictions")
+    insample_df = xarray2summarydf(
+        insample["events"][..., 2].reset_coords(drop=True)
+    )
+    insample_df["value_name"] = "insample7_Cases"
+    df = pd.concat([df, insample_df], axis="index")
+
+    insample = xarray.open_dataset(input_files[2], group="predictions")
     insample_df = xarray2summarydf(
         insample["events"][..., 2].reset_coords(drop=True)
     )
     insample_df["value_name"] = "insample14_Cases"
     df = pd.concat([df, insample_df], axis="index")
 
-    # Medium term incidence
-    medium_term = xarray.open_dataset(input_files[2])
+    # Medium term absolute incidence
+    medium_term = xarray.open_dataset(input_files[3], group="predictions")
     medium_df = xarray2summarydf(
         medium_term["events"][..., 2].reset_coords(drop=True)
     )
-    medium_df["value_name"] = "Cases"
+    medium_df["value_name"] = "absolute_incidence"
+    df = pd.concat([df, medium_df], axis="index")
+
+    # Cumulative cases
+    medium_df = xarray2summarydf(
+        medium_term["events"][..., 2].cumsum(dim="time").reset_coords(drop=True)
+    )
+    medium_df["value_name"] = "cumulative_absolute_incidence"
+    df = pd.concat([df, medium_df], axis="index")
+
+    # Medium term incidence per 100k
+    medium_df = xarray2summarydf(
+        (
+            medium_term["events"][..., 2].reset_coords(drop=True)
+            / np.array(data["N"])[np.newaxis, :, np.newaxis]
+        )
+        * 100000
+    )
+    medium_df["value_name"] = "incidence_per_100k"
     df = pd.concat([df, medium_df], axis="index")
 
     # Weekly incidence per 100k
@@ -121,12 +147,14 @@ def summary_longformat(input_files, output_file):
     df = pd.concat([df, prev_df], axis="index")
 
     # Rt
-    ngms = xarray.load_dataset(input_files[3])["ngm"]
+    ngms = xarray.load_dataset(input_files[4], group="posterior_predictive")[
+        "ngm"
+    ]
     rt = ngms.sum(dim="dest")
     rt = rt.rename({"src": "location"})
     rt_summary = xarray2summarydf(rt)
     rt_summary["value_name"] = "R"
-    rt_summary["time"] = data["date_range"][1]
+    rt_summary["time"] = cases.coords["time"].data[-1] + np.timedelta64(1, "D")
     df = pd.concat([df, rt_summary], axis="index")
 
     quantiles = df.columns[df.columns.str.startswith("0.")]
@@ -144,3 +172,33 @@ def summary_longformat(input_files, output_file):
         value=df["value"],
         quantiles={q: df[q] for q in quantiles},
     ).to_excel(output_file, index=False)
+
+
+if __name__ == "__main__":
+
+    import os
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--output", "-o", type=str, required=True, help="Output file"
+    )
+    parser.add_argument(
+        "resultsdir",
+        type=str,
+        help="Results directory",
+    )
+    args = parser.parse_args()
+
+    input_files = [
+        os.path.join(args.resultsdir, d)
+        for d in [
+            "pipeline_data.pkl",
+            "insample7.nc",
+            "insample14.nc",
+            "medium_term.nc",
+            "ngm.nc",
+        ]
+    ]
+
+    summary_longformat(input_files, args.output)

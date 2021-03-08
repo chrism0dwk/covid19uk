@@ -1,6 +1,8 @@
 """Summarises posterior distribution into a geopackage"""
 
 import pickle as pkl
+import numpy as np
+import xarray
 import pandas as pd
 import geopandas as gp
 
@@ -26,12 +28,11 @@ def summary_geopackage(input_files, output_file, config):
     """
 
     # Read in the first input file
-    with open(input_files.pop(0), "rb") as f:
-        data = pkl.load(f)
+    data = xarray.open_dataset(input_files.pop(0), group="constant_data")
 
     # Load and filter geopackage
     geo = gp.read_file(config["base_geopackage"], layer=config["base_layer"])
-    geo = geo[geo["lad19cd"].isin(data["locations"]["lad19cd"])]
+    geo = geo[geo["lad19cd"].isin(np.array(data.coords["location"]))]
     geo = geo.sort_values(by="lad19cd")
 
     # Dump data into the geopackage

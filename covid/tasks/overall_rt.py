@@ -12,7 +12,9 @@ from covid.summary import (
 
 def overall_rt(next_generation_matrix, output_file):
 
-    ngms = xarray.open_dataset(next_generation_matrix)["ngm"]
+    ngms = xarray.open_dataset(
+        next_generation_matrix, group="posterior_predictive"
+    )["ngm"]
     b, _ = power_iteration(ngms)
     rt = rayleigh_quotient(ngms, b)
     q = np.arange(0.05, 1.0, 0.05)

@@ -1,9 +1,11 @@
 """MCMC Test Rig for COVID-19 UK model"""
 # pylint: disable=E402
 
-import h5py
 import pickle as pkl
 from time import perf_counter
+
+import h5py
+import xarray
 import tqdm
 import yaml
 import numpy as np
@@ -270,7 +272,12 @@ def draws_to_dict(draws):
 
 
 def run_mcmc(
-    joint_log_prob_fn, current_state, initial_conditions, config, output_file
+    joint_log_prob_fn,
+    current_state,
+    param_bijector,
+    initial_conditions,
+    config,
+    output_file,
 ):
 
     first_window_size, slow_window_size, last_window_size = _get_window_sizes(
@@ -325,13 +332,13 @@ def run_mcmc(
         event_kernel_kwargs=event_kernel_kwargs,
         trace_fn=trace_results_fn,
     )
+    current_state = [s[-1] for s in draws]
+    draws[0] = param_bijector.inverse(draws[0])
     posterior.write_samples(
-        draws_to_dict(draws),
-        first_dim_offset=offset,
+        draws_to_dict(draws), first_dim_offset=offset,
     )
     posterior.write_results(trace, first_dim_offset=offset)
     offset += first_window_size
-    current_state = [s[-1] for s in draws]
 
     # Slow adaptation sampling
     hmc_kernel_kwargs["step_size"] = step_size
@@ -357,9 +364,9 @@ def run_mcmc(
         hmc_kernel_kwargs["step_size"] = step_size
         hmc_kernel_kwargs["momentum_distribution"] = momentum_distribution
         current_state = [s[-1] for s in draws]
+        draws[0] = param_bijector.inverse(draws[0])
         posterior.write_samples(
-            draws_to_dict(draws),
-            first_dim_offset=offset,
+            draws_to_dict(draws), first_dim_offset=offset,
         )
         posterior.write_results(trace, first_dim_offset=offset)
         offset += window_num_draws
@@ -367,7 +374,7 @@ def run_mcmc(
     # Fast adaptation sampling
     print(f"Fast window {last_window_size}")
     dual_averaging_kwargs["num_adaptation_steps"] = last_window_size
-    draws, trace, step_size, weighted_running_variance = _fast_adapt_window(
+    draws, trace, step_size, _ = _fast_adapt_window(
         num_draws=last_window_size,
         joint_log_prob_fn=joint_log_prob_fn,
         initial_position=current_state,
@@ -377,9 +384,9 @@ def run_mcmc(
         trace_fn=trace_results_fn,
     )
     current_state = [s[-1] for s in draws]
+    draws[0] = param_bijector.inverse(draws[0])
     posterior.write_samples(
-        draws_to_dict(draws),
-        first_dim_offset=offset,
+        draws_to_dict(draws), first_dim_offset=offset,
     )
     posterior.write_results(trace, first_dim_offset=offset)
     offset += last_window_size
@@ -400,13 +407,12 @@ def run_mcmc(
             trace_fn=trace_results_fn,
         )
         current_state = [state_part[-1] for state_part in draws]
+        draws[0] = param_bijector.inverse(draws[0])
         posterior.write_samples(
-            draws_to_dict(draws),
-            first_dim_offset=offset,
+            draws_to_dict(draws), first_dim_offset=offset,
         )
         posterior.write_results(
-            trace,
-            first_dim_offset=offset,
+            trace, first_dim_offset=offset,
         )
         offset += config["num_burst_samples"]
 
@@ -421,13 +427,13 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     else:
         print("Using CPU")
 
-    with open(data_file, "rb") as f:
-        data = pkl.load(f)
+    data = xarray.open_dataset(data_file, group="constant_data")
+    cases = xarray.open_dataset(data_file, group="observations")["cases"]
 
     # We load in cases and impute missing infections first, since this sets the
     # time epoch which we are analysing.
     # Impute censored events, return cases
-    events = model_spec.impute_censored_events(data["cases"].astype(DTYPE))
+    events = model_spec.impute_censored_events(cases.astype(DTYPE))
 
     # Initial conditions are calculated by calculating the state
     # at the beginning of the inference period
@@ -437,13 +443,16 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     # to set up a sensible initial state.
     state = compute_state(
         initial_state=tf.concat(
-            [data["N"][:, tf.newaxis], tf.zeros_like(events[:, 0, :])],
+            [
+                tf.constant(data["N"], DTYPE)[:, tf.newaxis],
+                tf.zeros_like(events[:, 0, :]),
+            ],
             axis=-1,
         ),
         events=events,
         stoichiometry=model_spec.STOICHIOMETRY,
     )
-    start_time = state.shape[1] - data["cases"].shape[1]
+    start_time = state.shape[1] - cases.shape[1]
     initial_state = state[:, start_time, :]
     events = events[:, start_time:, :]
 
@@ -457,32 +466,32 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
         num_steps=events.shape[1],
     )
 
-    def joint_log_prob(unconstrained_params, events):
-        bij = tfb.Invert(  # Forward transform unconstrains params
-            tfb.Blockwise(
-                [
-                    tfb.Softplus(low=dtype_util.eps(DTYPE)),
-                    tfb.Identity(),
-                    tfb.Softplus(low=dtype_util.eps(DTYPE)),
-                    tfb.Identity(),
-                ],
-                block_sizes=[1, 2, 1, unconstrained_params.shape[-1] - 4],
-            )
+    param_bij = tfb.Invert(  # Forward transform unconstrains params
+        tfb.Blockwise(
+            [
+                tfb.Softplus(low=dtype_util.eps(DTYPE)),
+                tfb.Identity(),
+                tfb.Softplus(low=dtype_util.eps(DTYPE)),
+                tfb.Identity(),
+            ],
+            block_sizes=[1, 2, 1, model.event_shape["xi"][0] + 1],
         )
-        params = bij.inverse(unconstrained_params)
-        return (
-            model.log_prob(
-                dict(
-                    beta2=params[0],
-                    gamma0=params[1],
-                    gamma1=params[2],
-                    sigma=params[3],
-                    beta1=params[4],
-                    xi=params[5:],
-                    seir=events,
-                )
+    )
+
+    def joint_log_prob(unconstrained_params, events):
+        params = param_bij.inverse(unconstrained_params)
+        return model.log_prob(
+            dict(
+                beta2=params[0],
+                gamma0=params[1],
+                gamma1=params[2],
+                sigma=params[3],
+                beta1=params[4],
+                xi=params[5:],
+                seir=events,
             )
-            + bij.inverse_log_det_jacobian(unconstrained_params, event_ndims=1)
+        ) + param_bij.inverse_log_det_jacobian(
+            unconstrained_params, event_ndims=1
         )
 
     # MCMC tracing functions
@@ -508,14 +517,15 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     posterior = run_mcmc(
         joint_log_prob_fn=joint_log_prob,
         current_state=current_chain_state,
+        param_bijector=param_bij,
         initial_conditions=initial_state,
         config=config,
         output_file=output_file,
     )
     posterior._file.create_dataset("initial_state", data=initial_state)
     posterior._file.create_dataset(
-        "date_range",
-        data=np.array(data["date_range"])
+        "time",
+        data=np.array(cases.coords["time"])
         .astype(str)
         .astype(h5py.string_dtype()),
     )
@@ -549,9 +559,7 @@ if __name__ == "__main__":
         "-o", "--output", type=str, help="Output file", required=True
     )
     parser.add_argument(
-        "data_file",
-        type=str,
-        help="Data pickle file",
+        "data_file", type=str, help="Data pickle file",
     )
     args = parser.parse_args()
 

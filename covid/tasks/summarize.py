@@ -20,7 +20,7 @@ def rt(input_file, output_file):
     :param output_file: a .csv of mean (ci) values
     """
 
-    ngm = xarray.open_dataset(input_file)["ngm"]
+    ngm = xarray.open_dataset(input_file, group="posterior_predictive")["ngm"]
 
     rt = np.sum(ngm, axis=-2)
     rt_summary = mean_and_ci(rt, name="Rt")
@@ -41,7 +41,7 @@ def infec_incidence(input_file, output_file):
     :param output_file: csv with prediction summaries
     """
 
-    prediction = xarray.open_dataset(input_file)["events"]
+    prediction = xarray.open_dataset(input_file, group="predictions")["events"]
 
     offset = 4
     timepoints = SUMMARY_DAYS + offset
@@ -77,17 +77,15 @@ def prevalence(input_files, output_file):
     offset = 4  # Account for recording lag
     timepoints = SUMMARY_DAYS + offset
 
-    with open(input_files[0], "rb") as f:
-        data = pkl.load(f)
-
-    prediction = xarray.open_dataset(input_files[1])
+    data = xarray.open_dataset(input_files[0], group="constant_data")
+    prediction = xarray.open_dataset(input_files[1], group="predictions")
 
     predicted_state = compute_state(
         prediction["initial_state"], prediction["events"], STOICHIOMETRY
     )
 
     def calc_prev(state, name=None):
-        prev = np.sum(state[..., 1:3], axis=-1) / np.squeeze(data["N"])
+        prev = np.sum(state[..., 1:3], axis=-1) / np.array(data["N"])
         return mean_and_ci(prev, name=name)
 
     idx = prediction.coords["location"]

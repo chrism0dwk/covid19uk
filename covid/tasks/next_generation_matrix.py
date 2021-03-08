@@ -7,6 +7,7 @@ import tensorflow as tf
 
 
 from covid import model_spec
+from covid.util import copy_nc_attrs
 from gemlib.util import compute_state
 
 
@@ -56,8 +57,7 @@ def calc_posterior_ngm(samples, covar_data):
 
 def next_generation_matrix(input_files, output_file):
 
-    with open(input_files[0], "rb") as f:
-        covar_data = pkl.load(f)
+    covar_data = xarray.open_dataset(input_files[0], group="constant_data")
 
     with open(input_files[1], "rb") as f:
         samples = pkl.load(f)
@@ -68,15 +68,16 @@ def next_generation_matrix(input_files, output_file):
         ngm,
         coords=[
             np.arange(ngm.shape[0]),
-            covar_data["locations"]["lad19cd"],
-            covar_data["locations"]["lad19cd"],
+            covar_data.coords["location"],
+            covar_data.coords["location"],
         ],
         dims=["iteration", "dest", "src"],
     )
     ngm = xarray.Dataset({"ngm": ngm})
 
     # Output
-    ngm.to_netcdf(output_file)
+    ngm.to_netcdf(output_file, group="posterior_predictive")
+    copy_nc_attrs(input_files[0], output_file)
 
 
 if __name__ == "__main__":

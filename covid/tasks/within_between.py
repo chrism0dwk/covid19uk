@@ -3,6 +3,7 @@
 import pickle as pkl
 import numpy as np
 import pandas as pd
+import xarray
 import tensorflow as tf
 
 from gemlib.util import compute_state
@@ -62,8 +63,7 @@ def within_between(input_files, output_file):
     :param output_file: a csv with within/between summary
     """
 
-    with open(input_files[0], "rb") as f:
-        covar_data = pkl.load(f)
+    covar_data = xarray.open_dataset(input_files[0], group="constant_data")
 
     with open(input_files[1], "rb") as f:
         samples = pkl.load(f)
@@ -85,7 +85,9 @@ def within_between(input_files, output_file):
             between_mean=np.mean(between, axis=0),
             p_within_gt_between=np.mean(within > between),
         ),
-        index=pd.Index(covar_data["locations"]["lad19cd"], name="location"),
+        index=pd.Index(
+            covar_data["locations"].coords["location"], name="location"
+        ),
     )
     df.to_csv(output_file)
 
