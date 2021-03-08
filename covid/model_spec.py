@@ -95,7 +95,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
     def beta1():
         return tfd.Normal(
             loc=tf.constant(0.0, dtype=DTYPE),
-            scale=tf.constant(1000.0, dtype=DTYPE),
+            scale=tf.constant(1.0, dtype=DTYPE),
         )
 
     def beta2():
@@ -106,8 +106,8 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
 
     def sigma():
         return tfd.Gamma(
-            concentration=tf.constant(2.0, dtype=DTYPE),
-            rate=tf.constant(20.0, dtype=DTYPE),
+            concentration=tf.constant(20.0, dtype=DTYPE),
+            rate=tf.constant(200.0, dtype=DTYPE),
         )
 
     def xi(beta1, sigma):

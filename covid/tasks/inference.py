@@ -10,19 +10,355 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+from tensorflow_probability.python.internal import unnest
+from tensorflow_probability.python.internal import dtype_util
+from tensorflow_probability.python.experimental.stats import sample_stats
+
 from gemlib.util import compute_state
-from gemlib.mcmc import UncalibratedEventTimesUpdate
-from gemlib.mcmc import UncalibratedOccultUpdate, TransitionTopology
-from gemlib.mcmc import GibbsKernel
-from gemlib.mcmc import MultiScanKernel
-from gemlib.mcmc import AdaptiveRandomWalkMetropolis
 from gemlib.mcmc import Posterior
+from gemlib.mcmc import GibbsKernel
+from covid.tasks.mcmc_kernel_factory import make_hmc_base_kernel
+from covid.tasks.mcmc_kernel_factory import make_hmc_fast_adapt_kernel
+from covid.tasks.mcmc_kernel_factory import make_hmc_slow_adapt_kernel
+from covid.tasks.mcmc_kernel_factory import make_event_multiscan_gibbs_step
 
 import covid.model_spec as model_spec
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
 DTYPE = model_spec.DTYPE
+
+
+def get_weighted_running_variance(draws):
+
+    prev_mean, prev_var = tf.nn.moments(draws[-draws.shape[0] // 2 :], axes=[0])
+    num_samples = tf.cast(
+        draws.shape[0] / 2,
+        dtype=dtype_util.common_dtype([prev_mean, prev_var], tf.float32),
+    )
+    weighted_running_variance = sample_stats.RunningVariance.from_stats(
+        num_samples=num_samples, mean=prev_mean, variance=prev_var
+    )
+    return weighted_running_variance
+
+
+@tf.function
+def _fast_adapt_window(
+    num_draws,
+    joint_log_prob_fn,
+    initial_position,
+    hmc_kernel_kwargs,
+    dual_averaging_kwargs,
+    event_kernel_kwargs,
+    trace_fn=None,
+    seed=None,
+):
+
+    kernel_list = [
+        (
+            0,
+            make_hmc_fast_adapt_kernel(
+                hmc_kernel_kwargs=hmc_kernel_kwargs,
+                dual_averaging_kwargs=dual_averaging_kwargs,
+            ),
+        ),
+        (1, make_event_multiscan_gibbs_step(**event_kernel_kwargs)),
+    ]
+
+    kernel = GibbsKernel(
+        target_log_prob_fn=joint_log_prob_fn,
+        kernel_list=kernel_list,
+        name="fast_adapt",
+    )
+
+    draws, trace, fkr = tfp.mcmc.sample_chain(
+        num_draws,
+        initial_position,
+        kernel=kernel,
+        return_final_kernel_results=True,
+        trace_fn=trace_fn,
+        seed=seed,
+    )
+
+    weighted_running_variance = get_weighted_running_variance(draws[0])
+    step_size = unnest.get_outermost(fkr.inner_results[0], "step_size")
+    return draws, trace, step_size, weighted_running_variance
+
+
+@tf.function
+def _slow_adapt_window(
+    num_draws,
+    joint_log_prob_fn,
+    initial_position,
+    initial_running_variance,
+    hmc_kernel_kwargs,
+    dual_averaging_kwargs,
+    event_kernel_kwargs,
+    trace_fn=None,
+    seed=None,
+):
+    kernel_list = [
+        (
+            0,
+            make_hmc_slow_adapt_kernel(
+                initial_running_variance,
+                hmc_kernel_kwargs,
+                dual_averaging_kwargs,
+            ),
+        ),
+        (1, make_event_multiscan_gibbs_step(**event_kernel_kwargs)),
+    ]
+
+    kernel = GibbsKernel(
+        target_log_prob_fn=joint_log_prob_fn,
+        kernel_list=kernel_list,
+        name="slow_adapt",
+    )
+
+    draws, trace, fkr = tfp.mcmc.sample_chain(
+        num_draws,
+        current_state=initial_position,
+        kernel=kernel,
+        return_final_kernel_results=True,
+        trace_fn=trace_fn,
+    )
+
+    step_size = unnest.get_outermost(fkr.inner_results[0], "step_size")
+    momentum_distribution = unnest.get_outermost(
+        fkr.inner_results[0], "momentum_distribution"
+    )
+
+    weighted_running_variance = get_weighted_running_variance(draws[0])
+
+    return (
+        draws,
+        trace,
+        step_size,
+        weighted_running_variance,
+        momentum_distribution,
+    )
+
+
+@tf.function  # (experimental_compile=True)
+def _fixed_window(
+    num_draws,
+    joint_log_prob_fn,
+    initial_position,
+    hmc_kernel_kwargs,
+    event_kernel_kwargs,
+    trace_fn=None,
+    seed=None,
+):
+    """Fixed step size HMC.
+
+    :returns: (draws, trace, final_kernel_results)
+    """
+    kernel_list = [
+        (0, make_hmc_base_kernel(**hmc_kernel_kwargs)),
+        (1, make_event_multiscan_gibbs_step(**event_kernel_kwargs)),
+    ]
+
+    kernel = GibbsKernel(
+        target_log_prob_fn=joint_log_prob_fn,
+        kernel_list=kernel_list,
+        name="fixed",
+    )
+
+    return tfp.mcmc.sample_chain(
+        num_draws,
+        current_state=initial_position,
+        kernel=kernel,
+        return_final_kernel_results=True,
+        trace_fn=trace_fn,
+        seed=seed,
+    )
+
+
+def trace_results_fn(_, results):
+    """Packs results into a dictionary"""
+    results_dict = {}
+    root_results = results.inner_results
+
+    results_dict["hmc"] = {
+        "is_accepted": unnest.get_innermost(root_results[0], "is_accepted"),
+        "target_log_prob": unnest.get_innermost(
+            root_results[0], "target_log_prob"
+        ),
+    }
+
+    def get_move_results(results):
+        return {
+            "is_accepted": results.is_accepted,
+            "target_log_prob": results.accepted_results.target_log_prob,
+            "proposed_delta": tf.stack(
+                [
+                    results.accepted_results.m,
+                    results.accepted_results.t,
+                    results.accepted_results.delta_t,
+                    results.accepted_results.x_star,
+                ]
+            ),
+        }
+
+    res1 = root_results[1].inner_results
+    results_dict["move/S->E"] = get_move_results(res1[0])
+    results_dict["move/E->I"] = get_move_results(res1[1])
+    results_dict["occult/S->E"] = get_move_results(res1[2])
+    results_dict["occult/E->I"] = get_move_results(res1[3])
+
+    return results_dict
+
+
+def draws_to_dict(draws):
+    return {
+        "beta2": draws[0][:, 0],
+        "gamma0": draws[0][:, 1],
+        "gamma1": draws[0][:, 2],
+        "sigma": draws[0][:, 3],
+        "beta3": tf.zeros([1, 5], dtype=DTYPE),
+        "beta1": draws[0][:, 4],
+        "xi": draws[0][:, 5:],
+        "events": draws[1],
+    }
+
+
+def run_mcmc(
+    joint_log_prob_fn, current_state, initial_conditions, config, output_file
+):
+
+    num_draws = config["num_bursts"] * config["num_burst_samples"]
+    fast_window_size = 75
+    slow_window_size = 25
+    num_slow_windows = 4
+
+    hmc_kernel_kwargs = {
+        "step_size": 0.00001,
+        "num_leapfrog_steps": 4,
+        "momentum_distribution": None,
+    }
+    dual_averaging_kwargs = {
+        "num_adaptation_steps": fast_window_size,
+        "target_accept_prob": 0.75,
+    }
+    event_kernel_kwargs = {
+        "initial_state": initial_conditions,
+        "t_range": [
+            current_state[1].shape[-2] - 21,
+            current_state[1].shape[-2],
+        ],
+        "config": config,
+    }
+
+    # Set up posterior
+    draws, trace, _ = _fixed_window(
+        num_draws=1,
+        joint_log_prob_fn=joint_log_prob_fn,
+        initial_position=current_state,
+        hmc_kernel_kwargs=hmc_kernel_kwargs,
+        event_kernel_kwargs=event_kernel_kwargs,
+        trace_fn=trace_results_fn,
+    )
+    posterior = Posterior(
+        output_file,
+        sample_dict=draws_to_dict(draws),
+        results_dict=trace,
+        num_samples=5000 + 75 + 25 + 50 + 100 + 200 + 75,
+    )
+    offset = 0
+
+    # Fast adaptation sampling
+    print(f"Fast window {fast_window_size}")
+    draws, trace, step_size, running_variance = _fast_adapt_window(
+        num_draws=fast_window_size,
+        joint_log_prob_fn=joint_log_prob_fn,
+        initial_position=current_state,
+        hmc_kernel_kwargs=hmc_kernel_kwargs,
+        dual_averaging_kwargs=dual_averaging_kwargs,
+        event_kernel_kwargs=event_kernel_kwargs,
+        trace_fn=trace_results_fn,
+    )
+    posterior.write_samples(
+        draws_to_dict(draws),
+        first_dim_offset=offset,
+    )
+    posterior.write_results(trace, first_dim_offset=offset)
+    offset += fast_window_size
+    current_state = [s[-1] for s in draws]
+
+    # Slow adaptation sampling
+    hmc_kernel_kwargs["step_size"] = step_size
+    for slow_window_idx in range(num_slow_windows):
+        window_num_draws = slow_window_size * (2 ** slow_window_idx)
+        print(f"Slow window {window_num_draws}")
+        (
+            draws,
+            trace,
+            step_size,
+            running_variance,
+            momentum_distribution,
+        ) = _slow_adapt_window(
+            num_draws=window_num_draws,
+            joint_log_prob_fn=joint_log_prob_fn,
+            initial_position=current_state,
+            initial_running_variance=running_variance,
+            hmc_kernel_kwargs=hmc_kernel_kwargs,
+            dual_averaging_kwargs=dual_averaging_kwargs,
+            event_kernel_kwargs=event_kernel_kwargs,
+            trace_fn=trace_results_fn,
+        )
+        hmc_kernel_kwargs["step_size"] = step_size
+        hmc_kernel_kwargs["momentum_distribution"] = momentum_distribution
+        current_state = [s[-1] for s in draws]
+        posterior.write_samples(
+            draws_to_dict(draws),
+            first_dim_offset=offset,
+        )
+        posterior.write_results(trace, first_dim_offset=offset)
+        offset += window_num_draws
+
+    # Fast adaptation sampling
+    print(f"Fast window {fast_window_size}")
+    draws, trace, step_size, weighted_running_variance = _fast_adapt_window(
+        num_draws=fast_window_size,
+        joint_log_prob_fn=joint_log_prob_fn,
+        initial_position=current_state,
+        hmc_kernel_kwargs=hmc_kernel_kwargs,
+        dual_averaging_kwargs=dual_averaging_kwargs,
+        event_kernel_kwargs=event_kernel_kwargs,
+        trace_fn=trace_results_fn,
+    )
+    current_state = [s[-1] for s in draws]
+    posterior.write_samples(
+        draws_to_dict(draws),
+        first_dim_offset=offset,
+    )
+    posterior.write_results(trace, first_dim_offset=offset)
+    offset += fast_window_size
+
+    # Fixed window sampling
+    print("Sampling...")
+    hmc_kernel_kwargs["step_size"] = step_size
+    for i in tqdm.tqdm(range(config["num_bursts"])):
+        draws, trace, _ = _fixed_window(
+            num_draws=config["num_burst_samples"],
+            joint_log_prob_fn=joint_log_prob_fn,
+            initial_position=current_state,
+            hmc_kernel_kwargs=hmc_kernel_kwargs,
+            event_kernel_kwargs=event_kernel_kwargs,
+            trace_fn=trace_results_fn,
+        )
+        current_state = [state_part[-1] for state_part in draws]
+        posterior.write_samples(
+            draws_to_dict(draws),
+            first_dim_offset=offset,
+        )
+        posterior.write_results(
+            trace,
+            first_dim_offset=offset,
+        )
+        offset += config["num_burst_samples"]
+
+    return posterior
 
 
 def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
@@ -39,7 +375,6 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     # We load in cases and impute missing infections first, since this sets the
     # time epoch which we are analysing.
     # Impute censored events, return cases
-    print("Data shape:", data["cases"].shape)
     events = model_spec.impute_censored_events(data["cases"].astype(DTYPE))
 
     # Initial conditions are calculated by calculating the state
@@ -70,275 +405,70 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
         num_steps=events.shape[1],
     )
 
-    def joint_log_prob(block0, block1, events):
-        return model.log_prob(
-            dict(
-                beta2=block0[0],
-                gamma0=block0[1],
-                gamma1=block0[2],
-                sigma=block0[3],
-                beta1=block1[0],
-                xi=block1[1:],
-                seir=events,
+    def joint_log_prob(unconstrained_params, events):
+        bij = tfb.Invert(  # Forward transform unconstrains params
+            tfb.Blockwise(
+                [
+                    tfb.Softplus(low=dtype_util.eps(DTYPE)),
+                    tfb.Identity(),
+                    tfb.Softplus(low=dtype_util.eps(DTYPE)),
+                    tfb.Identity(),
+                ],
+                block_sizes=[1, 2, 1, unconstrained_params.shape[-1] - 4],
             )
         )
-
-    # Build Metropolis within Gibbs sampler
-    def make_blk0_kernel(shape, name):
-        def fn(target_log_prob_fn, _):
-            return tfp.mcmc.TransformedTransitionKernel(
-                inner_kernel=AdaptiveRandomWalkMetropolis(
-                    target_log_prob_fn=target_log_prob_fn,
-                    initial_covariance=np.eye(shape[0], dtype=model_spec.DTYPE)
-                    * 1e-1,
-                    covariance_burnin=200,
-                ),
-                bijector=tfp.bijectors.Blockwise(
-                    bijectors=[
-                        tfp.bijectors.Exp(),
-                        tfp.bijectors.Identity(),
-                        tfp.bijectors.Exp(),
-                        # tfp.bijectors.Identity(),
-                    ],
-                    block_sizes=[1, 2, 1],  # , 5],
-                ),
-                name=name,
+        params = bij.inverse(unconstrained_params)
+        return (
+            model.log_prob(
+                dict(
+                    beta2=params[0],
+                    gamma0=params[1],
+                    gamma1=params[2],
+                    sigma=params[3],
+                    beta1=params[4],
+                    xi=params[5:],
+                    seir=events,
+                )
             )
-
-        return fn
-
-    def make_blk1_kernel(shape, name):
-        def fn(target_log_prob_fn, _):
-            return AdaptiveRandomWalkMetropolis(
-                target_log_prob_fn=target_log_prob_fn,
-                initial_covariance=np.eye(shape[0], dtype=model_spec.DTYPE)
-                * 1e-1,
-                covariance_burnin=200,
-                name=name,
-            )
-
-        return fn
-
-    def make_partially_observed_step(
-        target_event_id, prev_event_id=None, next_event_id=None, name=None
-    ):
-        def fn(target_log_prob_fn, _):
-            return tfp.mcmc.MetropolisHastings(
-                inner_kernel=UncalibratedEventTimesUpdate(
-                    target_log_prob_fn=target_log_prob_fn,
-                    target_event_id=target_event_id,
-                    prev_event_id=prev_event_id,
-                    next_event_id=next_event_id,
-                    initial_state=initial_state,
-                    dmax=config["dmax"],
-                    mmax=config["m"],
-                    nmax=config["nmax"],
-                ),
-                name=name,
-            )
-
-        return fn
-
-    def make_occults_step(prev_event_id, target_event_id, next_event_id, name):
-        def fn(target_log_prob_fn, _):
-            return tfp.mcmc.MetropolisHastings(
-                inner_kernel=UncalibratedOccultUpdate(
-                    target_log_prob_fn=target_log_prob_fn,
-                    topology=TransitionTopology(
-                        prev_event_id, target_event_id, next_event_id
-                    ),
-                    cumulative_event_offset=initial_state,
-                    nmax=config["occult_nmax"],
-                    t_range=(events.shape[1] - 21, events.shape[1]),
-                    name=name,
-                ),
-                name=name,
-            )
-
-        return fn
-
-    def make_event_multiscan_kernel(target_log_prob_fn, _):
-        return MultiScanKernel(
-            config["num_event_time_updates"],
-            GibbsKernel(
-                target_log_prob_fn=target_log_prob_fn,
-                kernel_list=[
-                    (0, make_partially_observed_step(0, None, 1, "se_events")),
-                    (0, make_partially_observed_step(1, 0, 2, "ei_events")),
-                    (0, make_occults_step(None, 0, 1, "se_occults")),
-                    (0, make_occults_step(0, 1, 2, "ei_occults")),
-                ],
-                name="gibbs1",
-            ),
+            + bij.inverse_log_det_jacobian(unconstrained_params, event_ndims=1)
         )
 
     # MCMC tracing functions
-    def trace_results_fn(_, results):
-        """Packs results into a dictionary"""
-        results_dict = {}
-        res0 = results.inner_results
-
-        results_dict["block0"] = {
-            "is_accepted": res0[0].inner_results.is_accepted,
-            "target_log_prob": res0[
-                0
-            ].inner_results.accepted_results.target_log_prob,
-        }
-        results_dict["block1"] = {
-            "is_accepted": res0[1].is_accepted,
-            "target_log_prob": res0[1].accepted_results.target_log_prob,
-        }
-
-        def get_move_results(results):
-            return {
-                "is_accepted": results.is_accepted,
-                "target_log_prob": results.accepted_results.target_log_prob,
-                "proposed_delta": tf.stack(
-                    [
-                        results.accepted_results.m,
-                        results.accepted_results.t,
-                        results.accepted_results.delta_t,
-                        results.accepted_results.x_star,
-                    ]
-                ),
-            }
-
-        res1 = res0[2].inner_results
-        results_dict["move/S->E"] = get_move_results(res1[0])
-        results_dict["move/E->I"] = get_move_results(res1[1])
-        results_dict["occult/S->E"] = get_move_results(res1[2])
-        results_dict["occult/E->I"] = get_move_results(res1[3])
-
-        return results_dict
-
-    # Build MCMC algorithm here.  This will be run in bursts for memory economy
-    @tf.function(autograph=use_autograph, experimental_compile=use_xla)
-    def sample(n_samples, init_state, thin=0, previous_results=None):
-        with tf.name_scope("main_mcmc_sample_loop"):
-
-            init_state = init_state.copy()
-
-            gibbs_schema = GibbsKernel(
-                target_log_prob_fn=joint_log_prob,
-                kernel_list=[
-                    (0, make_blk0_kernel(init_state[0].shape, "block0")),
-                    (1, make_blk1_kernel(init_state[1].shape, "block1")),
-                    (2, make_event_multiscan_kernel),
-                ],
-                name="gibbs0",
-            )
-
-            samples, results, final_results = tfp.mcmc.sample_chain(
-                n_samples,
-                init_state,
-                kernel=gibbs_schema,
-                num_steps_between_results=thin,
-                previous_kernel_results=previous_results,
-                return_final_kernel_results=True,
-                trace_fn=trace_results_fn,
-            )
-
-            return samples, results, final_results
-
     ###############################
     # Construct bursted MCMC loop #
     ###############################
-    NUM_BURSTS = int(config["num_bursts"])
-    NUM_BURST_SAMPLES = int(config["num_burst_samples"])
-    NUM_SAVED_SAMPLES = NUM_BURST_SAMPLES * NUM_BURSTS
-
-    # RNG stuff
-    tf.random.set_seed(2)
-
-    current_state = [
-        np.array(
-            [0.6, 0.0, 0.0, 0.1], dtype=DTYPE
-        ),  # , 0.0, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
-        np.zeros(
-            model.model["xi"](0.0, 0.1).event_shape[-1] + 1,
-            dtype=DTYPE,
+    current_chain_state = [
+        tf.concat(
+            [
+                np.array([0.6, 0.0, 0.0, 0.1], dtype=DTYPE),
+                np.zeros(
+                    model.model["xi"](0.0, 0.1).event_shape[-1] + 1,
+                    dtype=DTYPE,
+                ),
+            ],
+            axis=0,
         ),
         events,
     ]
-    print("Initial logpi:", joint_log_prob(*current_state))
+    print("Initial logpi:", joint_log_prob(*current_chain_state))
 
     # Output file
-    samples, results, _ = sample(1, current_state)
-    posterior = Posterior(
-        output_file,
-        sample_dict={
-            "beta2": (samples[0][:, 0], (NUM_BURST_SAMPLES,)),
-            "gamma0": (samples[0][:, 1], (NUM_BURST_SAMPLES,)),
-            "gamma1": (samples[0][:, 2], (NUM_BURST_SAMPLES,)),
-            "sigma": (samples[0][:, 3], (NUM_BURST_SAMPLES,)),
-            "beta3": (
-                tf.zeros([1, 5], dtype=DTYPE),
-                (NUM_BURST_SAMPLES, 2),
-            ),  # (samples[0][:, 4:], (NUM_BURST_SAMPLES, 2)),
-            "beta1": (samples[1][:, 0], (NUM_BURST_SAMPLES,)),
-            "xi": (
-                samples[1][:, 1:],
-                (NUM_BURST_SAMPLES, samples[1].shape[1] - 1),
-            ),
-            "events": (
-                samples[2],
-                (NUM_BURST_SAMPLES, min(32, events.shape[0]), 32, 1),
-            ),
-        },
-        results_dict=results,
-        num_samples=NUM_SAVED_SAMPLES,
+    posterior = run_mcmc(
+        joint_log_prob_fn=joint_log_prob,
+        current_state=current_chain_state,
+        initial_conditions=initial_state,
+        config=config,
+        output_file=output_file,
     )
     posterior._file.create_dataset("initial_state", data=initial_state)
     posterior._file.create_dataset(
         "date_range",
-        data=np.array(data["date_range"]).astype(h5py.string_dtype()),
+        data=np.array(data["date_range"])
+        .astype(str)
+        .astype(h5py.string_dtype()),
     )
-    # We loop over successive calls to sample because we have to dump results
-    #   to disc, or else end OOM (even on a 32GB system).
-    # with tf.profiler.experimental.Profile("/tmp/tf_logdir"):
-    final_results = None
-    for i in tqdm.tqdm(
-        range(NUM_BURSTS), unit_scale=NUM_BURST_SAMPLES * config["thin"]
-    ):
-        samples, results, final_results = sample(
-            NUM_BURST_SAMPLES,
-            init_state=current_state,
-            thin=config["thin"] - 1,
-            previous_results=final_results,
-        )
-        current_state = [s[-1] for s in samples]
-        print(current_state[0].numpy(), flush=True)
 
-        start = perf_counter()
-        posterior.write_samples(
-            {
-                "beta2": samples[0][:, 0],
-                "gamma0": samples[0][:, 1],
-                "gamma1": samples[0][:, 2],
-                "sigma": samples[0][:, 3],
-                "beta3": tf.zeros(
-                    [samples[0].shape[0], 5], dtype=DTYPE
-                ),  # samples[0][:, 4:],
-                "beta1": samples[1][:, 0],
-                "xi": samples[1][:, 1:],
-                "events": samples[2],
-            },
-            first_dim_offset=i * NUM_BURST_SAMPLES,
-        )
-        posterior.write_results(results, first_dim_offset=i * NUM_BURST_SAMPLES)
-        end = perf_counter()
-
-        print("Storage time:", end - start, "seconds")
-        for k, v in results.items():
-            print(
-                f"Acceptance {k}:",
-                tf.reduce_mean(tf.cast(v["is_accepted"], tf.float32)),
-            )
-
-    print(
-        f"Acceptance theta: {posterior['results/block0/is_accepted'][:].mean()}"
-    )
-    print(f"Acceptance xi: {posterior['results/block1/is_accepted'][:].mean()}")
+    print(f"Acceptance theta: {posterior['results/hmc/is_accepted'][:].mean()}")
     print(
         f"Acceptance move S->E: {posterior['results/move/S->E/is_accepted'][:].mean()}"
     )
@@ -367,7 +497,9 @@ if __name__ == "__main__":
         "-o", "--output", type=str, help="Output file", required=True
     )
     parser.add_argument(
-        "data_file", type=str, help="Data pickle file", required=True
+        "data_file",
+        type=str,
+        help="Data pickle file",
     )
     args = parser.parse_args()
 

@@ -2,8 +2,8 @@
 
 ProcessData:
   date_range:
-    - 2020-10-09
     - 2021-01-01
+    - 2021-02-02
   mobility_matrix: data/mergedflows.csv
   population_size: data/c2019modagepop.csv
   commute_volume:   # Can be replaced by DfT traffic flow data - contact authors <c.jewell@lancaster.ac.uk>
@@ -20,25 +20,22 @@ ProcessData:
     address:  "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/LAD_APR_2019_UK_NC/FeatureServer/0/query?where=1%3D1&outFields=LAD19CD,LAD19NM&returnGeometry=false&returnDistinctValues=true&orderByFields=LAD19CD&outSR=4326&f=json"
     format: ons
     regions:
-      - S  # Scotland
-      - E  # England
-      - W  # Wales
-      - NI # Northern Ireland
+      - N # Northern Ireland
 
 Mcmc:
   dmax: 84  # Max distance to move events
-  nmax: 50  # Max num events per metapopulation/time to move
-  m: 1      # Number of metapopulations to move
+  nmax: 25  # Max num events per metapopulation/time to move
+  m: 2      # Number of metapopulations to move
   occult_nmax: 15  # Max number of occults to add/delete per metapop/time
-  num_event_time_updates: 35  # Num event and occult updates per sweep of Gibbs MCMC sampler.
-  num_bursts: 200  # Number of MCMC bursts of `num_burst_samples` 
-  num_burst_samples: 50  # Number of MCMC samples per burst
-  thin: 20  # Thin MCMC samples every `thin` iterations
+  num_event_time_updates: 5  # Num event and occult updates per sweep of Gibbs MCMC sampler.
+  num_bursts: 50  # Number of MCMC bursts of `num_burst_samples` 
+  num_burst_samples: 100  # Number of MCMC samples per burst
+  thin: 1  # Thin MCMC samples every `thin` iterations
 
 ThinPosterior:  # Post-process further chain thinning HDF5 -> .pkl.
-  start: 6000
-  end: 10000
-  by: 10
+  start: 0
+  end: 5000
+  by: 1
 
 Geopackage:  # covid.tasks.summary_geopackage
   base_geopackage: data/UK2019mod_pop.gpkg
