@@ -6,7 +6,7 @@ import pickle as pkl
 
 def thin_posterior(input_file, output_file, config):
 
-    thin_idx = range(config['start'], config['end'], config['by'])
+    thin_idx = slice(config["start"], config["end"], config["by"])
 
     f = h5py.File(input_file, "r", rdcc_nbytes=1024 ** 3, rdcc_nslots=1e6)
     output_dict = dict(
