@@ -22,36 +22,23 @@ def calc_posterior_ngm(samples, covar_data):
     """
 
     def r_fn(args):
-        beta1_, beta2_, beta3_, sigma_, xi_, gamma0_, events_ = args
+
+        par = tf.nest.pack_sequence_as(samples, args)
+        
         t = events_.shape[-2] - 1
         state = compute_state(
-            samples["init_state"], events_, model_spec.STOICHIOMETRY
+            samples["init_state"], par['seir'], model_spec.STOICHIOMETRY
         )
         state = tf.gather(state, t, axis=-2)  # State on final inference day
 
-        par = dict(
-            beta1=beta1_,
-            beta2=beta2_,
-            beta3=beta3_,
-            sigma=sigma_,
-            gamma0=gamma0_,
-            xi=xi_,
-        )
+        del par['seir']
         ngm_fn = model_spec.next_generation_matrix_fn(covar_data, par)
         ngm = ngm_fn(t, state)
         return ngm
 
     return tf.vectorized_map(
         r_fn,
-        elems=(
-            samples["beta1"],
-            samples["beta2"],
-            samples["beta3"],
-            samples["sigma"],
-            samples["xi"],
-            samples["gamma0"],
-            samples["seir"],
-        ),
+        elems=tf.nest.flatten(samples),
     )
 
 
