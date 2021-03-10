@@ -54,7 +54,7 @@ def _get_window_sizes(num_adaptation_steps):
     return first_window_size, slow_window_size, last_window_size
 
 
-@tf.function
+@tf.function(jit_compile=False)
 def _fast_adapt_window(
     num_draws,
     joint_log_prob_fn,
@@ -112,7 +112,7 @@ def _fast_adapt_window(
     return draws, trace, step_size, weighted_running_variance
 
 
-@tf.function
+@tf.function(jit_compile=False)
 def _slow_adapt_window(
     num_draws,
     joint_log_prob_fn,
@@ -181,7 +181,7 @@ def _slow_adapt_window(
     )
 
 
-@tf.function  # (experimental_compile=True)
+@tf.function(jit_compile=False)
 def _fixed_window(
     num_draws,
     joint_log_prob_fn,
