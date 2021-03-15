@@ -76,7 +76,7 @@ def run_pipeline(global_config, results_directory, cli_options):
         global_config,
     )
     def run_mcmc(input_file, output_file, config):
-        mcmc(input_file, output_file, config["Mcmc"])
+        mcmc(input_file, output_file, config["Mcmc"], use_autograph=True, use_xla=False)
 
     @rf.transform(
         input=run_mcmc,
