@@ -77,7 +77,7 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
     )
 
     prediction = xarray.DataArray(
-        predicted_events,
+        predicted_events.numpy(),
         coords=[
             np.arange(predicted_events.shape[0]),
             covar_data.coords["location"],
@@ -87,7 +87,7 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
         dims=("iteration", "location", "time", "event"),
     )
     estimated_init_state = xarray.DataArray(
-        estimated_init_state,
+        estimated_init_state.numpy(),
         coords=[
             np.arange(estimated_init_state.shape[0]),
             covar_data.coords["location"],
