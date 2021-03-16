@@ -15,6 +15,7 @@ def overall_rt(next_generation_matrix, output_file):
     ngms = xarray.open_dataset(
         next_generation_matrix, group="posterior_predictive"
     )["ngm"]
+    ngms = ngms[:, 0, :, :].drop("time")
     b, _ = power_iteration(ngms)
     rt = rayleigh_quotient(ngms, b)
     q = np.arange(0.05, 1.0, 0.05)
@@ -30,10 +31,11 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument(
         "input_file",
-        description="The input .pkl file containing the next generation matrix",
+        type=str,
+        help="The input .pkl file containing the next generation matrix",
     )
     parser.add_argument(
-        "output_file", description="The name of the output .xlsx file"
+        "output_file", type=str, help="The name of the output .xlsx file"
     )
 
     args = parser.parse_args()

@@ -276,10 +276,9 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
             "gamma0": samples[0][:, 1],
             "gamma1": samples[0][:, 2],
             "sigma": samples[0][:, 3],
-            "beta3": tf.zeros([1, 5], dtype=DTYPE),
             "beta1": samples[1][:, 0],
             "xi": samples[1][:, 1:],
-            "events": samples[2],
+            "seir": samples[2],
         },
         results_dict=results,
         num_samples=NUM_SAVED_SAMPLES,
@@ -309,12 +308,9 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
                 "gamma0": samples[0][:, 1],
                 "gamma1": samples[0][:, 2],
                 "sigma": samples[0][:, 3],
-                "beta3": tf.zeros(
-                    [samples[0].shape[0], 5], dtype=DTYPE
-                ),  # samples[0][:, 4:],
                 "beta1": samples[1][:, 0],
                 "xi": samples[1][:, 1:],
-                "events": samples[2],
+                "seir": samples[2],
             },
             first_dim_offset=i * NUM_BURST_SAMPLES,
         )

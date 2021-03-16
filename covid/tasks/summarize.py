@@ -22,7 +22,7 @@ def rt(input_file, output_file):
 
     ngm = xarray.open_dataset(input_file, group="posterior_predictive")["ngm"]
 
-    rt = np.sum(ngm, axis=-2)
+    rt = ngm.sum(dim="dest").isel(time=-1).drop("time")
     rt_summary = mean_and_ci(rt, name="Rt")
     exceed = np.mean(rt > 1.0, axis=0)
 

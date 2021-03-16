@@ -70,7 +70,7 @@ def within_between(input_files, output_file):
 
     beta2 = samples["beta2"]
     events = samples["seir"]
-    init_state = samples["init_state"]
+    init_state = samples["initial_state"]
     state_timeseries = compute_state(
         init_state, events, model_spec.STOICHIOMETRY
     )

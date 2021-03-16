@@ -9,8 +9,10 @@ from covid import model_spec
 from covid.util import copy_nc_attrs
 from gemlib.util import compute_state
 
-@tf.function
-def predicted_incidence(posterior_samples, covar_data, init_step, num_steps):
+
+def predicted_incidence(
+    posterior_samples, init_state, covar_data, init_step, num_steps
+):
     """Runs the simulation forward in time from `init_state` at time `init_time`
        for `num_steps`.
     :param param: a dictionary of model parameters
@@ -22,33 +24,36 @@ def predicted_incidence(posterior_samples, covar_data, init_step, num_steps):
     """
 
     posterior_state = compute_state(
-        posterior_samples["init_state"],
+        init_state,
         posterior_samples["seir"],
         model_spec.STOICHIOMETRY,
     )
-    posterior_samples['init_state_'] = posterior_state[..., init_step, :]
-    del posterior_samples['seir']
-    
-    def sim_fn(args):
-        par = tf.nest.pack_sequence_as(posterior_samples, args)
-        init_ = par['init_state_']
-        del par['init_state_']
-        
-        model = model_spec.CovidUK(
-            covar_data,
-            initial_state=init_,
-            initial_step=init_step,
-            num_steps=num_steps,
-        )
-        sim = model.sample(**par)
-        return sim["seir"]
+    posterior_samples["new_init_state"] = posterior_state[..., init_step, :]
+    del posterior_samples["seir"]
 
-    events = tf.map_fn(
-        sim_fn,
-        elems=tf.nest.flatten(posterior_samples),
-        fn_output_signature=(tf.float64),
-    )
-    return init_state, events
+    @tf.function
+    def do_sim():
+        def sim_fn(args):
+            par = tf.nest.pack_sequence_as(posterior_samples, args)
+            init_ = par["new_init_state"]
+            del par["new_init_state"]
+
+            model = model_spec.CovidUK(
+                covar_data,
+                initial_state=init_,
+                initial_step=init_step,
+                num_steps=num_steps,
+            )
+            sim = model.sample(**par)
+            return sim["seir"]
+
+        return tf.map_fn(
+            sim_fn,
+            elems=tf.nest.flatten(posterior_samples),
+            fn_output_signature=(tf.float64),
+        )
+
+    return posterior_samples["new_init_state"], do_sim()
 
 
 def read_pkl(filename):
@@ -60,7 +65,10 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
 
     covar_data = xarray.open_dataset(data, group="constant_data")
     cases = xarray.open_dataset(data, group="observations")
+
     samples = read_pkl(posterior_samples)
+    initial_state = samples["initial_state"]
+    del samples["initial_state"]
 
     if initial_step < 0:
         initial_step = samples["seir"].shape[-2] + initial_step
@@ -73,7 +81,7 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
     )
 
     estimated_init_state, predicted_events = predicted_incidence(
-        samples, covar_data, initial_step, num_steps
+        samples, initial_state, covar_data, initial_step, num_steps
     )
 
     prediction = xarray.DataArray(
@@ -109,23 +117,21 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument(
-        "-i", "--initial-step", type=int, default=0, description="Initial step"
+        "-i", "--initial-step", type=int, default=0, help="Initial step"
     )
     parser.add_argument(
-        "-n", "--num-steps", type=int, default=1, description="Number of steps"
+        "-n", "--num-steps", type=int, default=1, help="Number of steps"
     )
-    parser.add_argument(
-        "data_pkl", type=str, description="Covariate data pickle"
-    )
+    parser.add_argument("data_pkl", type=str, help="Covariate data pickle")
     parser.add_argument(
         "posterior_samples_pkl",
         type=str,
-        description="Posterior samples pickle",
+        help="Posterior samples pickle",
     )
     parser.add_argument(
         "output_file",
         type=str,
-        description="Output pkl file",
+        help="Output pkl file",
     )
     args = parser.parse_args()
 
