@@ -25,7 +25,7 @@ def calc_posterior_ngm(samples, covar_data):
 
         par = tf.nest.pack_sequence_as(samples, args)
         
-        t = events_.shape[-2] - 1
+        t = par['seir'].shape[-2] - 1
         state = compute_state(
             samples["init_state"], par['seir'], model_spec.STOICHIOMETRY
         )
