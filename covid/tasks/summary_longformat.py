@@ -147,14 +147,12 @@ def summary_longformat(input_files, output_file):
     df = pd.concat([df, prev_df], axis="index")
 
     # Rt
-    ngms = xarray.load_dataset(input_files[4], group="posterior_predictive")[
-        "ngm"
+    rt = xarray.load_dataset(input_files[4], group="posterior_predictive")[
+        "R_it"
     ]
-    rt = ngms.sum(dim="dest")
-    rt = rt.rename({"src": "location"})
-    rt_summary = xarray2summarydf(rt)
+    rt_summary = xarray2summarydf(rt.isel(time=-1))
     rt_summary["value_name"] = "R"
-    rt_summary["time"] = cases.coords["time"].data[-1] + np.timedelta64(1, "D")
+    rt_summary["time"] = rt.coords["time"].data[-1] + np.timedelta64(1, "D")
     df = pd.concat([df, rt_summary], axis="index")
 
     quantiles = df.columns[df.columns.str.startswith("0.")]

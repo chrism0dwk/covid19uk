@@ -10,18 +10,18 @@ from covid.summary import (
 )
 
 
-def overall_rt(next_generation_matrix, output_file):
+def overall_rt(inference_data, output_file):
 
-    ngms = xarray.open_dataset(
-        next_generation_matrix, group="posterior_predictive"
-    )["ngm"]
-    ngms = ngms[:, 0, :, :].drop("time")
-    b, _ = power_iteration(ngms)
-    rt = rayleigh_quotient(ngms, b)
+    r_t = xarray.open_dataset(inference_data, group="posterior_predictive")[
+        "R_t"
+    ]
+
     q = np.arange(0.05, 1.0, 0.05)
-    rt_quantiles = pd.DataFrame(
-        {"Rt": np.quantile(rt, q, axis=-1)}, index=q
-    ).T.to_excel(output_file)
+    quantiles = r_t.isel(time=-1).quantile(q=q)
+    quantiles.to_dataframe().T.to_excel(output_file)
+    # pd.DataFrame({"Rt": np.quantile(r_t, q, axis=-1)}, index=q).T.to_excel(
+    #     output_file
+    # )
 
 
 if __name__ == "__main__":
