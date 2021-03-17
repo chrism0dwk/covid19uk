@@ -47,7 +47,7 @@ def calc_posterior_rit(samples, initial_state, times, covar_data):
     )
 
 
-def next_generation_matrix(input_files, output_file):
+def reproduction_number(input_files, output_file):
 
     covar_data = xarray.open_dataset(input_files[0], group="constant_data")
 
@@ -101,4 +101,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    next_generation_matrix([args.data, args.samples], args.output)
+    reproduction_number([args.data, args.samples], args.output)

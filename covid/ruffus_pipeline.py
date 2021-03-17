@@ -14,7 +14,7 @@ from covid.tasks import (
     assemble_data,
     mcmc,
     thin_posterior,
-    next_generation_matrix,
+    reproduction_number,
     overall_rt,
     predict,
     summarize,
@@ -91,11 +91,11 @@ def run_pipeline(global_config, results_directory, cli_options):
     rf.transform(
         input=[[process_data, thin_samples]],
         filter=rf.formatter(),
-        output=wd("ngm.nc"),
-    )(next_generation_matrix)
+        output=wd("reproduction_number.nc"),
+    )(reproduction_number)
 
     rf.transform(
-        input=next_generation_matrix,
+        input=reproduction_number,
         filter=rf.formatter(),
         output=wd("national_rt.xlsx"),
     )(overall_rt)
@@ -146,7 +146,7 @@ def run_pipeline(global_config, results_directory, cli_options):
 
     # Summarisation
     rf.transform(
-        input=next_generation_matrix,
+        input=reproduction_number,
         filter=rf.formatter(),
         output=wd("rt_summary.csv"),
     )(summarize.rt)
@@ -221,7 +221,7 @@ def run_pipeline(global_config, results_directory, cli_options):
                 insample7,
                 insample14,
                 medium_term,
-                next_generation_matrix,
+                reproduction_number,
             ]
         ],
         rf.formatter(),

@@ -3,7 +3,7 @@
 from covid.tasks.assemble_data import assemble_data
 from covid.tasks.inference import mcmc
 from covid.tasks.thin_posterior import thin_posterior
-from covid.tasks.next_generation_matrix import next_generation_matrix
+from covid.tasks.next_generation_matrix import reproduction_number
 from covid.tasks.overall_rt import overall_rt
 from covid.tasks.predict import predict
 import covid.tasks.summarize as summarize
@@ -18,7 +18,7 @@ __all__ = [
     "assemble_data",
     "mcmc",
     "thin_posterior",
-    "next_generation_matrix",
+    "reproduction_number",
     "overall_rt",
     "predict",
     "summarize",
