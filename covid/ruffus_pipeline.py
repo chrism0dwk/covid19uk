@@ -184,15 +184,15 @@ def run_pipeline(global_config, results_directory, cli_options):
         df.to_csv(output_file)
 
     # Plot in-sample
-    @rf.transform(
-        input=[insample7, insample14],
-        filter=rf.formatter(".+/insample(?P<LAG>\d+).nc"),
-        add_inputs=rf.add_inputs(process_data),
-        output="{path[0]}/insample_plots{LAG[0]}",
-        extras=["{LAG[0]}"],
-    )
-    def plot_insample_predictive_timeseries(input_files, output_dir, lag):
-        insample_predictive_timeseries(input_files, output_dir, lag)
+    # @rf.transform(
+    #     input=[insample7, insample14],
+    #     filter=rf.formatter(".+/insample(?P<LAG>\d+).nc"),
+    #     add_inputs=rf.add_inputs(process_data),
+    #     output="{path[0]}/insample_plots{LAG[0]}",
+    #     extras=["{LAG[0]}"],
+    # )
+    # def plot_insample_predictive_timeseries(input_files, output_dir, lag):
+    #     insample_predictive_timeseries(input_files, output_dir, lag)
 
     # Geopackage
     rf.transform(
