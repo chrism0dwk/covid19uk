@@ -1,8 +1,7 @@
 """MCMC Test Rig for COVID-19 UK model"""
 # pylint: disable=E402
 
-import pickle as pkl
-from time import perf_counter
+import sys
 
 import h5py
 import xarray
@@ -260,14 +259,13 @@ def trace_results_fn(_, results):
 
 def draws_to_dict(draws):
     return {
-        "beta2": draws[0][:, 0],
-        "gamma0": draws[0][:, 1],
-        "gamma1": draws[0][:, 2],
-        "sigma": draws[0][:, 3],
-        "beta3": tf.zeros([1, 5], dtype=DTYPE),
-        "beta1": draws[0][:, 4],
-        "xi": draws[0][:, 5:],
-        "events": draws[1],
+        "psi": draws[0][:, 0],
+        "beta_area": draws[0][:, 1],
+        "gamma0": draws[0][:, 2],
+        "gamma1": draws[0][:, 3],
+        "alpha_0": draws[0][:, 4],
+        "alpha_t": draws[0][:, 5:],
+        "seir": draws[1],
     }
 
 
@@ -297,13 +295,14 @@ def run_mcmc(
     event_kernel_kwargs = {
         "initial_state": initial_conditions,
         "t_range": [
-            current_state[1].shape[-2] - 21,
+            current_state[1].shape[-2] - 28,
             current_state[1].shape[-2],
         ],
         "config": config,
     }
 
     # Set up posterior
+    print("Initialising output...", end="", flush=True, file=sys.stderr)
     draws, trace, _ = _fixed_window(
         num_draws=1,
         joint_log_prob_fn=joint_log_prob_fn,
@@ -320,9 +319,10 @@ def run_mcmc(
         + config["num_burst_samples"] * config["num_bursts"],
     )
     offset = 0
+    print("Done", flush=True, file=sys.stderr)
 
     # Fast adaptation sampling
-    print(f"Fast window {first_window_size}")
+    print(f"Fast window {first_window_size}", file=sys.stderr, flush=True)
     draws, trace, step_size, running_variance = _fast_adapt_window(
         num_draws=first_window_size,
         joint_log_prob_fn=joint_log_prob_fn,
@@ -335,7 +335,8 @@ def run_mcmc(
     current_state = [s[-1] for s in draws]
     draws[0] = param_bijector.inverse(draws[0])
     posterior.write_samples(
-        draws_to_dict(draws), first_dim_offset=offset,
+        draws_to_dict(draws),
+        first_dim_offset=offset,
     )
     posterior.write_results(trace, first_dim_offset=offset)
     offset += first_window_size
@@ -344,7 +345,7 @@ def run_mcmc(
     hmc_kernel_kwargs["step_size"] = step_size
     for slow_window_idx in range(num_slow_windows):
         window_num_draws = slow_window_size * (2 ** slow_window_idx)
-        print(f"Slow window {window_num_draws}")
+        print(f"Slow window {window_num_draws}", file=sys.stderr, flush=True)
         (
             draws,
             trace,
@@ -366,13 +367,14 @@ def run_mcmc(
         current_state = [s[-1] for s in draws]
         draws[0] = param_bijector.inverse(draws[0])
         posterior.write_samples(
-            draws_to_dict(draws), first_dim_offset=offset,
+            draws_to_dict(draws),
+            first_dim_offset=offset,
         )
         posterior.write_results(trace, first_dim_offset=offset)
         offset += window_num_draws
 
     # Fast adaptation sampling
-    print(f"Fast window {last_window_size}")
+    print(f"Fast window {last_window_size}", file=sys.stderr, flush=True)
     dual_averaging_kwargs["num_adaptation_steps"] = last_window_size
     draws, trace, step_size, _ = _fast_adapt_window(
         num_draws=last_window_size,
@@ -386,13 +388,14 @@ def run_mcmc(
     current_state = [s[-1] for s in draws]
     draws[0] = param_bijector.inverse(draws[0])
     posterior.write_samples(
-        draws_to_dict(draws), first_dim_offset=offset,
+        draws_to_dict(draws),
+        first_dim_offset=offset,
     )
     posterior.write_results(trace, first_dim_offset=offset)
     offset += last_window_size
 
     # Fixed window sampling
-    print("Sampling...")
+    print("Sampling...", file=sys.stderr, flush=True)
     hmc_kernel_kwargs["step_size"] = step_size
     for i in tqdm.tqdm(
         range(config["num_bursts"]),
@@ -409,10 +412,12 @@ def run_mcmc(
         current_state = [state_part[-1] for state_part in draws]
         draws[0] = param_bijector.inverse(draws[0])
         posterior.write_samples(
-            draws_to_dict(draws), first_dim_offset=offset,
+            draws_to_dict(draws),
+            first_dim_offset=offset,
         )
         posterior.write_results(
-            trace, first_dim_offset=offset,
+            trace,
+            first_dim_offset=offset,
         )
         offset += config["num_burst_samples"]
 
@@ -428,12 +433,17 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
         print("Using CPU")
 
     data = xarray.open_dataset(data_file, group="constant_data")
-    cases = xarray.open_dataset(data_file, group="observations")["cases"]
+    cases = xarray.open_dataset(data_file, group="observations")[
+        "cases"
+    ].astype(DTYPE)
+    dates = cases.coords["time"]
 
-    # We load in cases and impute missing infections first, since this sets the
-    # time epoch which we are analysing.
     # Impute censored events, return cases
-    events = model_spec.impute_censored_events(cases.astype(DTYPE))
+    # Take the last week of data, and repeat a further 3 times
+    # to get a better occult initialisation.
+    extra_cases = tf.tile(cases[:, -7:], [1, 3])
+    cases = tf.concat([cases, extra_cases], axis=-1)
+    events = model_spec.impute_censored_events(cases).numpy()
 
     # Initial conditions are calculated by calculating the state
     # at the beginning of the inference period
@@ -454,7 +464,7 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     )
     start_time = state.shape[1] - cases.shape[1]
     initial_state = state[:, start_time, :]
-    events = events[:, start_time:, :]
+    events = events[:, start_time:-21, :]  # Clip off the "extra" events
 
     ########################################################
     # Construct the MCMC kernels #
@@ -471,10 +481,9 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
             [
                 tfb.Softplus(low=dtype_util.eps(DTYPE)),
                 tfb.Identity(),
-                tfb.Softplus(low=dtype_util.eps(DTYPE)),
                 tfb.Identity(),
             ],
-            block_sizes=[1, 2, 1, model.event_shape["xi"][0] + 1],
+            block_sizes=[1, 3, events.shape[1]],
         )
     )
 
@@ -482,12 +491,12 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
         params = param_bij.inverse(unconstrained_params)
         return model.log_prob(
             dict(
-                beta2=params[0],
-                gamma0=params[1],
-                gamma1=params[2],
-                sigma=params[3],
-                beta1=params[4],
-                xi=params[5:],
+                psi=params[0],
+                beta_area=params[1],
+                gamma0=params[2],
+                gamma1=params[3],
+                alpha_0=params[4],
+                alpha_t=params[5:],
                 seir=events,
             )
         ) + param_bij.inverse_log_det_jacobian(
@@ -501,9 +510,10 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     current_chain_state = [
         tf.concat(
             [
-                np.array([0.6, 0.0, 0.0, 0.1], dtype=DTYPE),
-                np.zeros(
-                    model.model["xi"](0.0, 0.1).event_shape[-1] + 1,
+                np.array([0.1, 0.0, 0.0, 0.0], dtype=DTYPE),
+                np.full(
+                    events.shape[1],
+                    -1.75,
                     dtype=DTYPE,
                 ),
             ],
@@ -511,7 +521,10 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
         ),
         events,
     ]
-    print("Initial logpi:", joint_log_prob(*current_chain_state))
+    print("Num time steps:", events.shape[1], flush=True)
+    print("alpha_t shape", model.event_shape["alpha_t"], flush=True)
+    print("Initial chain state:", current_chain_state[0], flush=True)
+    print("Initial logpi:", joint_log_prob(*current_chain_state), flush=True)
 
     # Output file
     posterior = run_mcmc(
@@ -525,9 +538,7 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     posterior._file.create_dataset("initial_state", data=initial_state)
     posterior._file.create_dataset(
         "time",
-        data=np.array(cases.coords["time"])
-        .astype(str)
-        .astype(h5py.string_dtype()),
+        data=np.array(dates).astype(str).astype(h5py.string_dtype()),
     )
 
     print(f"Acceptance theta: {posterior['results/hmc/is_accepted'][:].mean()}")
@@ -559,7 +570,9 @@ if __name__ == "__main__":
         "-o", "--output", type=str, help="Output file", required=True
     )
     parser.add_argument(
-        "data_file", type=str, help="Data pickle file",
+        "data_file",
+        type=str,
+        help="Data pickle file",
     )
     args = parser.parse_args()
 

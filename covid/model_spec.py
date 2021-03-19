@@ -1,23 +1,25 @@
 """Implements the COVID SEIR model as a TFP Joint Distribution"""
 
 import pandas as pd
+import geopandas as gp
 import numpy as np
 import xarray
 import tensorflow as tf
 import tensorflow_probability as tfp
 
 from gemlib.distributions import DiscreteTimeStateTransitionModel
+from gemlib.distributions import BrownianMotion
+
 from covid.util import impute_previous_cases
 import covid.data as data
 
 tfd = tfp.distributions
 
-VERSION = "0.5.0"
+VERSION = "0.7.0"
 DTYPE = np.float64
 
 STOICHIOMETRY = np.array([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])
 TIME_DELTA = 1.0
-XI_FREQ = 14  # baseline transmission changes every 14 days
 NU = tf.constant(0.28, dtype=DTYPE)  # E->I rate assumed known.
 
 
@@ -42,6 +44,14 @@ def gather_data(config):
     commute_volume = data.read_traffic_flow(
         config["commute_volume"], date_low=date_low, date_high=date_high
     )
+    geo = gp.read_file(config["geopackage"])
+    geo = geo.sort_values("lad19cd")
+    area = xarray.DataArray(
+        geo.area,
+        name="area",
+        dims=["location"],
+        coords=[geo["lad19cd"]],
+    )
 
     # tier_restriction = data.TierData.process(config)[:, :, [0, 2, 3, 4]]
     dates = pd.date_range(*config["date_range"], closed="left")
@@ -60,6 +70,7 @@ def gather_data(config):
                 W=commute_volume.astype(DTYPE),
                 N=popsize.astype(DTYPE),
                 weekday=weekday.astype(DTYPE),
+                area=area.astype(DTYPE),
                 locations=xarray.DataArray(
                     locations["name"],
                     dims=["location"],
@@ -103,32 +114,27 @@ def conditional_gp(gp, observations, new_index_points):
 
 
 def CovidUK(covariates, initial_state, initial_step, num_steps):
-    def beta1():
+    def alpha_0():
+        return tfd.Normal(
+            loc=tf.constant(0.0, dtype=DTYPE),
+            scale=tf.constant(10.0, dtype=DTYPE),
+        )
+
+    def beta_area():
         return tfd.Normal(
             loc=tf.constant(0.0, dtype=DTYPE),
             scale=tf.constant(1.0, dtype=DTYPE),
         )
 
-    def beta2():
+    def psi():
         return tfd.Gamma(
             concentration=tf.constant(3.0, dtype=DTYPE),
             rate=tf.constant(10.0, dtype=DTYPE),
         )
 
-    def sigma():
-        return tfd.Gamma(
-            concentration=tf.constant(20.0, dtype=DTYPE),
-            rate=tf.constant(200.0, dtype=DTYPE),
-        )
-
-    def xi(beta1, sigma):
-        phi = tf.constant(24.0, dtype=DTYPE)
-        kernel = tfp.math.psd_kernels.MaternThreeHalves(sigma, phi)
-        idx_pts = tf.cast(tf.range(num_steps // XI_FREQ) * XI_FREQ, dtype=DTYPE)
-        return tfd.GaussianProcessRegressionModel(
-            kernel,
-            mean_fn=lambda idx: beta1,
-            index_points=idx_pts[:, tf.newaxis],
+    def alpha_t(alpha_0):
+        return BrownianMotion(
+            tf.range(num_steps, dtype=DTYPE), x0=alpha_0, scale=0.01
         )
 
     def gamma0():
@@ -143,9 +149,10 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             scale=tf.constant(100.0, dtype=DTYPE),
         )
 
-    def seir(beta2, xi, gamma0, gamma1):
-        beta2 = tf.convert_to_tensor(beta2, DTYPE)
-        xi = tf.convert_to_tensor(xi, DTYPE)
+    def seir(psi, beta_area, alpha_0, alpha_t, gamma0, gamma1):
+        psi = tf.convert_to_tensor(psi, DTYPE)
+        beta_area = tf.convert_to_tensor(beta_area, DTYPE)
+        alpha_t = tf.convert_to_tensor(alpha_t, DTYPE)
         gamma0 = tf.convert_to_tensor(gamma0, DTYPE)
         gamma1 = tf.convert_to_tensor(gamma1, DTYPE)
 
@@ -161,24 +168,40 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         weekday = tf.convert_to_tensor(covariates["weekday"], DTYPE)
         weekday = weekday - tf.reduce_mean(weekday, axis=-1)
 
+        # Area in 100km^2
+        area = tf.convert_to_tensor(covariates["area"], DTYPE)
+        log_area = tf.math.log(area / 100000000.0)  # log area in 100km^2
+        log_area = log_area - tf.reduce_mean(log_area)
+
         def transition_rate_fn(t, state):
 
             w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
             commute_volume = tf.gather(W, w_idx)
-            xi_idx = tf.cast(
-                tf.clip_by_value(t // XI_FREQ, 0, xi.shape[0] - 1),
-                dtype=tf.int64,
-            )
-            xi_ = tf.gather(xi, xi_idx)
 
             weekday_idx = tf.clip_by_value(
                 tf.cast(t, tf.int64), 0, weekday.shape[0] - 1
             )
             weekday_t = tf.gather(weekday, weekday_idx)
 
-            infec_rate = tf.math.exp(xi_) * (
+            with tf.name_scope("Pick_alpha_t"):
+                alpha_t_idx = tf.cast(t, tf.int64)
+                alpha_t_ = tf.where(
+                    alpha_t_idx == initial_step,
+                    alpha_0,
+                    tf.gather(
+                        alpha_t,
+                        tf.clip_by_value(
+                            alpha_t_idx - initial_step - 1,
+                            clip_value_min=0,
+                            clip_value_max=alpha_t.shape[0] - 1,
+                        ),
+                    ),
+                )
+
+            eta = alpha_t_ + beta_area * log_area
+            infec_rate = tf.math.exp(eta) * (
                 state[..., 2]
-                + beta2
+                + psi
                 * commute_volume
                 * tf.linalg.matvec(Cstar, state[..., 2] / tf.squeeze(N))
             )
@@ -207,10 +230,10 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
 
     return tfd.JointDistributionNamed(
         dict(
-            beta1=beta1,
-            beta2=beta2,
-            sigma=sigma,
-            xi=xi,
+            alpha_0=alpha_0,
+            beta_area=beta_area,
+            psi=psi,
+            alpha_t=alpha_t,
             gamma0=gamma0,
             gamma1=gamma1,
             seir=seir,
@@ -244,17 +267,24 @@ def next_generation_matrix_fn(covar_data, param):
 
         w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
         commute_volume = tf.gather(W, w_idx)
-        xi_idx = tf.cast(
-            tf.clip_by_value(t // XI_FREQ, 0, param["xi"].shape[0] - 1),
-            dtype=tf.int64,
+        xi = tf.where(
+            t == 0,
+            param["alpha_0"],
+            tf.gather(
+                param["alpha_t"],
+                tf.clip_by_value(
+                    t,
+                    clip_value_min=0,
+                    clip_value_max=param["alpha_t"].shape[-1] - 1,
+                ),
+            ),
         )
-        xi = tf.gather(param["xi"], xi_idx)
 
         beta = tf.math.exp(xi)
 
         ngm = beta * (
             tf.eye(Cstar.shape[0], dtype=state.dtype)
-            + param["beta2"] * commute_volume * Cstar / N[tf.newaxis, :]
+            + param["psi"] * commute_volume * Cstar / N[tf.newaxis, :]
         )
         ngm = (
             ngm
