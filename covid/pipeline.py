@@ -64,9 +64,7 @@ if __name__ == "__main__":
     data_args.add_argument(
         "--pillar", type=str, help="Pillar", choices=["both", "1", "2"]
     )
-    data_args.add_argument(
-        "--aws", action='store_true', help="Push to AWS"
-        )
+    data_args.add_argument("--aws", action="store_true", help="Push to AWS")
 
     cli_options = argparser.parse_args()
     global_config = _import_global_config(cli_options.config)
@@ -105,13 +103,3 @@ if __name__ == "__main__":
         ]
 
     run_pipeline(global_config, cli_options.results_directory, cli_options)
-
-    if cli_options.aws is True:
-        bucket_name = global_config['AWSS3']['bucket']
-        obj_name = os.path.split(cli_options.results_directory)[1]
-        obj_path = f"{bucket_name}/{obj_name}"
-        s3 = s3fs.S3FileSystem(profile=global_config["AWSS3"]["profile"])
-        if not s3.exists(obj_path):
-            s3.put(cli_options.results_directory, obj_path, recursive=True)
-        else:
-            warnings.warn(f"Path '{obj_path}' already exists, not uploading.")
