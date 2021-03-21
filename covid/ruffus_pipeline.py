@@ -236,7 +236,7 @@ def run_pipeline(global_config, results_directory, cli_options):
     @rf.transform(
         input=[
             process_data,
-            mcmc,
+            run_mcmc,
             insample7,
             insample14,
             medium_term,
