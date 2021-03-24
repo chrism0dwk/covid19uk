@@ -43,3 +43,7 @@ ThinPosterior:  # Post-process further chain thinning HDF5 -> .pkl.
 Geopackage:  # covid.tasks.summary_geopackage
   base_geopackage: data/UK2019mod_pop.gpkg
   base_layer: UK2019mod_pop_xgen
+
+#AWSS3:
+#  bucket: mybucket
+#  profile: myprofile
