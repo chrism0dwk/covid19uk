@@ -1,6 +1,6 @@
 """Loads COVID-19 case data"""
 
-import sys
+import time
 from warnings import warn
 import requests
 import json
@@ -58,7 +58,7 @@ class CasesData:
                 return df
             except ConnectionResetError:
                 print("Failed", flush=True)
-                sys.sleep(secs * 2 ** i)
+                time.sleep(secs * 2 ** i)
 
         raise ConnectionError(
             f"Data download timed out after {max_tries} attempts"
