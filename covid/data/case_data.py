@@ -1,5 +1,6 @@
 """Loads COVID-19 case data"""
 
+import sys
 from warnings import warn
 import requests
 import json
@@ -45,10 +46,23 @@ class CasesData:
         """
         Placeholder, in case we wish to interface with an API.
         """
-        response = requests.get(url)
-        content = json.loads(response.content)
-        df = pd.read_json(json.dumps(content["body"]))
-        return df
+        max_tries = 5
+        secs = 5
+        for i in range(max_tries):
+            try:
+                print("Attempting to download...", end="", flush=True)
+                response = requests.get(url)
+                content = json.loads(response.content)
+                df = pd.read_json(json.dumps(content["body"]))
+                print("Success", flush=True)
+                return df
+            except ConnectionResetError:
+                print("Failed", flush=True)
+                sys.sleep(secs * 2 ** i)
+
+        raise ConnectionError(
+            f"Data download timed out after {max_tries} attempts"
+        )
 
     def getCSV(file):
         """
