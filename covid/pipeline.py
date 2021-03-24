@@ -1,8 +1,11 @@
 """A Ruffus-ised pipeline for COVID-19 analysis"""
 
+import os
 from os.path import expandvars
+import warnings
 import yaml
 import datetime
+import s3fs
 import ruffus as rf
 
 from covid.ruffus_pipeline import run_pipeline
@@ -61,6 +64,7 @@ if __name__ == "__main__":
     data_args.add_argument(
         "--pillar", type=str, help="Pillar", choices=["both", "1", "2"]
     )
+    data_args.add_argument("--aws", action="store_true", help="Push to AWS")
 
     cli_options = argparser.parse_args()
     global_config = _import_global_config(cli_options.config)

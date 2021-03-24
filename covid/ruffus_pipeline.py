@@ -1,10 +1,12 @@
 """Represents the analytic pipeline as a ruffus chain"""
 
 import os
+import warnings
 import yaml
 from datetime import datetime
 from uuid import uuid1
 import json
+import s3fs
 import netCDF4 as nc
 import pandas as pd
 import ruffus as rf
@@ -184,15 +186,15 @@ def run_pipeline(global_config, results_directory, cli_options):
         df.to_csv(output_file)
 
     # Plot in-sample
-    @rf.transform(
-        input=[insample7, insample14],
-        filter=rf.formatter(".+/insample(?P<LAG>\d+).nc"),
-        add_inputs=rf.add_inputs(process_data),
-        output="{path[0]}/insample_plots{LAG[0]}",
-        extras=["{LAG[0]}"],
-    )
-    def plot_insample_predictive_timeseries(input_files, output_dir, lag):
-        insample_predictive_timeseries(input_files, output_dir, lag)
+    # @rf.transform(
+    #     input=[insample7, insample14],
+    #     filter=rf.formatter(".+/insample(?P<LAG>\d+).nc"),
+    #     add_inputs=rf.add_inputs(process_data),
+    #     output="{path[0]}/insample_plots{LAG[0]}",
+    #     extras=["{LAG[0]}"],
+    # )
+    # def plot_insample_predictive_timeseries(input_files, output_dir, lag):
+    #     insample_predictive_timeseries(input_files, output_dir, lag)
 
     # Geopackage
     rf.transform(
@@ -227,5 +229,29 @@ def run_pipeline(global_config, results_directory, cli_options):
         rf.formatter(),
         wd("summary_longformat.xlsx"),
     )(summary_longformat)
+
+    # Copy results to AWS
+
+    @rf.active_if(cli_options.aws)
+    @rf.transform(
+        input=[
+            process_data,
+            run_mcmc,
+            insample7,
+            insample14,
+            medium_term,
+            reproduction_number,
+        ],
+        filter=rf.formatter(),
+        output="{subdir[0][0]}/{basename[0]}{ext[0]}",
+        extras=[global_config["AWSS3"]],
+    )
+    def upload_to_aws(input_file, output_file, config):
+        obj_path = f"{config['bucket']}/{output_file}"
+        s3 = s3fs.S3FileSystem(profile=config["profile"])
+        if not s3.exists(obj_path):
+            s3.put(input_file, obj_path)
+        else:
+            warnings.warn(f"Path '{obj_path}' already exists, not uploading.")
 
     rf.cmdline.run(cli_options)
