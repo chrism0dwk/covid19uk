@@ -20,14 +20,14 @@ def rt(input_file, output_file):
     :param output_file: a .csv of mean (ci) values
     """
 
-    ngm = xarray.open_dataset(input_file, group="posterior_predictive")["ngm"]
+    r_it = xarray.open_dataset(input_file, group="posterior_predictive")["R_it"]
 
-    rt = np.sum(ngm, axis=-2)
+    rt = r_it.isel(time=-1).drop("time")
     rt_summary = mean_and_ci(rt, name="Rt")
     exceed = np.mean(rt > 1.0, axis=0)
 
     rt_summary = pd.DataFrame(
-        rt_summary, index=pd.Index(ngm.coords["dest"], name="location")
+        rt_summary, index=pd.Index(r_it.coords["location"], name="location")
     )
     rt_summary["Rt_exceed"] = exceed
     rt_summary.to_csv(output_file)

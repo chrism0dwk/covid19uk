@@ -68,15 +68,15 @@ def within_between(input_files, output_file):
     with open(input_files[1], "rb") as f:
         samples = pkl.load(f)
 
-    beta2 = samples["beta2"]
+    psi = samples["psi"]
     events = samples["seir"]
-    init_state = samples["init_state"]
+    init_state = samples["initial_state"]
     state_timeseries = compute_state(
         init_state, events, model_spec.STOICHIOMETRY
     )
 
     within, between = calc_pressure_components(
-        covar_data, beta2, state_timeseries[..., -1, :]
+        covar_data, psi, state_timeseries[..., -1, :]
     )
 
     df = pd.DataFrame(

@@ -134,7 +134,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
 
     def alpha_t(alpha_0):
         return BrownianMotion(
-            tf.range(num_steps, dtype=DTYPE), x0=alpha_0, scale=0.01
+            tf.range(num_steps, dtype=DTYPE), x0=alpha_0, scale=0.005
         )
 
     def gamma0():
