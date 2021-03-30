@@ -56,8 +56,9 @@ class CasesData:
                 df = pd.read_json(json.dumps(content["body"]))
                 print("Success", flush=True)
                 return df
-            except ConnectionResetError:
+            except (requests.ConnectionError, requests.RequestException) as e:
                 print("Failed", flush=True)
+                print(e)
                 time.sleep(secs * 2 ** i)
 
         raise ConnectionError(
