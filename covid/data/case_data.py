@@ -69,8 +69,7 @@ class CasesData:
         """
         Format as per linelisting
         """
-        columns = ["pillar", "LTLA_code", "specimen_date", "lab_report_date"]
-        dfs = pd.read_csv(file, chunksize=50000, iterator=True, usecols=columns)
+        dfs = pd.read_csv(file, chunksize=50000, iterator=True)
         df = pd.concat(dfs)
         return df
 
@@ -164,6 +163,8 @@ class CasesData:
         """
         Adapt the line listing data to the desired dataframe format.
         """
+        df = df[["pillar", "LTLA_code", "specimen_date", "lab_report_date"]]
+        
         # Clean missing values
         df.dropna(inplace=True)
         df = df.rename(columns={"LTLA_code": "lad19cd"})
