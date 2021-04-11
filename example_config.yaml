@@ -13,7 +13,7 @@ ProcessData:
     address: https://api.coronavirus.data.gov.uk/v2/data?areaType=ltla&metric=newCasesBySpecimenDate&format=json
     pillars: None  # Capability to filter Pillar 1 and 2 testing data from PHE confidential line listing
     measure: None  # Capability to filter date of test report from PHE confidential line listing
-    format: json
+    format: gov
  
   AreaCodeData:
     input: json

@@ -132,7 +132,7 @@ class CasesData:
                 measure,
                 areacodes,
             )
-        elif (settings["input"] == "url") and (settings["format"] == "json"):
+        elif settings["format"].lower() == "gov":
             df = CasesData.adapt_gov_api(
                 df, date_low, date_high, pillars, measure, areacodes
             )
