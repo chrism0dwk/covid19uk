@@ -53,7 +53,7 @@ class CasesData:
                 print("Attempting to download...", end="", flush=True)
                 response = requests.get(url)
                 content = json.loads(response.content)
-                df = pd.read_json(json.dumps(content["body"]))
+                df = pd.DataFrame.from_dict(content["body"])
                 print("Success", flush=True)
                 return df
             except (requests.ConnectionError, requests.RequestException) as e:
