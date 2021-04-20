@@ -15,6 +15,7 @@ def make_hmc_base_kernel(
     step_size,
     num_leapfrog_steps,
     momentum_distribution,
+    store_parameters_in_results,
 ):
     def fn(target_log_prob_fn, _):
         return tfp.experimental.mcmc.PreconditionedHamiltonianMonteCarlo(
@@ -22,6 +23,7 @@ def make_hmc_base_kernel(
             step_size=step_size,
             num_leapfrog_steps=num_leapfrog_steps,
             momentum_distribution=momentum_distribution,
+            store_parameters_in_results=store_parameters_in_results,
         )
 
     return fn
