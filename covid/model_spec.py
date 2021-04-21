@@ -132,11 +132,16 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             rate=tf.constant(10.0, dtype=DTYPE),
         )
 
-    def alpha_t(alpha_0):
-        return BrownianMotion(
-            tf.range(num_steps, dtype=DTYPE), x0=alpha_0, scale=0.005
-        )
-
+    def alpha_t():
+        # return BrownianMotion(
+        #     tf.range(num_steps, dtype=DTYPE), x0=alpha_0, scale=0.005
+        # )
+        return tfd.MultivariateNormalDiag(loc=tf.constant(0.0, dtype=DTYPE),
+                                          scale_diag=tf.fill(
+                                              [num_steps-1], tf.constant(0.005,  dtype=DTYPE)
+                                          ),
+                                          )
+        
     def gamma0():
         return tfd.Normal(
             loc=tf.constant(0.0, dtype=DTYPE),
@@ -184,12 +189,13 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             weekday_t = tf.gather(weekday, weekday_idx)
 
             with tf.name_scope("Pick_alpha_t"):
+                b_t = alpha_0 + tf.cumsum(alpha_t)
                 alpha_t_idx = tf.cast(t, tf.int64)
                 alpha_t_ = tf.where(
                     alpha_t_idx == initial_step,
                     alpha_0,
                     tf.gather(
-                        alpha_t,
+                        b_t,
                         tf.clip_by_value(
                             alpha_t_idx - initial_step - 1,
                             clip_value_min=0,
