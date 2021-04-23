@@ -136,12 +136,13 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         # return BrownianMotion(
         #     tf.range(num_steps, dtype=DTYPE), x0=alpha_0, scale=0.005
         # )
-        return tfd.MultivariateNormalDiag(loc=tf.constant(0.0, dtype=DTYPE),
-                                          scale_diag=tf.fill(
-                                              [num_steps-1], tf.constant(0.005,  dtype=DTYPE)
-                                          ),
-                                          )
-        
+        return tfd.MultivariateNormalDiag(
+            loc=tf.constant(0.0, dtype=DTYPE),
+            scale_diag=tf.fill(
+                [num_steps - 1], tf.constant(0.005, dtype=DTYPE)
+            ),
+        )
+
     def gamma0():
         return tfd.Normal(
             loc=tf.constant(0.0, dtype=DTYPE),
@@ -270,17 +271,18 @@ def next_generation_matrix_fn(covar_data, param):
         N = tf.constant(covar_data["N"], dtype=DTYPE)
 
         # Area in 100km^2
-        area = tf.convert_to_tensor(covariates["area"], DTYPE)
+        area = tf.convert_to_tensor(covar_data["area"], DTYPE)
         log_area = tf.math.log(area / 100000000.0)  # log area in 100km^2
         log_area = log_area - tf.reduce_mean(log_area)
-        
+
         w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
         commute_volume = tf.gather(W, w_idx)
-        xi = tf.where(
+        b_t = param["alpha_0"] + tf.cumsum(param["alpha_t"])
+        alpha_t_ = tf.where(
             t == 0,
             param["alpha_0"],
             tf.gather(
-                param["alpha_t"],
+                b_t,
                 tf.clip_by_value(
                     t,
                     clip_value_min=0,
@@ -288,16 +290,22 @@ def next_generation_matrix_fn(covar_data, param):
                 ),
             ),
         )
-        
-        eta = alpha_t_ + beta_area[:, tf.newaxis] * log_area
-        infec_rate = tf.math.exp(eta) * (
-            tf.eye(Cstar.shape[0], dtype=state.dtype)
-            + param["psi"] * commute_volume * Cstar / N[tf.newaxis, :]
-        ) / N[:, tf.newaxis]
-        infec_prob = (1.0 - tf.math.exp(-ngm))
+
+        eta = alpha_t_ + param["beta_area"] * log_area[:, tf.newaxis]
+        infec_rate = (
+            tf.math.exp(eta)
+            * (
+                tf.eye(Cstar.shape[0], dtype=state.dtype)
+                + param["psi"] * commute_volume * Cstar / N[tf.newaxis, :]
+            )
+            / N[:, tf.newaxis]
+        )
+        infec_prob = 1.0 - tf.math.exp(-infec_rate)
 
         expected_new_infec = infec_prob * state[..., 0][..., tf.newaxis]
-        expected_infec_period = 1.0 / (1.0 - tf.math.exp(tf.math.exp(param['gamma0'])))
+        expected_infec_period = 1.0 / (
+            1.0 - tf.math.exp(-tf.math.exp(param["gamma0"]))
+        )
         ngm = expected_new_infec * expected_infec_period
         return ngm
 
