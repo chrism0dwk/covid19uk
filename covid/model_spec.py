@@ -271,6 +271,11 @@ def next_generation_matrix_fn(covar_data, param):
         W = tf.constant(covar_data["W"], dtype=DTYPE)
         N = tf.constant(covar_data["N"], dtype=DTYPE)
 
+        # Area in 100km^2
+        area = tf.convert_to_tensor(covariates["area"], DTYPE)
+        log_area = tf.math.log(area / 100000000.0)  # log area in 100km^2
+        log_area = log_area - tf.reduce_mean(log_area)
+        
         w_idx = tf.clip_by_value(tf.cast(t, tf.int64), 0, W.shape[0] - 1)
         commute_volume = tf.gather(W, w_idx)
         xi = tf.where(
@@ -285,18 +290,17 @@ def next_generation_matrix_fn(covar_data, param):
                 ),
             ),
         )
-
-        beta = tf.math.exp(xi)
-
-        ngm = beta * (
+        
+        eta = alpha_t_ + beta_area[:, tf.newaxis] * log_area
+        infec_rate = tf.math.exp(eta) * (
             tf.eye(Cstar.shape[0], dtype=state.dtype)
             + param["psi"] * commute_volume * Cstar / N[tf.newaxis, :]
-        )
-        ngm = (
-            ngm
-            * state[..., 0][..., tf.newaxis]
-            / (N[:, tf.newaxis] * tf.math.exp(param["gamma0"]))
-        )
+        ) / N[:, tf.newaxis]
+        infec_prob = (1.0 - tf.math.exp(-ngm))
+
+        expected_new_infec = infec_prob * state[..., 0][..., tf.newaxis]
+        expected_infec_period = 1.0 / (1.0 - tf.math.exp(tf.math.exp(param['gamma0'])))
+        ngm = expected_new_infec * expected_infec_period
         return ngm
 
     return fn
