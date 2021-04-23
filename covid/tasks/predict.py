@@ -3,6 +3,7 @@
 import numpy as np
 import xarray
 import pickle as pkl
+import pandas as pd
 import tensorflow as tf
 
 from covid import model_spec
@@ -75,9 +76,15 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
 
     origin_date = np.array(cases.coords["time"][0])
     dates = np.arange(
-        origin_date + np.timedelta64(initial_step, "D"),
+        origin_date,
         origin_date + np.timedelta64(initial_step + num_steps, "D"),
         np.timedelta64(1, "D"),
+    )
+
+    covar_data["weekday"] = xarray.DataArray(
+        (pd.to_datetime(dates).weekday < 5).astype(model_spec.DTYPE),
+        coords=[dates],
+        dims=["prediction_time"],
     )
 
     estimated_init_state, predicted_events = predicted_incidence(
@@ -89,7 +96,7 @@ def predict(data, posterior_samples, output_file, initial_step, num_steps):
         coords=[
             np.arange(predicted_events.shape[0]),
             covar_data.coords["location"],
-            dates,
+            dates[initial_step:],
             np.arange(predicted_events.shape[3]),
         ],
         dims=("iteration", "location", "time", "event"),
