@@ -1,5 +1,6 @@
 """Loads COVID-19 case data"""
 
+import time
 from warnings import warn
 import requests
 import json
@@ -45,17 +46,30 @@ class CasesData:
         """
         Placeholder, in case we wish to interface with an API.
         """
-        response = requests.get(url)
-        content = json.loads(response.content)
-        df = pd.read_json(json.dumps(content["body"]))
-        return df
+        max_tries = 5
+        secs = 5
+        for i in range(max_tries):
+            try:
+                print("Attempting to download...", end="", flush=True)
+                response = requests.get(url)
+                content = json.loads(response.content)
+                df = pd.DataFrame.from_dict(content["body"])
+                print("Success", flush=True)
+                return df
+            except (requests.ConnectionError, requests.RequestException) as e:
+                print("Failed", flush=True)
+                print(e)
+                time.sleep(secs * 2 ** i)
+
+        raise ConnectionError(
+            f"Data download timed out after {max_tries} attempts"
+        )
 
     def getCSV(file):
         """
         Format as per linelisting
         """
-        columns = ["pillar", "LTLA_code", "specimen_date", "lab_report_date"]
-        dfs = pd.read_csv(file, chunksize=50000, iterator=True, usecols=columns)
+        dfs = pd.read_csv(file, chunksize=50000, iterator=True)
         df = pd.concat(dfs)
         return df
 
@@ -117,7 +131,7 @@ class CasesData:
                 measure,
                 areacodes,
             )
-        elif (settings["input"] == "url") and (settings["format"] == "json"):
+        elif settings["format"].lower() == "gov":
             df = CasesData.adapt_gov_api(
                 df, date_low, date_high, pillars, measure, areacodes
             )
@@ -149,6 +163,8 @@ class CasesData:
         """
         Adapt the line listing data to the desired dataframe format.
         """
+        df = df[["pillar", "LTLA_code", "specimen_date", "lab_report_date"]]
+        
         # Clean missing values
         df.dropna(inplace=True)
         df = df.rename(columns={"LTLA_code": "lad19cd"})

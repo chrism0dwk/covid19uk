@@ -6,6 +6,7 @@ import yaml
 from datetime import datetime
 from uuid import uuid1
 import json
+import s3fs
 import netCDF4 as nc
 import s3fs
 import pandas as pd
@@ -230,6 +231,7 @@ def run_pipeline(global_config, results_directory, cli_options):
         wd("summary_longformat.xlsx"),
     )(summary_longformat)
 
+    # Copy results to AWS
     @rf.active_if(cli_options.aws)
     @rf.transform(
         input=[
@@ -248,7 +250,6 @@ def run_pipeline(global_config, results_directory, cli_options):
         obj_path = f"{config['bucket']}/{output_file}"
         s3 = s3fs.S3FileSystem(profile=config["profile"])
         if not s3.exists(obj_path):
-            print(f"Copy {input_file} to {obj_path}", flush=True)
             s3.put(input_file, obj_path)
         else:
             warnings.warn(f"Path '{obj_path}' already exists, not uploading.")

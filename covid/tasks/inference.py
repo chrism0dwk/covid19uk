@@ -592,11 +592,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "-o", "--output", type=str, help="Output file", required=True
     )
-    parser.add_argument(
-        "data_file",
-        type=str,
-        help="Data pickle file",
-    )
+    parser.add_argument("data_file", type=str, help="Data NetCDF file")
+
     args = parser.parse_args()
 
     with open(args.config, "r") as f:

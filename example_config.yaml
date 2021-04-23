@@ -13,7 +13,7 @@ ProcessData:
     address: https://api.coronavirus.data.gov.uk/v2/data?areaType=ltla&metric=newCasesBySpecimenDate&format=json
     pillars: None  # Capability to filter Pillar 1 and 2 testing data from PHE confidential line listing
     measure: None  # Capability to filter date of test report from PHE confidential line listing
-    format: json
+    format: gov
  
   AreaCodeData:
     input: json
@@ -41,3 +41,7 @@ ThinPosterior:  # Post-process further chain thinning HDF5 -> .pkl.
 Geopackage:  # covid.tasks.summary_geopackage
   base_geopackage: data/UK2019mod_pop.gpkg
   base_layer: UK2019mod_pop_xgen
+
+#AWSS3:
+#  bucket: mybucket
+#  profile: myprofile

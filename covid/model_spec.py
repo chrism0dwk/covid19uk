@@ -163,7 +163,6 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
 
         C = tf.convert_to_tensor(covariates["C"], dtype=DTYPE)
         C = tf.linalg.set_diag(C, tf.zeros(C.shape[0], dtype=DTYPE))
-
         Cstar = C + tf.transpose(C)
         Cstar = tf.linalg.set_diag(Cstar, -tf.reduce_sum(C, axis=-2))
 
@@ -263,7 +262,6 @@ def next_generation_matrix_fn(covar_data, param):
 
     def fn(t, state):
         C = tf.convert_to_tensor(covar_data["C"], dtype=DTYPE)
-        C = tf.linalg.set_diag(C, -tf.reduce_sum(C, axis=-2))
         C = tf.linalg.set_diag(C, tf.zeros(C.shape[0], dtype=DTYPE))
         Cstar = C + tf.transpose(C)
         Cstar = tf.linalg.set_diag(Cstar, -tf.reduce_sum(C, axis=-2))
