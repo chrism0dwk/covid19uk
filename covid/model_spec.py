@@ -250,15 +250,17 @@ def next_generation_matrix_fn(covar_data, param):
 
         beta = tf.math.exp(xi)
 
-        ngm = beta * (
-            tf.eye(Cstar.shape[0], dtype=state.dtype)
-            + param["beta2"] * commute_volume * Cstar / N[tf.newaxis, :]
-        )
         ngm = (
-            ngm
-            * state[..., 0][..., tf.newaxis]
-            / (N[:, tf.newaxis] * tf.math.exp(param["gamma0"]))
+            beta
+            * (
+                tf.eye(Cstar.shape[0], dtype=state.dtype)
+                + param["beta2"] * commute_volume * Cstar / N[tf.newaxis, :]
+            )
+            / N[:, tf.newaxis]
         )
+
+        ngm = (1.0 - tf.math.exp(-ngm)) * state[..., 0][..., tf.newaxis]
+        ngm = ngm / (1 - tf.math.exp(-tf.math.exp(param["gamma0"])))
         return ngm
 
     return fn
