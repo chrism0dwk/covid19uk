@@ -15,7 +15,7 @@ import covid.data as data
 
 tfd = tfp.distributions
 
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 DTYPE = np.float64
 
 STOICHIOMETRY = np.array([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])
@@ -46,6 +46,7 @@ def gather_data(config):
     )
     geo = gp.read_file(config["geopackage"])
     geo = geo.sort_values("lad19cd")
+    geo = geo[geo['lad19cd'].isin(locations['lad19cd'])]
     area = xarray.DataArray(
         geo.area,
         name="area",
