@@ -192,12 +192,12 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
                 b_t = alpha_0 + tf.cumsum(alpha_t)
                 alpha_t_idx = tf.cast(t, tf.int64)
                 alpha_t_ = tf.where(
-                    alpha_t_idx == initial_step,
+                    alpha_t_idx == 0,
                     alpha_0,
                     tf.gather(
                         b_t,
                         tf.clip_by_value(
-                            alpha_t_idx - initial_step - 1,
+                            alpha_t_idx - 1,
                             clip_value_min=0,
                             clip_value_max=alpha_t.shape[0] - 1,
                         ),

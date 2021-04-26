@@ -116,6 +116,7 @@ def run_pipeline(global_config, results_directory, cli_options):
             output_file=output_file,
             initial_step=-7,
             num_steps=28,
+            out_of_sample=True,
         )
 
     @rf.transform(
@@ -130,6 +131,7 @@ def run_pipeline(global_config, results_directory, cli_options):
             output_file=output_file,
             initial_step=-14,
             num_steps=28,
+            out_of_sample=True,
         )
 
     # Medium-term prediction
@@ -144,7 +146,8 @@ def run_pipeline(global_config, results_directory, cli_options):
             posterior_samples=input_files[1],
             output_file=output_file,
             initial_step=-1,
-            num_steps=61,
+            num_steps=84,
+            out_of_sample=True,
         )
 
     # Summarisation
