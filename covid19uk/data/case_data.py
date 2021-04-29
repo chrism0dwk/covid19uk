@@ -4,10 +4,9 @@ import time
 from warnings import warn
 import requests
 import json
-import numpy as np
 import pandas as pd
 
-from covid.data.util import (
+from covid19uk.data.util import (
     invalidInput,
     get_date_low_high,
     check_date_bounds,
@@ -15,7 +14,7 @@ from covid.data.util import (
     check_lad19cd_format,
     merge_lad_codes,
 )
-from covid.data import AreaCodeData
+from covid19uk.data import AreaCodeData
 
 
 class CasesData:
@@ -124,12 +123,7 @@ class CasesData:
 
         if settings["format"].lower() == "phe":
             df = CasesData.adapt_phe(
-                df,
-                date_low,
-                date_high,
-                pillars,
-                measure,
-                areacodes,
+                df, date_low, date_high, pillars, measure, areacodes,
             )
         elif settings["format"].lower() == "gov":
             df = CasesData.adapt_gov_api(
@@ -164,7 +158,7 @@ class CasesData:
         Adapt the line listing data to the desired dataframe format.
         """
         df = df[["pillar", "LTLA_code", "specimen_date", "lab_report_date"]]
-        
+
         # Clean missing values
         df.dropna(inplace=True)
         df = df.rename(columns={"LTLA_code": "lad19cd"})

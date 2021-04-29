@@ -18,11 +18,13 @@ from tensorflow_probability.python.experimental.stats import sample_stats
 from gemlib.util import compute_state
 from gemlib.mcmc import Posterior
 from gemlib.mcmc import GibbsKernel
-from gemlib.distributions import BrownianMotion
-from covid19uk.tasks.mcmc_kernel_factory import make_hmc_base_kernel
-from covid19uk.tasks.mcmc_kernel_factory import make_hmc_fast_adapt_kernel
-from covid19uk.tasks.mcmc_kernel_factory import make_hmc_slow_adapt_kernel
-from covid19uk.tasks.mcmc_kernel_factory import make_event_multiscan_gibbs_step
+
+from covid19uk.inference.mcmc_kernel_factory import make_hmc_base_kernel
+from covid19uk.inference.mcmc_kernel_factory import make_hmc_fast_adapt_kernel
+from covid19uk.inference.mcmc_kernel_factory import make_hmc_slow_adapt_kernel
+from covid19uk.inference.mcmc_kernel_factory import (
+    make_event_multiscan_gibbs_step,
+)
 
 import covid19uk.model_spec as model_spec
 

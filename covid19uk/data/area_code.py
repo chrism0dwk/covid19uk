@@ -1,15 +1,15 @@
 """Retrieves LAD19 area codes"""
 
-import pandas as pd
-import requests
 from http import HTTPStatus
 import json
 
-from covid.data.util import (
+import pandas as pd
+import requests
+
+from covid19uk.data.util import (
     merge_lad_codes,
     check_lad19cd_format,
     invalidInput,
-    format_output_filename,
 )
 
 

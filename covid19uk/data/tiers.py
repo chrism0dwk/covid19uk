@@ -3,8 +3,8 @@
 import numpy as np
 import pandas as pd
 
-from covid.data.area_code import AreaCodeData
-from covid.data.util import get_date_low_high, invalidInput, merge_lad_codes
+from covid19uk.data.area_code import AreaCodeData
+from covid19uk.data.util import get_date_low_high, invalidInput, merge_lad_codes
 
 
 class TierData:
@@ -112,18 +112,9 @@ class TierData:
 
         # Separate out December tiers
         date_mask = tiers["date"] > np.datetime64("2020-12-02")
-        tiers.loc[
-            date_mask & (tiers["tier"] == "three"),
-            "tier",
-        ] = "dec_three"
-        tiers.loc[
-            date_mask & (tiers["tier"] == "two"),
-            "tier",
-        ] = "dec_two"
-        tiers.loc[
-            date_mask & (tiers["tier"] == "one"),
-            "tier",
-        ] = "dec_one"
+        tiers.loc[date_mask & (tiers["tier"] == "three"), "tier",] = "dec_three"
+        tiers.loc[date_mask & (tiers["tier"] == "two"), "tier",] = "dec_two"
+        tiers.loc[date_mask & (tiers["tier"] == "one"), "tier",] = "dec_one"
 
         # filter down to the lads
         if len(lads) > 0:
