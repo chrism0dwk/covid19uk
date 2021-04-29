@@ -5,8 +5,8 @@ import numpy as np
 import xarray
 import tensorflow as tf
 
-from covid import model_spec
-from covid.util import copy_nc_attrs
+from covid19uk import model_spec
+from covid19uk.util import copy_nc_attrs
 from gemlib.util import compute_state
 
 
@@ -41,10 +41,7 @@ def calc_posterior_rit(samples, initial_state, times, covar_data):
         ngm = tf.vectorized_map(fn, elems=times)
         return tf.reduce_sum(ngm, axis=-2)  # sum over destinations
 
-    return tf.vectorized_map(
-        r_fn,
-        elems=tf.nest.flatten(samples),
-    )
+    return tf.vectorized_map(r_fn, elems=tf.nest.flatten(samples),)
 
 
 CHUNKSIZE = 50
@@ -97,16 +94,10 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument(
-        "samples",
-        type=str,
-        help="A pickle file with MCMC samples",
+        "samples", type=str, help="A pickle file with MCMC samples",
     )
     parser.add_argument(
-        "-d",
-        "--data",
-        type=str,
-        help="A data glob pickle file",
-        required=True,
+        "-d", "--data", type=str, help="A data glob pickle file", required=True,
     )
     parser.add_argument(
         "-o", "--output", type=str, help="The output file", required=True

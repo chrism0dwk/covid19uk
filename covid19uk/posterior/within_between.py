@@ -7,7 +7,7 @@ import xarray
 import tensorflow as tf
 
 from gemlib.util import compute_state
-from covid import model_spec
+from covid19uk import model_spec
 
 
 def make_within_rate_fns(covariates, beta2):

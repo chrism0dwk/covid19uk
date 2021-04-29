@@ -6,8 +6,8 @@ import pickle as pkl
 import pandas as pd
 import tensorflow as tf
 
-from covid import model_spec
-from covid.util import copy_nc_attrs
+from covid19uk import model_spec
+from covid19uk.util import copy_nc_attrs
 from gemlib.util import compute_state
 
 
@@ -30,9 +30,7 @@ def predicted_incidence(
     """
 
     posterior_state = compute_state(
-        init_state,
-        posterior_samples["seir"],
-        model_spec.STOICHIOMETRY,
+        init_state, posterior_samples["seir"], model_spec.STOICHIOMETRY,
     )
     posterior_samples["new_init_state"] = posterior_state[..., init_step, :]
     del posterior_samples["seir"]
@@ -166,14 +164,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("data_pkl", type=str, help="Covariate data pickle")
     parser.add_argument(
-        "posterior_samples_pkl",
-        type=str,
-        help="Posterior samples pickle",
+        "posterior_samples_pkl", type=str, help="Posterior samples pickle",
     )
     parser.add_argument(
-        "output_file",
-        type=str,
-        help="Output pkl file",
+        "output_file", type=str, help="Output pkl file",
     )
     args = parser.parse_args()
 

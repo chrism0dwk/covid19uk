@@ -10,12 +10,11 @@ import tensorflow_probability as tfp
 from gemlib.distributions import DiscreteTimeStateTransitionModel
 from gemlib.distributions import BrownianMotion
 
-from covid.util import impute_previous_cases
-import covid.data as data
+from covid19uk.util import impute_previous_cases
+import covid19uk.data.loaders as data
 
 tfd = tfp.distributions
 
-VERSION = "0.7.1"
 DTYPE = np.float64
 
 STOICHIOMETRY = np.array([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])
@@ -46,12 +45,9 @@ def gather_data(config):
     )
     geo = gp.read_file(config["geopackage"])
     geo = geo.sort_values("lad19cd")
-    geo = geo[geo['lad19cd'].isin(locations['lad19cd'])]
+    geo = geo[geo["lad19cd"].isin(locations["lad19cd"])]
     area = xarray.DataArray(
-        geo.area,
-        name="area",
-        dims=["location"],
-        coords=[geo["lad19cd"]],
+        geo.area, name="area", dims=["location"], coords=[geo["lad19cd"]],
     )
 
     # tier_restriction = data.TierData.process(config)[:, :, [0, 2, 3, 4]]

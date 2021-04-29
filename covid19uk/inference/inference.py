@@ -19,12 +19,12 @@ from gemlib.util import compute_state
 from gemlib.mcmc import Posterior
 from gemlib.mcmc import GibbsKernel
 from gemlib.distributions import BrownianMotion
-from covid.tasks.mcmc_kernel_factory import make_hmc_base_kernel
-from covid.tasks.mcmc_kernel_factory import make_hmc_fast_adapt_kernel
-from covid.tasks.mcmc_kernel_factory import make_hmc_slow_adapt_kernel
-from covid.tasks.mcmc_kernel_factory import make_event_multiscan_gibbs_step
+from covid19uk.tasks.mcmc_kernel_factory import make_hmc_base_kernel
+from covid19uk.tasks.mcmc_kernel_factory import make_hmc_fast_adapt_kernel
+from covid19uk.tasks.mcmc_kernel_factory import make_hmc_slow_adapt_kernel
+from covid19uk.tasks.mcmc_kernel_factory import make_event_multiscan_gibbs_step
 
-import covid.model_spec as model_spec
+import covid19uk.model_spec as model_spec
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
@@ -354,8 +354,7 @@ def run_mcmc(
     current_state = [s[-1] for s in draws]
     draws[0] = param_bijector.inverse(draws[0])
     posterior.write_samples(
-        draws_to_dict(draws),
-        first_dim_offset=offset,
+        draws_to_dict(draws), first_dim_offset=offset,
     )
     posterior.write_results(trace, first_dim_offset=offset)
     offset += first_window_size
@@ -387,8 +386,7 @@ def run_mcmc(
         current_state = [s[-1] for s in draws]
         draws[0] = param_bijector.inverse(draws[0])
         posterior.write_samples(
-            draws_to_dict(draws),
-            first_dim_offset=offset,
+            draws_to_dict(draws), first_dim_offset=offset,
         )
         posterior.write_results(trace, first_dim_offset=offset)
         offset += window_num_draws
@@ -408,8 +406,7 @@ def run_mcmc(
     current_state = [s[-1] for s in draws]
     draws[0] = param_bijector.inverse(draws[0])
     posterior.write_samples(
-        draws_to_dict(draws),
-        first_dim_offset=offset,
+        draws_to_dict(draws), first_dim_offset=offset,
     )
     posterior.write_results(trace, first_dim_offset=offset)
     offset += last_window_size
@@ -435,12 +432,10 @@ def run_mcmc(
         current_state = [state_part[-1] for state_part in draws]
         draws[0] = param_bijector.inverse(draws[0])
         posterior.write_samples(
-            draws_to_dict(draws),
-            first_dim_offset=offset,
+            draws_to_dict(draws), first_dim_offset=offset,
         )
         posterior.write_results(
-            trace,
-            first_dim_offset=offset,
+            trace, first_dim_offset=offset,
         )
         offset += config["num_burst_samples"]
 
@@ -534,11 +529,7 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
         tf.concat(
             [
                 np.array([0.1, 0.0, 0.0, 0.0], dtype=DTYPE),
-                np.full(
-                    events.shape[1],
-                    -1.75,
-                    dtype=DTYPE,
-                ),
+                np.full(events.shape[1], -1.75, dtype=DTYPE,),
             ],
             axis=0,
         ),
@@ -560,8 +551,7 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     )
     posterior._file.create_dataset("initial_state", data=initial_state)
     posterior._file.create_dataset(
-        "time",
-        data=np.array(dates).astype(str).astype(h5py.string_dtype()),
+        "time", data=np.array(dates).astype(str).astype(h5py.string_dtype()),
     )
 
     print(f"Acceptance theta: {posterior['results/hmc/is_accepted'][:].mean()}")

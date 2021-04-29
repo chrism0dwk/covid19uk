@@ -2,7 +2,7 @@
    to instantiate the COVID19 model"""
 
 import os
-from covid.model_spec import gather_data
+from covid19uk.model_spec import gather_data
 
 
 def assemble_data(filename, config):
