@@ -8,14 +8,17 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from gemlib.distributions import DiscreteTimeStateTransitionModel
-from gemlib.distributions import BrownianMotion
 
-from covid.util import impute_previous_cases
-import covid.data as data
+from covid19uk.util import impute_previous_cases
+
+from covid19uk.data import AreaCodeData
+from covid19uk.data import CasesData
+from covid19uk.data import read_mobility
+from covid19uk.data import read_population
+from covid19uk.data import read_traffic_flow
 
 tfd = tfp.distributions
 
-VERSION = "0.7.1"
 DTYPE = np.float64
 
 STOICHIOMETRY = np.array([[-1, 1, 0, 0], [0, -1, 1, 0], [0, 0, -1, 1]])
@@ -34,19 +37,15 @@ def gather_data(config):
 
     date_low = np.datetime64(config["date_range"][0])
     date_high = np.datetime64(config["date_range"][1])
-    locations = data.AreaCodeData.process(config)
-    mobility = data.read_mobility(
-        config["mobility_matrix"], locations["lad19cd"]
-    )
-    popsize = data.read_population(
-        config["population_size"], locations["lad19cd"]
-    )
-    commute_volume = data.read_traffic_flow(
+    locations = AreaCodeData.process(config)
+    mobility = read_mobility(config["mobility_matrix"], locations["lad19cd"])
+    popsize = read_population(config["population_size"], locations["lad19cd"])
+    commute_volume = read_traffic_flow(
         config["commute_volume"], date_low=date_low, date_high=date_high
     )
     geo = gp.read_file(config["geopackage"])
     geo = geo.sort_values("lad19cd")
-    geo = geo[geo['lad19cd'].isin(locations['lad19cd'])]
+    geo = geo[geo["lad19cd"].isin(locations["lad19cd"])]
     area = xarray.DataArray(
         geo.area,
         name="area",
@@ -54,7 +53,6 @@ def gather_data(config):
         coords=[geo["lad19cd"]],
     )
 
-    # tier_restriction = data.TierData.process(config)[:, :, [0, 2, 3, 4]]
     dates = pd.date_range(*config["date_range"], closed="left")
     weekday = xarray.DataArray(
         dates.weekday < 5,
@@ -63,7 +61,7 @@ def gather_data(config):
         coords=[dates.to_numpy()],
     )
 
-    cases = data.CasesData.process(config).to_xarray()
+    cases = CasesData.process(config).to_xarray()
     return (
         xarray.Dataset(
             dict(
@@ -134,9 +132,6 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         )
 
     def alpha_t():
-        # return BrownianMotion(
-        #     tf.range(num_steps, dtype=DTYPE), x0=alpha_0, scale=0.005
-        # )
         return tfd.MultivariateNormalDiag(
             loc=tf.constant(0.0, dtype=DTYPE),
             scale_diag=tf.fill(
