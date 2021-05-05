@@ -343,7 +343,11 @@ def next_generation_matrix_fn(covar_data, param):
             ),
         )
 
-        eta = alpha_t_ + param["beta_area"] * log_area[:, tf.newaxis]
+        eta = (
+            alpha_t_
+            + param["beta_area"] * log_area[:, tf.newaxis]
+            + param["sigma_space"] * param["spatial_effect"]
+        )
         infec_rate = (
             tf.math.exp(eta)
             * (
