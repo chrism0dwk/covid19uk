@@ -109,14 +109,15 @@ def predict(
         dims=["prediction_time"],
     )
 
-    estimated_init_state, predicted_events = predicted_incidence(
-        samples,
-        initial_state,
-        covar_data,
-        initial_step,
-        num_steps,
-        out_of_sample,
-    )
+    with tf.device("CPU"):  # TODO: work out effect GPU solution
+        estimated_init_state, predicted_events = predicted_incidence(
+            samples,
+            initial_state,
+            covar_data,
+            initial_step,
+            num_steps,
+            out_of_sample,
+        )
 
     prediction = xarray.DataArray(
         predicted_events.numpy(),

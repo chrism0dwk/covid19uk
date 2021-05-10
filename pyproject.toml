@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "covid19uk"
-version = "0.7.4"
+version = "0.7.5"
 description = "Spatial stochastic SEIR analysis of COVID-19 in the UK"
 authors = ["Chris Jewell <c.jewell@lancaster.ac.uk>"]
 license = "MIT"
