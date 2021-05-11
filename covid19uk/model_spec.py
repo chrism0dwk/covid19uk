@@ -26,6 +26,26 @@ TIME_DELTA = 1.0
 NU = tf.constant(0.28, dtype=DTYPE)  # E->I rate assumed known.
 
 
+def _compute_adjacency_matrix(geom, names, tol=200):
+    mat = geom.apply(lambda x: geom.distance(x) < tol).to_numpy()
+    np.fill_diagonal(mat, False)
+
+    # Fix for islands > tol apart
+    num_neighbours = mat.sum(axis=-1)
+    islands = np.where(num_neighbours == 0)[0]
+    closest_neighbour = [
+        geom.distance(geom.iloc[i]).argsort()[1] for i in islands
+    ]
+    mat[islands, closest_neighbour] = True
+    mat = mat | mat.T  # Ensure symmetry
+
+    return xarray.DataArray(
+        mat.astype(DTYPE),  # Coerce to global float type
+        coords=[names, names],
+        dims=["location_dest", "location_src"],
+    )
+
+
 def gather_data(config):
     """Loads covariate data
 
@@ -43,9 +63,12 @@ def gather_data(config):
     commute_volume = read_traffic_flow(
         config["commute_volume"], date_low=date_low, date_high=date_high
     )
-    geo = gp.read_file(config["geopackage"])
+    geo = gp.read_file(config["geopackage"], layer="UK2019mod_pop_xgen")
     geo = geo.sort_values("lad19cd")
     geo = geo[geo["lad19cd"].isin(locations["lad19cd"])]
+
+    adjacency = _compute_adjacency_matrix(geo.geometry, geo["lad19cd"], 200)
+
     area = xarray.DataArray(
         geo.area,
         name="area",
@@ -68,6 +91,7 @@ def gather_data(config):
                 C=mobility.astype(DTYPE),
                 W=commute_volume.astype(DTYPE),
                 N=popsize.astype(DTYPE),
+                adjacency=adjacency,
                 weekday=weekday.astype(DTYPE),
                 area=area.astype(DTYPE),
                 locations=xarray.DataArray(
@@ -132,12 +156,34 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         )
 
     def alpha_t():
+        """Time-varying force of infection"""
         return tfd.MultivariateNormalDiag(
             loc=tf.constant(0.0, dtype=DTYPE),
             scale_diag=tf.fill(
                 [num_steps - 1], tf.constant(0.005, dtype=DTYPE)
             ),
         )
+
+    def sigma_space():
+        """Variance of CAR prior on space"""
+        return tfd.HalfNormal(scale=tf.constant(0.1, dtype=DTYPE))
+
+    def spatial_effect():
+        W = tf.convert_to_tensor(covariates["adjacency"])
+        Dw = tf.linalg.diag(tf.reduce_sum(W, axis=-1))  # row sums
+        rho = 0.5
+        precision = Dw - rho * W
+        cov = tf.linalg.inv(precision)
+        scale = tf.linalg.cholesky(cov)
+        return tfd.MultivariateNormalTriL(
+            loc=tf.constant(0.0, DTYPE),
+            scale_tril=scale,
+        )
+        # return tfd.MultivariateNormalDiag(
+        #     loc=tf.constant(0.0, dtype=DTYPE),
+        #     scale_diag=tf.ones(covariates["adjacency"].shape[0], dtype=DTYPE)
+        #     * sigma_space,
+        # )
 
     def gamma0():
         return tfd.Normal(
@@ -151,7 +197,16 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             scale=tf.constant(100.0, dtype=DTYPE),
         )
 
-    def seir(psi, beta_area, alpha_0, alpha_t, gamma0, gamma1):
+    def seir(
+        psi,
+        beta_area,
+        alpha_0,
+        alpha_t,
+        spatial_effect,
+        sigma_space,
+        gamma0,
+        gamma1,
+    ):
         psi = tf.convert_to_tensor(psi, DTYPE)
         beta_area = tf.convert_to_tensor(beta_area, DTYPE)
         alpha_t = tf.convert_to_tensor(alpha_t, DTYPE)
@@ -199,8 +254,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
                         ),
                     ),
                 )
-
-            eta = alpha_t_ + beta_area * log_area
+            eta = alpha_t_ + beta_area * log_area + sigma_space * spatial_effect
             infec_rate = tf.math.exp(eta) * (
                 state[..., 2]
                 + psi
@@ -236,6 +290,8 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             beta_area=beta_area,
             psi=psi,
             alpha_t=alpha_t,
+            sigma_space=sigma_space,
+            spatial_effect=spatial_effect,
             gamma0=gamma0,
             gamma1=gamma1,
             seir=seir,
@@ -287,7 +343,11 @@ def next_generation_matrix_fn(covar_data, param):
             ),
         )
 
-        eta = alpha_t_ + param["beta_area"] * log_area[:, tf.newaxis]
+        eta = (
+            alpha_t_
+            + param["beta_area"] * log_area[:, tf.newaxis]
+            + param["sigma_space"] * param["spatial_effect"]
+        )
         infec_rate = (
             tf.math.exp(eta)
             * (

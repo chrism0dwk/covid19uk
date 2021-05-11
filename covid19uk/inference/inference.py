@@ -56,7 +56,7 @@ def _get_window_sizes(num_adaptation_steps):
     return first_window_size, slow_window_size, last_window_size
 
 
-@tf.function(jit_compile=False)
+@tf.function(autograph=False, jit_compile=False)
 def _fast_adapt_window(
     num_draws,
     joint_log_prob_fn,
@@ -114,7 +114,7 @@ def _fast_adapt_window(
     return draws, trace, step_size, weighted_running_variance
 
 
-@tf.function(jit_compile=False)
+@tf.function(autograph=False, jit_compile=False)
 def _slow_adapt_window(
     num_draws,
     joint_log_prob_fn,
@@ -183,7 +183,7 @@ def _slow_adapt_window(
     )
 
 
-@tf.function(jit_compile=False)
+@tf.function(autograph=False, jit_compile=False)
 def _fixed_window(
     num_draws,
     joint_log_prob_fn,
@@ -266,13 +266,19 @@ def trace_results_fn(_, results):
 
 
 def draws_to_dict(draws):
+    num_locs = draws[1].shape[1]
+    num_times = draws[1].shape[2]
     return {
         "psi": draws[0][:, 0],
-        "beta_area": draws[0][:, 1],
-        "gamma0": draws[0][:, 2],
-        "gamma1": draws[0][:, 3],
-        "alpha_0": draws[0][:, 4],
-        "alpha_t": draws[0][:, 5:],
+        "sigma_space": draws[0][:, 1],
+        "beta_area": draws[0][:, 2],
+        "gamma0": draws[0][:, 3],
+        "gamma1": draws[0][:, 4],
+        "alpha_0": draws[0][:, 5],
+        "alpha_t": draws[0][:, 6 : (6 + num_times - 1)],
+        "spatial_effect": draws[0][
+            :, (6 + num_times - 1) : (6 + num_times - 1 + num_locs)
+        ],
         "seir": draws[1],
     }
 
@@ -356,7 +362,8 @@ def run_mcmc(
     current_state = [s[-1] for s in draws]
     draws[0] = param_bijector.inverse(draws[0])
     posterior.write_samples(
-        draws_to_dict(draws), first_dim_offset=offset,
+        draws_to_dict(draws),
+        first_dim_offset=offset,
     )
     posterior.write_results(trace, first_dim_offset=offset)
     offset += first_window_size
@@ -388,7 +395,8 @@ def run_mcmc(
         current_state = [s[-1] for s in draws]
         draws[0] = param_bijector.inverse(draws[0])
         posterior.write_samples(
-            draws_to_dict(draws), first_dim_offset=offset,
+            draws_to_dict(draws),
+            first_dim_offset=offset,
         )
         posterior.write_results(trace, first_dim_offset=offset)
         offset += window_num_draws
@@ -408,7 +416,8 @@ def run_mcmc(
     current_state = [s[-1] for s in draws]
     draws[0] = param_bijector.inverse(draws[0])
     posterior.write_samples(
-        draws_to_dict(draws), first_dim_offset=offset,
+        draws_to_dict(draws),
+        first_dim_offset=offset,
     )
     posterior.write_results(trace, first_dim_offset=offset)
     offset += last_window_size
@@ -434,10 +443,12 @@ def run_mcmc(
         current_state = [state_part[-1] for state_part in draws]
         draws[0] = param_bijector.inverse(draws[0])
         posterior.write_samples(
-            draws_to_dict(draws), first_dim_offset=offset,
+            draws_to_dict(draws),
+            first_dim_offset=offset,
         )
         posterior.write_results(
-            trace, first_dim_offset=offset,
+            trace,
+            first_dim_offset=offset,
         )
         offset += config["num_burst_samples"]
 
@@ -502,8 +513,9 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
                 tfb.Softplus(low=dtype_util.eps(DTYPE)),
                 tfb.Identity(),
                 tfb.Identity(),
+                tfb.Identity(),
             ],
-            block_sizes=[1, 3, events.shape[1]],
+            block_sizes=[2, 4, events.shape[1] - 1, events.shape[0]],
         )
     )
 
@@ -512,11 +524,17 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
         return model.log_prob(
             dict(
                 psi=params[0],
-                beta_area=params[1],
-                gamma0=params[2],
-                gamma1=params[3],
-                alpha_0=params[4],
-                alpha_t=params[5:],
+                sigma_space=params[1],
+                beta_area=params[2],
+                gamma0=params[3],
+                gamma1=params[4],
+                alpha_0=params[5],
+                alpha_t=params[6 : (6 + events.shape[1] - 1)],
+                spatial_effect=params[
+                    (6 + events.shape[1] - 1) : (
+                        6 + events.shape[1] - 1 + events.shape[0]
+                    )
+                ],
                 seir=events,
             )
         ) + param_bij.inverse_log_det_jacobian(
@@ -530,8 +548,12 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     current_chain_state = [
         tf.concat(
             [
-                np.array([0.1, 0.0, 0.0, 0.0], dtype=DTYPE),
-                np.full(events.shape[1], -1.75, dtype=DTYPE,),
+                np.array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
+                np.full(
+                    events.shape[1] + events.shape[0],
+                    0.0,
+                    dtype=DTYPE,
+                ),
             ],
             axis=0,
         ),
@@ -553,7 +575,8 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     )
     posterior._file.create_dataset("initial_state", data=initial_state)
     posterior._file.create_dataset(
-        "time", data=np.array(dates).astype(str).astype(h5py.string_dtype()),
+        "time",
+        data=np.array(dates).astype(str).astype(h5py.string_dtype()),
     )
 
     print(f"Acceptance theta: {posterior['results/hmc/is_accepted'][:].mean()}")
