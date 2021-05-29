@@ -56,7 +56,7 @@ def _get_window_sizes(num_adaptation_steps):
     return first_window_size, slow_window_size, last_window_size
 
 
-@tf.function # (autograph=False, jit_compile=False)
+@tf.function  # (autograph=False, jit_compile=False)
 def _fast_adapt_window(
     num_draws,
     joint_log_prob_fn,
@@ -114,7 +114,7 @@ def _fast_adapt_window(
     return draws, trace, step_size, weighted_running_variance
 
 
-@tf.function # (autograph=False, jit_compile=False)
+@tf.function  # (autograph=False, jit_compile=False)
 def _slow_adapt_window(
     num_draws,
     joint_log_prob_fn,
@@ -183,7 +183,6 @@ def _slow_adapt_window(
     )
 
 
-@tf.function # (autograph=False, jit_compile=False)
 def _fixed_window(
     num_draws,
     joint_log_prob_fn,
@@ -215,7 +214,7 @@ def _fixed_window(
         name="fixed",
     )
 
-    return tfp.mcmc.sample_chain(
+    results = tfp.mcmc.sample_chain(
         num_draws,
         current_state=initial_position,
         kernel=kernel,
@@ -223,6 +222,8 @@ def _fixed_window(
         trace_fn=trace_fn,
         seed=seed,
     )
+
+    return results
 
 
 def trace_results_fn(_, results):
@@ -299,7 +300,7 @@ def run_mcmc(
     first_window_size = 200
     last_window_size = 50
     slow_window_size = 25
-    num_slow_windows = 6
+    num_slow_windows = 4
 
     warmup_size = int(
         first_window_size
@@ -427,19 +428,28 @@ def run_mcmc(
     hmc_kernel_kwargs["step_size"] = tf.reduce_mean(
         trace["hmc"]["step_size"][-last_window_size // 2 :]
     )
-    print("Fixed kernel kwargs:", hmc_kernel_kwargs, flush=True)
-    for i in tqdm.tqdm(
-        range(config["num_bursts"]),
-        unit_scale=config["num_burst_samples"] * config["thin"],
-    ):
-        draws, trace, _ = _fixed_window(
+
+    @tf.function(
+        jit_compile=True,
+        input_signature=[tf.TensorSpec.from_tensor(s) for s in current_state],
+    )
+    def fixed_window_closure(params, events):
+        return _fixed_window(
             num_draws=config["num_burst_samples"],
             joint_log_prob_fn=joint_log_prob_fn,
-            initial_position=current_state,
+            initial_position=[params, events],
             hmc_kernel_kwargs=hmc_kernel_kwargs,
             event_kernel_kwargs=event_kernel_kwargs,
             trace_fn=trace_results_fn,
         )
+
+    tf.profiler.experimental.start("tf_logdir")
+    for i in tqdm.tqdm(
+        range(config["num_bursts"]),
+        unit_scale=config["num_burst_samples"] * config["thin"],
+    ):
+        print("Current_state:", current_state)
+        draws, trace, _ = fixed_window_closure(*current_state)
         current_state = [state_part[-1] for state_part in draws]
         draws[0] = param_bijector.inverse(draws[0])
         posterior.write_samples(
@@ -451,6 +461,7 @@ def run_mcmc(
             first_dim_offset=offset,
         )
         offset += config["num_burst_samples"]
+    tf.profiler.experimental.stop()
 
     return posterior
 
@@ -559,9 +570,6 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
         ),
         events,
     ]
-    print("Num time steps:", events.shape[1], flush=True)
-    print("alpha_t shape", model.event_shape["alpha_t"], flush=True)
-    print("Initial chain state:", current_chain_state[0], flush=True)
     print("Initial logpi:", joint_log_prob(*current_chain_state), flush=True)
 
     # Output file
