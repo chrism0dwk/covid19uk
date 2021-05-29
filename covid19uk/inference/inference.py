@@ -300,10 +300,10 @@ def run_mcmc(
     #     config["num_adaptation_iterations"]
     # )
 
-    first_window_size = 20  # 200
+    first_window_size = 200
     last_window_size = 50
-    slow_window_size = 2  # 25
-    num_slow_windows = 4
+    slow_window_size = 25
+    num_slow_windows = 6
 
     warmup_size = int(
         first_window_size
