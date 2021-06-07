@@ -171,7 +171,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
     def spatial_effect():
         W = tf.convert_to_tensor(covariates["adjacency"])
         Dw = tf.linalg.diag(tf.reduce_sum(W, axis=-1))  # row sums
-        rho = 0.5
+        rho = 0.25
         precision = Dw - rho * W
         cov = tf.linalg.inv(precision)
         scale = tf.linalg.cholesky(cov)
