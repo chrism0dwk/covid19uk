@@ -14,6 +14,32 @@ implementing an ETL step, the model itself, and associated inference and predict
 Users requiring an end-to-end pipeline implementation should refer to the [covid-pipeline](https://github.com/chrism0dwk/covid-pipeline)
 repository.
 
+For development users, the recommended package management system is [`poetry`](https://python-poetry.org).  Follow the instructions in the `poetry` documentation to install it.  
+
+From a `bash`-like command line, clone the `covid19uk` repo and install dependencies
+```bash
+git clone <path to this repo>
+cd covid19uk
+poetry install
+```
+
+
+
+To run the various algorithms, a general configuration file must be specified, as exemplified in `example_config.yaml` which runs the model on a month's worth of publicly available COVID19 case data from the 11 Northern Irish Local Authority Districts.  The configuration file specifies the location of raw data, which we assemble into a NetCDF4 file:
+```bash
+mkdir results
+poetry run python -m covid19uk.data.assemble example_config.yaml results/inferencedata.nc
+```
+The inference algorithm may then be run using the assembled data
+```bash
+poetry run python -m covid19uk.inference.inference \
+    -c example_config.yaml \
+    -o results/posterior.hd5 \
+    inferencedata.nc
+```
+The resulting HDF5 file `results/posterior.hd5` contains the posterior samples. 
+
+
 
 ## COVID-19 Lancaster University data statement
 
