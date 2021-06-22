@@ -71,7 +71,10 @@ def gather_data(config):
     adjacency = _compute_adjacency_matrix(geo.geometry, geo["lad19cd"], 200)
 
     area = xarray.DataArray(
-        geo.area, name="area", dims=["location"], coords=[geo["lad19cd"]],
+        geo.area,
+        name="area",
+        dims=["location"],
+        coords=[geo["lad19cd"]],
     )
 
     dates = pd.date_range(*config["date_range"], closed="left")
@@ -166,10 +169,16 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         """Variance of CAR prior on space"""
         return tfd.HalfNormal(scale=tf.constant(0.1, dtype=DTYPE))
 
-    def spatial_effect():
+    def rho():
+        """Correlation between neighbouring regions"""
+        return tfd.InverseGamma(
+            concentration=tf.constant(2.5, dtype=DTYPE),
+            scale=tf.constant(0.5, dtype=DTYPE),
+        )
+
+    def spatial_effect(rho):
         W = tf.convert_to_tensor(covariates["adjacency"])
         Dw = tf.linalg.diag(tf.reduce_sum(W, axis=-1))  # row sums
-        rho = 0.25
         precision = Dw - rho * W
         precision_factor = tf.linalg.cholesky(precision)
         return tfd_e.MultivariateNormalPrecisionFactorLinearOperator(
@@ -178,11 +187,6 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
                 precision_factor
             ),
         )
-        # return tfd.MultivariateNormalDiag(
-        #     loc=tf.constant(0.0, dtype=DTYPE),
-        #     scale_diag=tf.ones(covariates["adjacency"].shape[0], dtype=DTYPE)
-        #     * sigma_space,
-        # )
 
     def gamma0():
         return tfd.Normal(
@@ -290,6 +294,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             psi=psi,
             alpha_t=alpha_t,
             sigma_space=sigma_space,
+            rho=rho,
             spatial_effect=spatial_effect,
             gamma0=gamma0,
             gamma1=gamma1,
