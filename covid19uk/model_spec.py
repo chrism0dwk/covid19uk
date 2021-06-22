@@ -71,7 +71,10 @@ def gather_data(config):
     adjacency = _compute_adjacency_matrix(geo.geometry, geo["lad19cd"], 200)
 
     area = xarray.DataArray(
-        geo.area, name="area", dims=["location"], coords=[geo["lad19cd"]],
+        geo.area,
+        name="area",
+        dims=["location"],
+        coords=[geo["lad19cd"]],
     )
 
     dates = pd.date_range(*config["date_range"], closed="left")
@@ -174,15 +177,10 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         precision_factor = tf.linalg.cholesky(precision)
         return tfd_e.MultivariateNormalPrecisionFactorLinearOperator(
             loc=tf.constant(0.0, DTYPE),
-            precision_factor=tf.linalg.LinearOperatorFullMatrix(
+            precision_factor=tf.linalg.LinearOperatorLowerTriangular(
                 precision_factor
             ),
         )
-        # return tfd.MultivariateNormalDiag(
-        #     loc=tf.constant(0.0, dtype=DTYPE),
-        #     scale_diag=tf.ones(covariates["adjacency"].shape[0], dtype=DTYPE)
-        #     * sigma_space,
-        # )
 
     def gamma0():
         return tfd.Normal(
