@@ -167,13 +167,17 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
 
     def sigma_space():
         """Variance of CAR prior on space"""
-        return tfd.HalfNormal(scale=tf.constant(0.1, dtype=DTYPE))
+        # return tfd.HalfNormal(scale=tf.constant(0.1, dtype=DTYPE))
+        return tfd.InverseGamma(
+            concentration=tf.constant(2.0, dtype=DTYPE),
+            scale=tf.constant(0.5, dtype=DTYPE),
+        )
 
     def rho():
         """Correlation between neighbouring regions"""
-        return tfd.InverseGamma(
-            concentration=tf.constant(2.5, dtype=DTYPE),
-            scale=tf.constant(0.5, dtype=DTYPE),
+        return tfd.Beta(
+            concentration0=tf.constant(2.0, dtype=DTYPE),
+            concentration1=tf.constant(2.0, dtype=DTYPE),
         )
 
     def spatial_effect(rho):

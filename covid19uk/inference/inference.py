@@ -56,7 +56,7 @@ def _get_window_sizes(num_adaptation_steps):
     return first_window_size, slow_window_size, last_window_size
 
 
-@tf.function  # (autograph=False, jit_compile=False)
+# @tf.function  # (autograph=False, jit_compile=False)
 def _fast_adapt_window(
     num_draws,
     joint_log_prob_fn,
@@ -227,7 +227,7 @@ def make_fixed_window_sampler(
         name="fixed",
     )
 
-    @tf.function(jit_compile=jit_compile)
+    # @tf.function(jit_compile=jit_compile)
     def sample_fn(current_state, previous_kernel_results=None):
         return tfp.mcmc.sample_chain(
             num_draws,
@@ -527,8 +527,8 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
         tfb.Blockwise(
             [
                 tfb.Softplus(low=dtype_util.eps(DTYPE)),  # psi
-                tfb.Softplus(low=dtype_util.eps(DTYPE)),  # sigma_space
-                tfb.Softplus(low=dtype_util.eps(DTYPE)),  # rho
+                tfb.Softplus(low=tf.constant(1e-3, DTYPE)),  # sigma_space
+                tfb.Sigmoid(),  # rho
                 tfb.Identity(),  # beta_area
                 tfb.Identity(),  # gamma0
                 tfb.Identity(),  # gamma1
@@ -552,6 +552,8 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
 
     def joint_log_prob(unconstrained_params, events):
         params = param_bij.inverse(unconstrained_params)
+        tf.print("Sigma:", unconstrained_params[1], "=>", params[1])
+        tf.print("Rho:", unconstrained_params[2], "=>", params[2])
         return model.log_prob(
             dict(
                 psi=params[0],
