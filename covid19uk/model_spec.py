@@ -18,6 +18,7 @@ from covid19uk.data import read_population
 from covid19uk.data import read_traffic_flow
 
 tfd = tfp.distributions
+tfd_e = tfp.experimental.distributions
 
 DTYPE = np.float64
 
@@ -173,17 +174,13 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         Dw = tf.linalg.diag(tf.reduce_sum(W, axis=-1))  # row sums
         rho = 0.25
         precision = Dw - rho * W
-        cov = tf.linalg.inv(precision)
-        scale = tf.linalg.cholesky(cov)
-        return tfd.MultivariateNormalTriL(
+        precision_factor = tf.linalg.cholesky(precision)
+        return tfd_e.MultivariateNormalPrecisionFactorLinearOperator(
             loc=tf.constant(0.0, DTYPE),
-            scale_tril=scale,
+            precision_factor=tf.linalg.LinearOperatorLowerTriangular(
+                precision_factor
+            ),
         )
-        # return tfd.MultivariateNormalDiag(
-        #     loc=tf.constant(0.0, dtype=DTYPE),
-        #     scale_diag=tf.ones(covariates["adjacency"].shape[0], dtype=DTYPE)
-        #     * sigma_space,
-        # )
 
     def gamma0():
         return tfd.Normal(
