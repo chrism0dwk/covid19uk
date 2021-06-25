@@ -187,7 +187,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
         precision_factor = tf.linalg.cholesky(precision)
         return tfd_e.MultivariateNormalPrecisionFactorLinearOperator(
             loc=tf.constant(0.0, DTYPE),
-            precision_factor=tf.linalg.LinearOperatorFullMatrix(
+            precision_factor=tf.linalg.LinearOperatorLowerTriangular(
                 precision_factor
             ),
         )

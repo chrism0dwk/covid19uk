@@ -7,7 +7,8 @@ ProcessData:
   mobility_matrix: data/mergedflows.csv
   population_size: data/c2019modagepop.csv
   commute_volume:   # Can be replaced by DfT traffic flow data - contact authors <c.jewell@lancaster.ac.uk>
-
+  geopackage: data/UK2019mod_pop.gpkg
+  
   CasesData:
     input: url
     address: https://api.coronavirus.data.gov.uk/v2/data?areaType=ltla&metric=newCasesBySpecimenDate&format=json

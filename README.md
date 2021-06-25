@@ -35,7 +35,7 @@ The inference algorithm may then be run using the assembled data
 poetry run python -m covid19uk.inference.inference \
     -c example_config.yaml \
     -o results/posterior.hd5 \
-    inferencedata.nc
+    results/inferencedata.nc
 ```
 The resulting HDF5 file `results/posterior.hd5` contains the posterior samples. 
 
