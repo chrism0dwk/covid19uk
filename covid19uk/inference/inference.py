@@ -56,7 +56,7 @@ def _get_window_sizes(num_adaptation_steps):
     return first_window_size, slow_window_size, last_window_size
 
 
-@tf.function  # (autograph=False, jit_compile=False)
+# @tf.function  # (autograph=False, jit_compile=False)
 def _fast_adapt_window(
     num_draws,
     joint_log_prob_fn,
@@ -227,7 +227,7 @@ def make_fixed_window_sampler(
         name="fixed",
     )
 
-    @tf.function(jit_compile=jit_compile)
+    # @tf.function(jit_compile=jit_compile)
     def sample_fn(current_state, previous_kernel_results=None):
         return tfp.mcmc.sample_chain(
             num_draws,
@@ -288,13 +288,14 @@ def draws_to_dict(draws):
     return {
         "psi": draws[0][:, 0],
         "sigma_space": draws[0][:, 1],
-        "beta_area": draws[0][:, 2],
-        "gamma0": draws[0][:, 3],
-        "gamma1": draws[0][:, 4],
-        "alpha_0": draws[0][:, 5],
-        "alpha_t": draws[0][:, 6 : (6 + num_times - 1)],
+        "rho": draws[0][:, 2],
+        "beta_area": draws[0][:, 3],
+        "gamma0": draws[0][:, 4],
+        "gamma1": draws[0][:, 5],
+        "alpha_0": draws[0][:, 6],
+        "alpha_t": draws[0][:, 7 : (7 + num_times - 1)],
         "spatial_effect": draws[0][
-            :, (6 + num_times - 1) : (6 + num_times - 1 + num_locs)
+            :, (7 + num_times - 1) : (7 + num_times - 1 + num_locs)
         ],
         "seir": draws[1],
     }
@@ -525,29 +526,47 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     param_bij = tfb.Invert(  # Forward transform unconstrains params
         tfb.Blockwise(
             [
-                tfb.Softplus(low=dtype_util.eps(DTYPE)),
-                tfb.Identity(),
-                tfb.Identity(),
-                tfb.Identity(),
+                tfb.Softplus(low=dtype_util.eps(DTYPE)),  # psi
+                tfb.Softplus(low=tf.constant(1e-3, DTYPE)),  # sigma_space
+                tfb.Sigmoid(),  # rho
+                tfb.Identity(),  # beta_area
+                tfb.Identity(),  # gamma0
+                tfb.Identity(),  # gamma1
+                tfb.Identity(),  # alpha_0
+                tfb.Identity(),  # alpha_t
+                tfb.Identity(),  # spatial_effect
             ],
-            block_sizes=[2, 4, events.shape[1] - 1, events.shape[0]],
+            block_sizes=[
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                events.shape[1] - 1,
+                events.shape[0],
+            ],
         )
     )
 
     def joint_log_prob(unconstrained_params, events):
         params = param_bij.inverse(unconstrained_params)
+        tf.print("Sigma:", unconstrained_params[1], "=>", params[1])
+        tf.print("Rho:", unconstrained_params[2], "=>", params[2])
         return model.log_prob(
             dict(
                 psi=params[0],
                 sigma_space=params[1],
-                beta_area=params[2],
-                gamma0=params[3],
-                gamma1=params[4],
-                alpha_0=params[5],
-                alpha_t=params[6 : (6 + events.shape[1] - 1)],
+                rho=params[2],
+                beta_area=params[3],
+                gamma0=params[4],
+                gamma1=params[5],
+                alpha_0=params[6],
+                alpha_t=params[7 : (7 + events.shape[1] - 1)],
                 spatial_effect=params[
-                    (6 + events.shape[1] - 1) : (
-                        6 + events.shape[1] - 1 + events.shape[0]
+                    (7 + events.shape[1] - 1) : (
+                        7 + events.shape[1] - 1 + events.shape[0]
                     )
                 ],
                 seir=events,
@@ -563,7 +582,7 @@ def mcmc(data_file, output_file, config, use_autograph=False, use_xla=True):
     current_chain_state = [
         tf.concat(
             [
-                np.array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=DTYPE),
+                np.array([0.0, 0.0, -2.5, 0.0, 0.0, 0.0], dtype=DTYPE),
                 np.full(
                     events.shape[1] + events.shape[0],
                     0.0,

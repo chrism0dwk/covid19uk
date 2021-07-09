@@ -18,6 +18,7 @@ from covid19uk.data import read_population
 from covid19uk.data import read_traffic_flow
 
 tfd = tfp.distributions
+tfd_e = tfp.experimental.distributions
 
 DTYPE = np.float64
 
@@ -166,24 +167,30 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
 
     def sigma_space():
         """Variance of CAR prior on space"""
-        return tfd.HalfNormal(scale=tf.constant(0.1, dtype=DTYPE))
+        # return tfd.HalfNormal(scale=tf.constant(0.1, dtype=DTYPE))
+        return tfd.InverseGamma(
+            concentration=tf.constant(2.0, dtype=DTYPE),
+            scale=tf.constant(0.5, dtype=DTYPE),
+        )
 
-    def spatial_effect():
+    def rho():
+        """Correlation between neighbouring regions"""
+        return tfd.Beta(
+            concentration0=tf.constant(2.0, dtype=DTYPE),
+            concentration1=tf.constant(2.0, dtype=DTYPE),
+        )
+
+    def spatial_effect(rho):
         W = tf.convert_to_tensor(covariates["adjacency"])
         Dw = tf.linalg.diag(tf.reduce_sum(W, axis=-1))  # row sums
-        rho = 0.25
         precision = Dw - rho * W
-        cov = tf.linalg.inv(precision)
-        scale = tf.linalg.cholesky(cov)
-        return tfd.MultivariateNormalTriL(
+        precision_factor = tf.linalg.cholesky(precision)
+        return tfd_e.MultivariateNormalPrecisionFactorLinearOperator(
             loc=tf.constant(0.0, DTYPE),
-            scale_tril=scale,
+            precision_factor=tf.linalg.LinearOperatorLowerTriangular(
+                precision_factor
+            ),
         )
-        # return tfd.MultivariateNormalDiag(
-        #     loc=tf.constant(0.0, dtype=DTYPE),
-        #     scale_diag=tf.ones(covariates["adjacency"].shape[0], dtype=DTYPE)
-        #     * sigma_space,
-        # )
 
     def gamma0():
         return tfd.Normal(
@@ -291,6 +298,7 @@ def CovidUK(covariates, initial_state, initial_step, num_steps):
             psi=psi,
             alpha_t=alpha_t,
             sigma_space=sigma_space,
+            rho=rho,
             spatial_effect=spatial_effect,
             gamma0=gamma0,
             gamma1=gamma1,

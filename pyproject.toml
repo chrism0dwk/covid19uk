@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "covid19uk"
-version = "0.8.0-alpha.3"
+version = "0.8.0-alpha.4"
 description = "Spatial stochastic SEIR analysis of COVID-19 in the UK"
 authors = ["Chris Jewell <c.jewell@lancaster.ac.uk>"]
 license = "MIT"
@@ -12,7 +12,7 @@ geopandas = "^0.8.1"
 PyYAML = "^5.3.1"
 tqdm = "^4.50.2"
 h5py = "^3.1.0"
-gemlib = {git = "http://fhm-chicas-code.lancs.ac.uk/GEM/gemlib.git", rev="9fa5e0ff"}
+gemlib = {git = "https://gitlab.com/gem-epidemics/gemlib.git", rev="9fa5e0ff"}
 xarray = {extras = ["netcdf4"], version = "^0.17.0"}
 netCDF4 = "^1.5.6"
 
@@ -24,6 +24,7 @@ black = "^20.8b1"
 pytest = "^6.2.1"
 jedi = "^0.17.2"
 toml = "^0.10.2"
+matplotlib = "^3.4.2"
 
 [tool.black]
 line-length = 80
